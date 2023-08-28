@@ -257,6 +257,7 @@
   },
   {
    "collapsible": 1,
+   "depends_on": "doc.estimated_costing",
    "fieldname": "project_details",
    "fieldtype": "Section Break",
    "label": "Costing and Billing",
@@ -270,18 +271,21 @@
    "label": "Estimated Cost",
    "oldfieldname": "project_value",
    "oldfieldtype": "Currency",
-   "options": "Company:company:default_currency"
+   "options": "Company:company:default_currency",
+   "permlevel": 1
   },
   {
    "fieldname": "total_costing_amount",
    "fieldtype": "Currency",
    "label": "Total Costing Amount (via Timesheets)",
+   "permlevel": 1,
    "read_only": 1
   },
   {
    "fieldname": "total_purchase_cost",
    "fieldtype": "Currency",
    "label": "Total Purchase Cost (via Purchase Invoice)",
+   "permlevel": 1,
    "read_only": 1
   },
   {
@@ -289,6 +293,7 @@
    "fieldtype": "Link",
    "label": "Company",
    "options": "Company",
+   "permlevel": 1,
    "remember_last_selected_value": 1,
    "reqd": 1
   },
@@ -300,34 +305,40 @@
    "fieldname": "total_sales_amount",
    "fieldtype": "Currency",
    "label": "Total Sales Amount (via Sales Order)",
+   "permlevel": 1,
    "read_only": 1
   },
   {
    "fieldname": "total_billable_amount",
    "fieldtype": "Currency",
    "label": "Total Billable Amount (via Timesheets)",
+   "permlevel": 1,
    "read_only": 1
   },
   {
    "fieldname": "total_billed_amount",
    "fieldtype": "Currency",
    "label": "Total Billed Amount (via Sales Invoices)",
+   "permlevel": 1,
    "read_only": 1
   },
   {
    "fieldname": "total_consumed_material_cost",
    "fieldtype": "Currency",
    "label": "Total Consumed Material Cost  (via Stock Entry)",
+   "permlevel": 1,
    "read_only": 1
   },
   {
    "fieldname": "cost_center",
    "fieldtype": "Link",
    "label": "Default Cost Center",
-   "options": "Cost Center"
+   "options": "Cost Center",
+   "permlevel": 1
   },
   {
    "collapsible": 1,
+   "depends_on": "doc.gross_margin",
    "fieldname": "margin",
    "fieldtype": "Section Break",
    "label": "Margin",
@@ -341,6 +352,7 @@
    "oldfieldname": "gross_margin_value",
    "oldfieldtype": "Currency",
    "options": "Company:company:default_currency",
+   "permlevel": 1,
    "read_only": 1
   },
   {
@@ -353,6 +365,7 @@
    "label": "Gross Margin %",
    "oldfieldname": "per_gross_margin",
    "oldfieldtype": "Currency",
+   "permlevel": 1,
    "read_only": 1
   },
   {
@@ -452,7 +465,7 @@
  "index_web_pages_for_search": 1,
  "links": [],
  "max_attachments": 4,
- "modified": "2023-02-14 04:54:25.819620",
+ "modified": "2023-08-09 05:24:09.519042",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Project",

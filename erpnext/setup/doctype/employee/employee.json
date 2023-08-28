@@ -37,8 +37,16 @@
   "column_break_25",
   "designation",
   "reports_to",
+  "wfh_approver",
+  "wfh_approver_name",
   "column_break_18",
   "branch",
+  "team_lead",
+  "team_lead_name",
+  "medical_allowance_section",
+  "medical_allowance",
+  "medical_availed",
+  "medical_balance",
   "employment_details",
   "scheduled_confirmation_date",
   "column_break_32",
@@ -68,6 +76,12 @@
   "emergency_phone_number",
   "column_break_19",
   "relation",
+  "section_break_5iqdl",
+  "emergency_name_2",
+  "column_break_tom25",
+  "emergency_contact_2",
+  "column_break_9zjb6",
+  "relation_2",
   "attendance_and_leave_details",
   "attendance_device_id",
   "column_break_44",
@@ -142,6 +156,7 @@
    "oldfieldname": "naming_series",
    "oldfieldtype": "Select",
    "options": "HR-EMP-",
+   "reqd": 1,
    "set_only_once": 1
   },
   {
@@ -219,6 +234,7 @@
   {
    "fieldname": "employee_number",
    "fieldtype": "Data",
+   "hidden": 1,
    "in_global_search": 1,
    "label": "Employee Number",
    "oldfieldname": "employee_number",
@@ -519,17 +535,17 @@
   {
    "fieldname": "date_of_issue",
    "fieldtype": "Date",
-   "label": "Date of Issue"
+   "label": "Passport Date of Issue"
   },
   {
    "fieldname": "valid_upto",
    "fieldtype": "Date",
-   "label": "Valid Upto"
+   "label": "Passport Date of Expiry"
   },
   {
    "fieldname": "place_of_issue",
    "fieldtype": "Data",
-   "label": "Place of Issue"
+   "label": "Passport Place of Issue"
   },
   {
    "fieldname": "column_break6",
@@ -816,58 +832,99 @@
    "fieldname": "iban",
    "fieldtype": "Data",
    "label": "IBAN"
+  },
+  {
+   "fieldname": "section_break_5iqdl",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "emergency_name_2",
+   "fieldtype": "Data",
+   "label": "Emergency Contact Name 2",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "column_break_tom25",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "emergency_contact_2",
+   "fieldtype": "Data",
+   "label": "Emergency Contact Number 2"
+  },
+  {
+   "fieldname": "column_break_9zjb6",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "relation_2",
+   "fieldtype": "Data",
+   "label": "Relation 2"
+  },
+  {
+   "fieldname": "medical_allowance",
+   "fieldtype": "Currency",
+   "label": "Medical Allowance"
+  },
+  {
+   "fieldname": "medical_availed",
+   "fieldtype": "Currency",
+   "label": "Medical Availed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "medical_balance",
+   "fieldtype": "Currency",
+   "label": "Medical Balance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "medical_allowance_section",
+   "fieldtype": "Section Break",
+   "label": "Medical Allowance"
+  },
+  {
+   "fieldname": "wfh_approver",
+   "fieldtype": "Link",
+   "label": "WFH Approver",
+   "options": "User"
+  },
+  {
+   "fetch_from": "wfh_approver.full_name",
+   "fieldname": "wfh_approver_name",
+   "fieldtype": "Data",
+   "label": "WFH Approver Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "team_lead",
+   "fieldtype": "Link",
+   "label": "Team Lead",
+   "options": "User"
+  },
+  {
+   "fetch_from": "team_lead.full_name",
+   "fieldname": "team_lead_name",
+   "fieldtype": "Data",
+   "label": "Team Lead Name",
+   "read_only": 1
   }
  ],
  "icon": "fa fa-user",
  "idx": 24,
  "image_field": "image",
  "links": [],
- "modified": "2023-03-30 15:57:05.174592",
+ "modified": "2023-08-18 16:44:15.401199",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee",
  "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
- "permissions": [
-  {
-   "email": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Employee"
-  },
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "import": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "HR User",
-   "share": 1,
-   "write": 1
-  },
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "import": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "HR Manager",
-   "set_user_permissions": 1,
-   "share": 1,
-   "write": 1
-  }
- ],
+ "permissions": [],
  "search_fields": "employee_name",
  "show_name_in_global_search": 1,
- "sort_field": "modified",
- "sort_order": "DESC",
+ "sort_field": "user_id",
+ "sort_order": "ASC",
  "states": [],
  "title_field": "employee_name"
 }
