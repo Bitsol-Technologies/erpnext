@@ -237,7 +237,7 @@
    "type": "Link"
   }
  ],
- "modified": "2023-08-11 12:48:46.023276",
+ "modified": "2023-08-30 15:05:14.579810",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Home",
@@ -248,7 +248,7 @@
  "quick_lists": [],
  "restrict_to_domain": "",
  "roles": [],
- "sequence_id": 2.0,
+ "sequence_id": 3.0,
  "shortcuts": [
   {
    "color": "Grey",
