@@ -840,8 +840,7 @@
   {
    "fieldname": "emergency_name_2",
    "fieldtype": "Data",
-   "label": "Emergency Contact Name 2",
-   "options": "Phone"
+   "label": "Emergency Contact Name 2"
   },
   {
    "fieldname": "column_break_tom25",
@@ -850,7 +849,8 @@
   {
    "fieldname": "emergency_contact_2",
    "fieldtype": "Data",
-   "label": "Emergency Contact Number 2"
+   "label": "Emergency Contact Number 2",
+   "options": "Phone"
   },
   {
    "fieldname": "column_break_9zjb6",
@@ -914,7 +914,7 @@
  "idx": 24,
  "image_field": "image",
  "links": [],
- "modified": "2023-08-18 16:44:15.401199",
+ "modified": "2023-09-05 14:39:10.374390",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee",
