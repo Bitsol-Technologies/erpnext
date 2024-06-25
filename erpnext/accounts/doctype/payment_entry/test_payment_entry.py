@@ -1,15 +1,16 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 
-import unittest
+import json
 
 import frappe
 from frappe import qb
 from frappe.tests.utils import FrappeTestCase, change_settings
-from frappe.utils import flt, nowdate
+from frappe.utils import add_days, flt, nowdate
 
 from erpnext.accounts.doctype.payment_entry.payment_entry import (
 	InvalidPaymentEntry,
+	get_outstanding_reference_documents,
 	get_payment_entry,
 	get_reference_details,
 )
@@ -21,6 +22,7 @@ from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import (
 	create_sales_invoice,
 	create_sales_invoice_against_cost_center,
 )
+from erpnext.accounts.general_ledger import make_gl_entries, make_reverse_gl_entries
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 from erpnext.setup.doctype.employee.test_employee import make_employee
 
@@ -160,7 +162,7 @@ class TestPaymentEntry(FrappeTestCase):
 
 				supplier.on_hold = 0
 				supplier.save()
-			except:
+			except Exception:
 				pass
 			else:
 				raise Exception
@@ -467,9 +469,7 @@ class TestPaymentEntry(FrappeTestCase):
 		si.save()
 		si.submit()
 
-		pe = get_payment_entry(
-			"Sales Invoice", si.name, bank_account="_Test Bank - _TC", bank_amount=4700
-		)
+		pe = get_payment_entry("Sales Invoice", si.name, bank_account="_Test Bank - _TC", bank_amount=4700)
 		pe.reference_no = si.name
 		pe.reference_date = nowdate()
 
@@ -636,9 +636,7 @@ class TestPaymentEntry(FrappeTestCase):
 		pe.set_exchange_rate()
 		pe.set_amounts()
 
-		self.assertEqual(
-			pe.source_exchange_rate, 65.1, "{0} is not equal to {1}".format(pe.source_exchange_rate, 65.1)
-		)
+		self.assertEqual(pe.source_exchange_rate, 65.1, f"{pe.source_exchange_rate} is not equal to {65.1}")
 
 	def test_internal_transfer_usd_to_inr(self):
 		pe = frappe.new_doc("Payment Entry")
@@ -702,7 +700,50 @@ class TestPaymentEntry(FrappeTestCase):
 		pe2.submit()
 
 		# create return entry against si1
-		create_sales_invoice(is_return=1, return_against=si1.name, qty=-1)
+		cr_note = create_sales_invoice(is_return=1, return_against=si1.name, qty=-1)
+		si1_outstanding = frappe.db.get_value("Sales Invoice", si1.name, "outstanding_amount")
+
+		# create JE(credit note) manually against si1 and cr_note
+		je = frappe.get_doc(
+			{
+				"doctype": "Journal Entry",
+				"company": si1.company,
+				"voucher_type": "Credit Note",
+				"posting_date": nowdate(),
+			}
+		)
+		je.append(
+			"accounts",
+			{
+				"account": si1.debit_to,
+				"party_type": "Customer",
+				"party": si1.customer,
+				"debit": 0,
+				"credit": 100,
+				"debit_in_account_currency": 0,
+				"credit_in_account_currency": 100,
+				"reference_type": si1.doctype,
+				"reference_name": si1.name,
+				"cost_center": si1.items[0].cost_center,
+			},
+		)
+		je.append(
+			"accounts",
+			{
+				"account": cr_note.debit_to,
+				"party_type": "Customer",
+				"party": cr_note.customer,
+				"debit": 100,
+				"credit": 0,
+				"debit_in_account_currency": 100,
+				"credit_in_account_currency": 0,
+				"reference_type": cr_note.doctype,
+				"reference_name": cr_note.name,
+				"cost_center": cr_note.items[0].cost_center,
+			},
+		)
+		je.save().submit()
+
 		si1_outstanding = frappe.db.get_value("Sales Invoice", si1.name, "outstanding_amount")
 		self.assertEqual(si1_outstanding, -100)
 
@@ -864,9 +905,7 @@ class TestPaymentEntry(FrappeTestCase):
 		cost_center = "_Test Cost Center for BS Account - _TC"
 		create_cost_center(cost_center_name="_Test Cost Center for BS Account", company="_Test Company")
 
-		pi = make_purchase_invoice_against_cost_center(
-			cost_center=cost_center, credit_to="Creditors - _TC"
-		)
+		pi = make_purchase_invoice_against_cost_center(cost_center=cost_center, credit_to="Creditors - _TC")
 
 		pe = get_payment_entry("Purchase Invoice", pi.name, bank_account="_Test Bank - _TC")
 		self.assertEqual(pe.cost_center, pi.cost_center)
@@ -907,9 +946,7 @@ class TestPaymentEntry(FrappeTestCase):
 		si = create_sales_invoice_against_cost_center(cost_center=cost_center, debit_to="Debtors - _TC")
 
 		account_balance = get_balance_on(account="_Test Bank - _TC", cost_center=si.cost_center)
-		party_balance = get_balance_on(
-			party_type="Customer", party=si.customer, cost_center=si.cost_center
-		)
+		party_balance = get_balance_on(party_type="Customer", party=si.customer, cost_center=si.cost_center)
 		party_account_balance = get_balance_on(si.debit_to, cost_center=si.cost_center)
 
 		pe = get_payment_entry("Sales Invoice", si.name, bank_account="_Test Bank - _TC")
@@ -1050,7 +1087,9 @@ class TestPaymentEntry(FrappeTestCase):
 		pe.source_exchange_rate = 50
 		pe.save()
 
-		ref_details = get_reference_details(so.doctype, so.name, pe.paid_from_account_currency)
+		ref_details = get_reference_details(
+			so.doctype, so.name, pe.paid_from_account_currency, "Customer", so.customer
+		)
 		expected_response = {
 			"total_amount": 5000.0,
 			"outstanding_amount": 5000.0,
@@ -1168,7 +1207,7 @@ class TestPaymentEntry(FrappeTestCase):
 		Overallocation validation shouldn't fire for Template without "Allocate Payment based on Payment Terms" enabled
 
 		"""
-		customer = create_customer()
+		create_customer()
 		create_payment_terms_template()
 
 		template = frappe.get_doc("Payment Terms Template", "Test Receivable Template")
@@ -1201,6 +1240,131 @@ class TestPaymentEntry(FrappeTestCase):
 		template.allocate_payment_based_on_payment_terms = 1
 		template.save()
 
+	def test_allocation_validation_for_sales_order(self):
+		so = make_sales_order(do_not_save=True)
+		so.items[0].rate = 99.55
+		so.save().submit()
+		self.assertGreater(so.rounded_total, 0.0)
+		pe = get_payment_entry("Sales Order", so.name, bank_account="_Test Cash - _TC")
+		pe.paid_from = "Debtors - _TC"
+		pe.paid_amount = 45.55
+		pe.references[0].allocated_amount = 45.55
+		pe.save().submit()
+		pe = get_payment_entry("Sales Order", so.name, bank_account="_Test Cash - _TC")
+		pe.paid_from = "Debtors - _TC"
+		# No validation error should be thrown here.
+		pe.save().submit()
+
+		so.reload()
+		self.assertEqual(so.advance_paid, so.rounded_total)
+
+	def test_outstanding_invoices_api(self):
+		"""
+		Test if `get_outstanding_reference_documents` fetches invoices in the right order.
+		"""
+		customer = create_customer("Max Mustermann", "INR")
+		create_payment_terms_template()
+
+		# SI has an earlier due date and SI2 has a later due date
+		si = create_sales_invoice(qty=1, rate=100, customer=customer, posting_date=add_days(nowdate(), -4))
+		si2 = create_sales_invoice(do_not_save=1, qty=1, rate=100, customer=customer)
+		si2.payment_terms_template = "Test Receivable Template"
+		si2.submit()
+
+		args = {
+			"posting_date": nowdate(),
+			"company": "_Test Company",
+			"party_type": "Customer",
+			"payment_type": "Pay",
+			"party": customer,
+			"party_account": "Debtors - _TC",
+		}
+		args.update(
+			{
+				"get_outstanding_invoices": True,
+				"from_posting_date": add_days(nowdate(), -4),
+				"to_posting_date": add_days(nowdate(), 2),
+			}
+		)
+		references = get_outstanding_reference_documents(args)
+
+		self.assertEqual(len(references), 3)
+		self.assertEqual(references[0].voucher_no, si.name)
+		self.assertEqual(references[1].voucher_no, si2.name)
+		self.assertEqual(references[2].voucher_no, si2.name)
+		self.assertEqual(references[1].payment_term, "Basic Amount Receivable")
+		self.assertEqual(references[2].payment_term, "Tax Receivable")
+
+	def test_partial_cancel_for_payment_entry(self):
+		si = create_sales_invoice()
+
+		pe = get_payment_entry(si.doctype, si.name)
+		pe.save()
+		pe.submit()
+
+		# Additional GL Entry
+		tax_amount = 10
+		reference_row = pe.references[0]
+		gl_args = {
+			"party_type": pe.party_type,
+			"party": pe.party,
+			"against_voucher_type": reference_row.reference_doctype,
+			"against_voucher": reference_row.reference_name,
+			"voucher_detail_no": reference_row.name,
+		}
+
+		gl_dicts = []
+
+		gl_dicts.extend(
+			[
+				pe.get_gl_dict(
+					{
+						"account": pe.paid_to,
+						"credit": tax_amount,
+						"credit_in_account_currency": tax_amount,
+						**gl_args,
+					}
+				),
+				pe.get_gl_dict(
+					{
+						"account": pe.paid_from,
+						"debit": tax_amount,
+						"debit_in_account_currency": tax_amount,
+						**gl_args,
+					}
+				),
+			]
+		)
+
+		make_gl_entries(gl_dicts)
+
+		# Assert PLEs Before
+		self.assertPLEntries(
+			pe,
+			[
+				{"amount": -100.0, "against_voucher_no": si.name},
+				{"amount": 10.0, "against_voucher_no": si.name},
+			],
+		)
+
+		# Partially cancel Payment Entry
+		make_reverse_gl_entries(gl_dicts, partial_cancel=True)
+		self.assertPLEntries(pe, [{"amount": -100.0, "against_voucher_no": si.name}])
+
+	def assertPLEntries(self, payment_doc, expected_pl_entries):
+		pl_entries = frappe.get_all(
+			"Payment Ledger Entry",
+			filters={
+				"voucher_type": payment_doc.doctype,
+				"voucher_no": payment_doc.name,
+				"delinked": 0,
+			},
+			fields=["amount", "against_voucher_no"],
+		)
+		out_str = json.dumps(sorted(pl_entries, key=json.dumps))
+		expected_out_str = json.dumps(sorted(expected_pl_entries, key=json.dumps))
+		self.assertEqual(out_str, expected_out_str)
+
 
 def create_payment_entry(**args):
 	payment_entry = frappe.new_doc("Payment Entry")
@@ -1228,12 +1392,11 @@ def create_payment_entry(**args):
 
 
 def create_payment_terms_template():
-
 	create_payment_term("Basic Amount Receivable")
 	create_payment_term("Tax Receivable")
 
 	if not frappe.db.exists("Payment Terms Template", "Test Receivable Template"):
-		payment_term_template = frappe.get_doc(
+		frappe.get_doc(
 			{
 				"doctype": "Payment Terms Template",
 				"template_name": "Test Receivable Template",
@@ -1261,6 +1424,9 @@ def create_payment_terms_template():
 def create_payment_terms_template_with_discount(
 	name=None, discount_type=None, discount=None, template_name=None
 ):
+	"""
+	Create a Payment Terms Template with %  or amount discount.
+	"""
 	create_payment_term(name or "30 Credit Days with 10% Discount")
 	template_name = template_name or "Test Discount Template"
 

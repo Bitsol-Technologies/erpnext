@@ -14,11 +14,12 @@ from frappe.utils import comma_and, get_link_to_form, has_gravatar, validate_ema
 from erpnext.accounts.party import set_taxes
 from erpnext.controllers.selling_controller import SellingController
 from erpnext.crm.utils import CRMNote, copy_comments, link_communications, link_open_events
+from erpnext.selling.doctype.customer.customer import parse_full_name
 
 
 class Lead(SellingController, CRMNote):
 	def get_feed(self):
-		return "{0}: {1}".format(_(self.status), self.lead_name)
+		return f"{_(self.status)}: {self.lead_name}"
 
 	def onload(self):
 		customer = frappe.db.get_value("Customer", {"lead_name": self.name})
@@ -37,7 +38,20 @@ class Lead(SellingController, CRMNote):
 	def before_insert(self):
 		self.contact_doc = None
 		if frappe.db.get_single_value("CRM Settings", "auto_creation_of_contact"):
+			if self.source == "Existing Customer" and self.customer:
+				contact = frappe.db.get_value(
+					"Dynamic Link",
+					{"link_doctype": "Customer", "parenttype": "Contact", "link_name": self.customer},
+					"parent",
+				)
+				if contact:
+					self.contact_doc = frappe.get_doc("Contact", contact)
+					return
 			self.contact_doc = self.create_contact()
+
+		# leads created by email inbox only have the full name set
+		if self.lead_name and not any([self.first_name, self.middle_name, self.last_name]):
+			self.first_name, self.middle_name, self.last_name = parse_full_name(self.lead_name)
 
 	def after_insert(self):
 		self.link_to_contact()
@@ -108,9 +122,7 @@ class Lead(SellingController, CRMNote):
 			self.contact_doc.save()
 
 	def update_prospect(self):
-		lead_row_name = frappe.db.get_value(
-			"Prospect Lead", filters={"lead": self.name}, fieldname="name"
-		)
+		lead_row_name = frappe.db.get_value("Prospect Lead", filters={"lead": self.name}, fieldname="name")
 		if lead_row_name:
 			lead_row = frappe.get_doc("Prospect Lead", lead_row_name)
 			lead_row.update(
@@ -160,9 +172,7 @@ class Lead(SellingController, CRMNote):
 		)
 
 	def has_lost_quotation(self):
-		return frappe.db.get_value(
-			"Quotation", {"party_name": self.name, "docstatus": 1, "status": "Lost"}
-		)
+		return frappe.db.get_value("Quotation", {"party_name": self.name, "docstatus": 1, "status": "Lost"})
 
 	@frappe.whitelist()
 	def create_prospect_and_contact(self, data):
@@ -382,7 +392,7 @@ def get_lead_details(lead, posting_date=None, company=None):
 		}
 	)
 
-	set_address_details(out, lead, "Lead")
+	set_address_details(out, lead, "Lead", company=company)
 
 	taxes_and_charges = set_taxes(
 		None,
@@ -434,8 +444,8 @@ def get_lead_with_phone_number(number):
 	leads = frappe.get_all(
 		"Lead",
 		or_filters={
-			"phone": ["like", "%{}".format(number)],
-			"mobile_no": ["like", "%{}".format(number)],
+			"phone": ["like", f"%{number}"],
+			"mobile_no": ["like", f"%{number}"],
 		},
 		limit=1,
 		order_by="creation DESC",
@@ -462,9 +472,7 @@ def add_lead_to_prospect(lead, prospect):
 	link_open_events("Lead", lead, prospect)
 
 	frappe.msgprint(
-		_("Lead {0} has been added to prospect {1}.").format(
-			frappe.bold(lead), frappe.bold(prospect.name)
-		),
+		_("Lead {0} has been added to prospect {1}.").format(frappe.bold(lead), frappe.bold(prospect.name)),
 		title=_("Lead -> Prospect"),
 		indicator="green",
 	)

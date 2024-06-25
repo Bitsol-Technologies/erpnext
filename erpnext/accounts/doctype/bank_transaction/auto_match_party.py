@@ -1,5 +1,3 @@
-from typing import Tuple, Union
-
 import frappe
 from frappe.utils import flt
 from rapidfuzz import fuzz, process
@@ -19,7 +17,7 @@ class AutoMatchParty:
 	def get(self, key):
 		return self.__dict__.get(key, None)
 
-	def match(self) -> Union[Tuple, None]:
+	def match(self) -> tuple | None:
 		result = None
 		result = AutoMatchbyAccountIBAN(
 			bank_party_account_number=self.bank_party_account_number,
@@ -50,7 +48,7 @@ class AutoMatchbyAccountIBAN:
 		result = self.match_account_in_party()
 		return result
 
-	def match_account_in_party(self) -> Union[Tuple, None]:
+	def match_account_in_party(self) -> tuple | None:
 		"""Check if there is a IBAN/Account No. match in Customer/Supplier/Employee"""
 		result = None
 		parties = get_parties_in_order(self.deposit)
@@ -97,7 +95,7 @@ class AutoMatchbyPartyNameDescription:
 	def get(self, key):
 		return self.__dict__.get(key, None)
 
-	def match(self) -> Union[Tuple, None]:
+	def match(self) -> tuple | None:
 		# fuzzy search by customer/supplier & employee
 		if not (self.bank_party_name or self.description):
 			return None
@@ -105,14 +103,15 @@ class AutoMatchbyPartyNameDescription:
 		result = self.match_party_name_desc_in_party()
 		return result
 
-	def match_party_name_desc_in_party(self) -> Union[Tuple, None]:
+	def match_party_name_desc_in_party(self) -> tuple | None:
 		"""Fuzzy search party name and/or description against parties in the system"""
 		result = None
 		parties = get_parties_in_order(self.deposit)
 
 		for party in parties:
 			filters = {"status": "Active"} if party == "Employee" else {"disabled": 0}
-			names = frappe.get_all(party, filters=filters, pluck=party.lower() + "_name")
+			field = party.lower() + "_name"
+			names = frappe.get_all(party, filters=filters, fields=[f"{field} as party_name", "name"])
 
 			for field in ["bank_party_name", "description"]:
 				if not self.get(field):
@@ -129,9 +128,13 @@ class AutoMatchbyPartyNameDescription:
 
 		return result
 
-	def fuzzy_search_and_return_result(self, party, names, field) -> Union[Tuple, None]:
+	def fuzzy_search_and_return_result(self, party, names, field) -> tuple | None:
 		skip = False
-		result = process.extract(query=self.get(field), choices=names, scorer=fuzz.token_set_ratio)
+		result = process.extract(
+			query=self.get(field),
+			choices={row.get("name"): row.get("party_name") for row in names},
+			scorer=fuzz.token_set_ratio,
+		)
 		party_name, skip = self.process_fuzzy_result(result)
 
 		if not party_name:
@@ -142,21 +145,21 @@ class AutoMatchbyPartyNameDescription:
 			party_name,
 		), skip
 
-	def process_fuzzy_result(self, result: Union[list, None]):
+	def process_fuzzy_result(self, result: list | None):
 		"""
 		If there are multiple valid close matches return None as result may be faulty.
 		Return the result only if one accurate match stands out.
 
 		Returns: Result, Skip (whether or not to discontinue matching)
 		"""
-		PARTY, SCORE, CUTOFF = 0, 1, 80
+		SCORE, PARTY_ID, CUTOFF = 1, 2, 80
 
 		if not result or not len(result):
 			return None, False
 
 		first_result = result[0]
 		if len(result) == 1:
-			return (first_result[PARTY] if first_result[SCORE] > CUTOFF else None), True
+			return (first_result[PARTY_ID] if first_result[SCORE] > CUTOFF else None), True
 
 		second_result = result[1]
 		if first_result[SCORE] > CUTOFF:
@@ -165,7 +168,7 @@ class AutoMatchbyPartyNameDescription:
 			if first_result[SCORE] == second_result[SCORE]:
 				return None, True
 
-			return first_result[PARTY], True
+			return first_result[PARTY_ID], True
 		else:
 			return None, False
 

@@ -6,7 +6,7 @@ import copy
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import add_days, cint, cstr, flt, today
+from frappe.utils import add_days, cint, flt, today
 
 import erpnext
 from erpnext.accounts.doctype.account.test_account import get_inventory_account
@@ -43,9 +43,7 @@ class TestSubcontractingReceipt(FrappeTestCase):
 
 	def test_subcontracting(self):
 		set_backflush_based_on("BOM")
-		make_stock_entry(
-			item_code="_Test Item", qty=100, target="_Test Warehouse 1 - _TC", basic_rate=100
-		)
+		make_stock_entry(item_code="_Test Item", qty=100, target="_Test Warehouse 1 - _TC", basic_rate=100)
 		make_stock_entry(
 			item_code="_Test Item Home Desktop 100",
 			qty=100,
@@ -77,9 +75,7 @@ class TestSubcontractingReceipt(FrappeTestCase):
 		self.assertEqual(scr.get("items")[0].rm_supp_cost, flt(rm_supp_cost))
 
 	def test_available_qty_for_consumption(self):
-		make_stock_entry(
-			item_code="_Test Item", qty=100, target="_Test Warehouse 1 - _TC", basic_rate=100
-		)
+		make_stock_entry(item_code="_Test Item", qty=100, target="_Test Warehouse 1 - _TC", basic_rate=100)
 		make_stock_entry(
 			item_code="_Test Item Home Desktop 100",
 			qty=100,
@@ -206,12 +202,8 @@ class TestSubcontractingReceipt(FrappeTestCase):
 		make_stock_entry(
 			target="_Test Warehouse - _TC", item_code="Test Extra Item 1", qty=10, basic_rate=100
 		)
-		make_stock_entry(
-			target="_Test Warehouse - _TC", item_code="_Test FG Item", qty=1, basic_rate=100
-		)
-		make_stock_entry(
-			target="_Test Warehouse - _TC", item_code="Test Extra Item 2", qty=1, basic_rate=100
-		)
+		make_stock_entry(target="_Test Warehouse - _TC", item_code="_Test FG Item", qty=1, basic_rate=100)
+		make_stock_entry(target="_Test Warehouse - _TC", item_code="Test Extra Item 2", qty=1, basic_rate=100)
 
 		rm_items = [
 			{
@@ -442,26 +434,15 @@ class TestSubcontractingReceipt(FrappeTestCase):
 		self.assertEqual(cint(erpnext.is_perpetual_inventory_enabled(scr.company)), 1)
 
 		gl_entries = get_gl_entries("Subcontracting Receipt", scr.name)
-
 		self.assertTrue(gl_entries)
 
 		fg_warehouse_ac = get_inventory_account(scr.company, scr.items[0].warehouse)
-		supplier_warehouse_ac = get_inventory_account(scr.company, scr.supplier_warehouse)
 		expense_account = scr.items[0].expense_account
-
-		if fg_warehouse_ac == supplier_warehouse_ac:
-			expected_values = {
-				fg_warehouse_ac: [2100.0, 1000.0],  # FG Amount (D), RM Cost (C)
-				expense_account: [0.0, 1000.0],  # Service Cost (C)
-				additional_costs_expense_account: [0.0, 100.0],  # Additional Cost (C)
-			}
-		else:
-			expected_values = {
-				fg_warehouse_ac: [2100.0, 0.0],  # FG Amount (D)
-				supplier_warehouse_ac: [0.0, 1000.0],  # RM Cost (C)
-				expense_account: [0.0, 1000.0],  # Service Cost (C)
-				additional_costs_expense_account: [0.0, 100.0],  # Additional Cost (C)
-			}
+		expected_values = {
+			fg_warehouse_ac: [2100.0, 1000],
+			expense_account: [1100, 2100],
+			additional_costs_expense_account: [0.0, 100.0],
+		}
 
 		for gle in gl_entries:
 			self.assertEqual(expected_values[gle.account][0], gle.debit)
@@ -471,14 +452,58 @@ class TestSubcontractingReceipt(FrappeTestCase):
 		scr.cancel()
 		self.assertTrue(get_gl_entries("Subcontracting Receipt", scr.name))
 
+	def test_subcontracting_receipt_with_zero_service_cost(self):
+		warehouse = "Stores - TCP1"
+		service_items = [
+			{
+				"warehouse": warehouse,
+				"item_code": "Subcontracted Service Item 7",
+				"qty": 10,
+				"rate": 0,
+				"fg_item": "Subcontracted Item SA7",
+				"fg_item_qty": 10,
+			},
+		]
+		sco = get_subcontracting_order(
+			company="_Test Company with perpetual inventory",
+			warehouse=warehouse,
+			supplier_warehouse="Work In Progress - TCP1",
+			service_items=service_items,
+		)
+		rm_items = get_rm_items(sco.supplied_items)
+		itemwise_details = make_stock_in_entry(rm_items=rm_items)
+		make_stock_transfer_entry(
+			sco_no=sco.name,
+			rm_items=rm_items,
+			itemwise_details=copy.deepcopy(itemwise_details),
+		)
+		scr = make_subcontracting_receipt(sco.name)
+		scr.save()
+		scr.submit()
+
+		gl_entries = get_gl_entries("Subcontracting Receipt", scr.name)
+		self.assertTrue(gl_entries)
+
+		fg_warehouse_ac = get_inventory_account(scr.company, scr.items[0].warehouse)
+		expense_account = scr.items[0].expense_account
+		expected_values = {
+			fg_warehouse_ac: [1000, 1000],
+			expense_account: [1000, 1000],
+		}
+
+		for gle in gl_entries:
+			self.assertEqual(expected_values[gle.account][0], gle.debit)
+			self.assertEqual(expected_values[gle.account][1], gle.credit)
+
+		scr.reload()
+		scr.cancel()
+
 	def test_supplied_items_consumed_qty(self):
 		# Set Backflush Based On as "Material Transferred for Subcontracting" to transfer RM's more than the required qty
 		set_backflush_based_on("Material Transferred for Subcontract")
 
 		# Create Material Receipt for RM's
-		make_stock_entry(
-			item_code="_Test Item", qty=100, target="_Test Warehouse 1 - _TC", basic_rate=100
-		)
+		make_stock_entry(item_code="_Test Item", qty=100, target="_Test Warehouse 1 - _TC", basic_rate=100)
 		make_stock_entry(
 			item_code="_Test Item Home Desktop 100",
 			qty=100,
@@ -655,13 +680,84 @@ class TestSubcontractingReceipt(FrappeTestCase):
 			self.assertEqual(rm_item.rate, 100)
 			self.assertEqual(rm_item.amount, rm_item.consumed_qty * rm_item.rate)
 
+	def test_subcontracting_receipt_cancel_with_batch(self):
+		from erpnext.manufacturing.doctype.production_plan.test_production_plan import make_bom
+
+		# Step - 1: Set Backflush Based On as "BOM"
+		set_backflush_based_on("BOM")
+
+		# Step - 2: Create FG and RM Items
+		fg_item = make_item(
+			properties={"is_stock_item": 1, "is_sub_contracted_item": 1, "has_batch_no": 1}
+		).name
+		rm_item1 = make_item(properties={"is_stock_item": 1}).name
+		rm_item2 = make_item(properties={"is_stock_item": 1}).name
+		make_item("Subcontracted Service Item Test For Batch 1", {"is_stock_item": 0})
+
+		# Step - 3: Create BOM for FG Item
+		bom = make_bom(item=fg_item, raw_materials=[rm_item1, rm_item2])
+		for rm_item in bom.items:
+			self.assertEqual(rm_item.rate, 0)
+			self.assertEqual(rm_item.amount, 0)
+		bom = bom.name
+
+		# Step - 4: Create PO and SCO
+		service_items = [
+			{
+				"warehouse": "_Test Warehouse - _TC",
+				"item_code": "Subcontracted Service Item Test For Batch 1",
+				"qty": 100,
+				"rate": 100,
+				"fg_item": fg_item,
+				"fg_item_qty": 100,
+			},
+		]
+		sco = get_subcontracting_order(service_items=service_items)
+		for rm_item in sco.supplied_items:
+			self.assertEqual(rm_item.rate, 0)
+			self.assertEqual(rm_item.amount, 0)
+
+		# Step - 5: Inward Raw Materials
+		rm_items = get_rm_items(sco.supplied_items)
+		for rm_item in rm_items:
+			rm_item["rate"] = 100
+		itemwise_details = make_stock_in_entry(rm_items=rm_items)
+
+		# Step - 6: Transfer RM's to Subcontractor
+		se = make_stock_transfer_entry(
+			sco_no=sco.name,
+			rm_items=rm_items,
+			itemwise_details=copy.deepcopy(itemwise_details),
+		)
+		for item in se.items:
+			self.assertEqual(item.qty, 100)
+			self.assertEqual(item.basic_rate, 100)
+			self.assertEqual(item.amount, item.qty * item.basic_rate)
+
+		batch_doc = frappe.get_doc(
+			{
+				"doctype": "Batch",
+				"item": fg_item,
+				"batch_id": frappe.generate_hash(length=10),
+			}
+		).insert(ignore_permissions=True)
+
+		# Step - 7: Create Subcontracting Receipt
+		scr = make_subcontracting_receipt(sco.name)
+		scr.items[0].batch_no = batch_doc.batch_id
+		scr.save()
+		scr.submit()
+		scr.load_from_db()
+
+		# Step - 8: Cancel Subcontracting Receipt
+		scr.cancel()
+		self.assertTrue(scr.docstatus == 2)
+
 
 def make_return_subcontracting_receipt(**args):
 	args = frappe._dict(args)
 	return_doc = make_return_doc("Subcontracting Receipt", args.scr_name)
-	return_doc.supplier_warehouse = (
-		args.supplier_warehouse or args.warehouse or "_Test Warehouse 1 - _TC"
-	)
+	return_doc.supplier_warehouse = args.supplier_warehouse or args.warehouse or "_Test Warehouse 1 - _TC"
 
 	if args.qty:
 		for item in return_doc.items:

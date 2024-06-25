@@ -13,6 +13,7 @@
   "end_time",
   "limits_dont_apply_on",
   "item_based_reposting",
+  "do_reposting_for_each_stock_transaction",
   "errors_notification_section",
   "notify_reposting_error_to_role"
  ],
@@ -50,7 +51,7 @@
    "label": "Limit timeslot for Stock Reposting"
   },
   {
-   "default": "0",
+   "default": "1",
    "fieldname": "item_based_reposting",
    "fieldtype": "Check",
    "label": "Use Item based reposting"
@@ -65,12 +66,18 @@
    "fieldname": "errors_notification_section",
    "fieldtype": "Section Break",
    "label": "Errors Notification"
+  },
+  {
+   "default": "0",
+   "fieldname": "do_reposting_for_each_stock_transaction",
+   "fieldtype": "Check",
+   "label": "Do reposting for each Stock Transaction"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2023-05-04 16:14:29.080697",
+ "modified": "2024-04-24 12:19:40.204888",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Stock Reposting Settings",
