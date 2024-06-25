@@ -19,7 +19,9 @@ default_mail_footer = """<div style="padding: 7px; text-align: right; color: #88
 
 
 def after_install():
-	frappe.get_doc({"doctype": "Role", "role_name": "Analytics"}).insert()
+	if not frappe.db.exists("Role", "Analytics"):
+		frappe.get_doc({"doctype": "Role", "role_name": "Analytics"}).insert()
+
 	set_single_defaults()
 	create_print_setting_custom_fields()
 	add_all_roles_to("Administrator")
@@ -33,6 +35,7 @@ def after_install():
 	add_app_name()
 	setup_log_settings()
 	hide_workspaces()
+	update_roles()
 	frappe.db.commit()
 
 
@@ -132,7 +135,6 @@ def create_default_success_action():
 
 
 def create_default_energy_point_rules():
-
 	for rule in get_default_energy_point_rules():
 		# check if any rule for ref. doctype exists
 		rule_exists = frappe.db.exists(
@@ -179,7 +181,7 @@ def add_standard_navbar_items():
 
 	for item in erpnext_navbar_items:
 		current_labels = [item.get("item_label") for item in current_navbar_items]
-		if not item.get("item_label") in current_labels:
+		if item.get("item_label") not in current_labels:
 			navbar_settings.append("help_dropdown", item)
 
 	for item in current_navbar_items:
@@ -212,6 +214,12 @@ def setup_log_settings():
 def hide_workspaces():
 	for ws in ["Integration", "Settings"]:
 		frappe.db.set_value("Workspace", ws, "public", 0)
+
+
+def update_roles():
+	website_user_roles = ("Customer", "Supplier")
+	for role in website_user_roles:
+		frappe.db.set_value("Role", role, "desk_access", 0)
 
 
 def create_default_role_profiles():

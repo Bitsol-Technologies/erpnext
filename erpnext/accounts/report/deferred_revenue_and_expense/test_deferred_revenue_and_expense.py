@@ -1,5 +1,3 @@
-import unittest
-
 import frappe
 from frappe import qb
 from frappe.tests.utils import FrappeTestCase, change_settings
@@ -13,8 +11,6 @@ from erpnext.accounts.report.deferred_revenue_and_expense.deferred_revenue_and_e
 )
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
 from erpnext.accounts.utils import get_fiscal_year
-from erpnext.buying.doctype.supplier.test_supplier import create_supplier
-from erpnext.stock.doctype.item.test_item import create_item
 
 
 class TestDeferredRevenueAndExpense(FrappeTestCase, AccountsTestMixin):
@@ -81,7 +77,7 @@ class TestDeferredRevenueAndExpense(FrappeTestCase, AccountsTestMixin):
 		self.create_item("_Test Internet Subscription", 0, self.warehouse, self.company)
 		item = frappe.get_doc("Item", self.item)
 		item.enable_deferred_revenue = 1
-		item.deferred_revenue_account = self.deferred_revenue_account
+		item.item_defaults[0].deferred_revenue_account = self.deferred_revenue_account
 		item.no_of_months = 3
 		item.save()
 
@@ -150,7 +146,7 @@ class TestDeferredRevenueAndExpense(FrappeTestCase, AccountsTestMixin):
 		self.create_item("_Test Office Desk", 0, self.warehouse, self.company)
 		item = frappe.get_doc("Item", self.item)
 		item.enable_deferred_expense = 1
-		item.deferred_expense_account = self.deferred_expense_account
+		item.item_defaults[0].deferred_expense_account = self.deferred_expense_account
 		item.no_of_months_exp = 3
 		item.save()
 

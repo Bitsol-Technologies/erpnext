@@ -170,7 +170,7 @@
    "fieldname": "supplier_type",
    "fieldtype": "Select",
    "label": "Supplier Type",
-   "options": "Company\nIndividual",
+   "options": "Company\nIndividual\nProprietorship\nPartnership",
    "reqd": 1
   },
   {
@@ -402,7 +402,7 @@
   {
    "fieldname": "contact_and_address_tab",
    "fieldtype": "Tab Break",
-   "label": "Contact & Address"
+   "label": "Address & Contact"
   },
   {
    "fieldname": "accounting_tab",
@@ -457,7 +457,7 @@
    "link_fieldname": "party"
   }
  ],
- "modified": "2023-05-09 15:34:13.408932",
+ "modified": "2024-05-08 18:02:57.342931",
  "modified_by": "Administrator",
  "module": "Buying",
  "name": "Supplier",

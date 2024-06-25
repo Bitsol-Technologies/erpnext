@@ -3,10 +3,10 @@
 
 frappe.provide("erpnext.assets");
 
-
 erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.stock.StockController {
 	setup() {
 		this.setup_posting_date_time_check();
+		this.frm.ignore_doctypes_on_cancel_all = ["Asset Movement"];
 	}
 
 	onload() {
@@ -15,9 +15,18 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 
 	refresh() {
 		this.show_general_ledger();
-		if ((this.frm.doc.stock_items && this.frm.doc.stock_items.length) || !this.frm.doc.target_is_fixed_asset) {
+
+		if (
+			(this.frm.doc.stock_items && this.frm.doc.stock_items.length) ||
+			!this.frm.doc.target_is_fixed_asset
+		) {
 			this.show_stock_ledger();
 		}
+
+		// if (this.frm.doc.stock_items && !this.frm.doc.stock_items.length && this.frm.doc.target_asset && this.frm.doc.capitalization_method === "Choose a WIP composite asset") {
+		// 	this.set_consumed_stock_items_tagged_to_wip_composite_asset(this.frm.doc.target_asset);
+		// 	this.get_target_asset_details();
+		// }
 	}
 
 	setup_queries() {
@@ -25,83 +34,126 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 
 		me.setup_warehouse_query();
 
-		me.frm.set_query("target_item_code", function() {
+		me.frm.set_query("target_item_code", function () {
 			if (me.frm.doc.entry_type == "Capitalization") {
-				return erpnext.queries.item({"is_stock_item": 0, "is_fixed_asset": 1});
+				return erpnext.queries.item({ is_stock_item: 0, is_fixed_asset: 1 });
 			} else {
-				return erpnext.queries.item({"is_stock_item": 1, "is_fixed_asset": 0});
+				return erpnext.queries.item({ is_stock_item: 1, is_fixed_asset: 0 });
 			}
 		});
 
-		me.frm.set_query("target_asset", function() {
-			var filters = {};
-
-			if (me.frm.doc.target_item_code) {
-				filters['item_code'] = me.frm.doc.target_item_code;
-			}
-
-			filters['status'] = ["not in", ["Draft", "Scrapped", "Sold", "Capitalized", "Decapitalized"]];
-			filters['docstatus'] = 1;
-
+		me.frm.set_query("target_asset", function () {
 			return {
-				filters: filters
+				filters: { is_composite_asset: 1, docstatus: 0 },
 			};
 		});
 
-		me.frm.set_query("asset", "asset_items", function() {
+		me.frm.set_query("asset", "asset_items", function () {
 			var filters = {
-				'status': ["not in", ["Draft", "Scrapped", "Sold", "Capitalized", "Decapitalized"]],
-				'docstatus': 1
+				status: ["not in", ["Draft", "Scrapped", "Sold", "Capitalized", "Decapitalized"]],
+				docstatus: 1,
 			};
 
 			if (me.frm.doc.target_asset) {
-				filters['name'] = ['!=', me.frm.doc.target_asset];
+				filters["name"] = ["!=", me.frm.doc.target_asset];
 			}
 
 			return {
-				filters: filters
+				filters: filters,
 			};
 		});
 
-		me.frm.set_query("item_code", "stock_items", function() {
-			return erpnext.queries.item({"is_stock_item": 1});
+		me.frm.set_query("item_code", "stock_items", function () {
+			return erpnext.queries.item({ is_stock_item: 1 });
 		});
 
-		me.frm.set_query("item_code", "service_items", function() {
-			return erpnext.queries.item({"is_stock_item": 0, "is_fixed_asset": 0});
+		me.frm.set_query("item_code", "service_items", function () {
+			return erpnext.queries.item({ is_stock_item: 0, is_fixed_asset: 0 });
 		});
 
-		me.frm.set_query('batch_no', 'stock_items', function(doc, cdt, cdn) {
+		me.frm.set_query("batch_no", "stock_items", function (doc, cdt, cdn) {
 			var item = locals[cdt][cdn];
 			if (!item.item_code) {
 				frappe.throw(__("Please enter Item Code to get Batch Number"));
 			} else {
 				var filters = {
-					'item_code': item.item_code,
-					'posting_date': me.frm.doc.posting_date || frappe.datetime.nowdate(),
-					'warehouse': item.warehouse
+					item_code: item.item_code,
+					posting_date: me.frm.doc.posting_date || frappe.datetime.nowdate(),
+					warehouse: item.warehouse,
 				};
 
 				return {
 					query: "erpnext.controllers.queries.get_batch_no",
-					filters: filters
+					filters: filters,
 				};
 			}
 		});
 
-		me.frm.set_query('expense_account', 'service_items', function() {
+		me.frm.set_query("expense_account", "service_items", function () {
 			return {
 				filters: {
-					"account_type": ['in', ["Tax", "Expense Account", "Income Account", "Expenses Included In Valuation", "Expenses Included In Asset Valuation"]],
-					"is_group": 0,
-					"company": me.frm.doc.company
-				}
+					account_type: [
+						"in",
+						[
+							"Tax",
+							"Expense Account",
+							"Income Account",
+							"Expenses Included In Valuation",
+							"Expenses Included In Asset Valuation",
+						],
+					],
+					is_group: 0,
+					company: me.frm.doc.company,
+				},
 			};
 		});
 	}
 
 	target_item_code() {
 		return this.get_target_item_details();
+	}
+
+	target_asset() {
+		if (
+			this.frm.doc.target_asset &&
+			this.frm.doc.capitalization_method === "Choose a WIP composite asset"
+		) {
+			this.set_consumed_stock_items_tagged_to_wip_composite_asset(this.frm.doc.target_asset);
+			this.get_target_asset_details();
+		}
+	}
+
+	set_consumed_stock_items_tagged_to_wip_composite_asset(asset) {
+		var me = this;
+
+		if (asset) {
+			return me.frm.call({
+				method: "erpnext.assets.doctype.asset_capitalization.asset_capitalization.get_items_tagged_to_wip_composite_asset",
+				args: {
+					asset: asset,
+				},
+				callback: function (r) {
+					if (!r.exc && r.message) {
+						if (r.message[0] && r.message[0].length) {
+							me.frm.clear_table("stock_items");
+							for (let item of r.message[0]) {
+								me.frm.add_child("stock_items", item);
+							}
+							refresh_field("stock_items");
+						}
+						if (r.message[1] && r.message[1].length) {
+							me.frm.clear_table("asset_items");
+							for (let item of r.message[1]) {
+								me.frm.add_child("asset_items", item);
+							}
+							me.frm.refresh_field("asset_items");
+						}
+
+						me.calculate_totals();
+					}
+				},
+			});
+		}
 	}
 
 	item_code(doc, cdt, cdn) {
@@ -131,7 +183,7 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 		if (this.frm.doc.posting_date) {
 			frappe.run_serially([
 				() => this.get_all_item_warehouse_details(),
-				() => this.get_all_asset_values()
+				() => this.get_all_asset_values(),
 			]);
 		}
 	}
@@ -187,15 +239,15 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 	}
 
 	stock_items_add(doc, cdt, cdn) {
-		erpnext.accounts.dimensions.copy_dimension_from_first_row(this.frm, cdt, cdn, 'stock_items');
+		erpnext.accounts.dimensions.copy_dimension_from_first_row(this.frm, cdt, cdn, "stock_items");
 	}
 
 	asset_items_add(doc, cdt, cdn) {
-		erpnext.accounts.dimensions.copy_dimension_from_first_row(this.frm, cdt, cdn, 'asset_items');
+		erpnext.accounts.dimensions.copy_dimension_from_first_row(this.frm, cdt, cdn, "asset_items");
 	}
 
 	serivce_items_add(doc, cdt, cdn) {
-		erpnext.accounts.dimensions.copy_dimension_from_first_row(this.frm, cdt, cdn, 'service_items');
+		erpnext.accounts.dimensions.copy_dimension_from_first_row(this.frm, cdt, cdn, "service_items");
 	}
 
 	get_target_item_details() {
@@ -213,7 +265,27 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 					if (!r.exc) {
 						me.frm.refresh_fields();
 					}
-				}
+				},
+			});
+		}
+	}
+
+	get_target_asset_details() {
+		var me = this;
+
+		if (me.frm.doc.target_asset) {
+			return me.frm.call({
+				method: "erpnext.assets.doctype.asset_capitalization.asset_capitalization.get_target_asset_details",
+				child: me.frm.doc,
+				args: {
+					asset: me.frm.doc.target_asset,
+					company: me.frm.doc.company,
+				},
+				callback: function (r) {
+					if (!r.exc) {
+						me.frm.refresh_fields();
+					}
+				},
 			});
 		}
 	}
@@ -235,13 +307,13 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 						company: me.frm.doc.company,
 						posting_date: me.frm.doc.posting_date,
 						posting_time: me.frm.doc.posting_time,
-					}
+					},
 				},
 				callback: function (r) {
 					if (!r.exc) {
 						me.calculate_totals();
 					}
-				}
+				},
 			});
 		}
 	}
@@ -262,13 +334,13 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 						finance_book: row.finance_book || me.frm.doc.finance_book,
 						posting_date: me.frm.doc.posting_date,
 						posting_time: me.frm.doc.posting_time,
-					}
+					},
 				},
 				callback: function (r) {
 					if (!r.exc) {
 						me.calculate_totals();
 					}
-				}
+				},
 			});
 		}
 	}
@@ -286,13 +358,13 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 						qty: flt(row.qty),
 						expense_account: row.expense_account,
 						company: me.frm.doc.company,
-					}
+					},
 				},
 				callback: function (r) {
 					if (!r.exc) {
 						me.calculate_totals();
 					}
-				}
+				},
 			});
 		}
 	}
@@ -305,23 +377,23 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 				child: item,
 				args: {
 					args: {
-						'item_code': item.item_code,
-						'warehouse': cstr(item.warehouse),
-						'qty': flt(item.stock_qty),
-						'serial_no': item.serial_no,
-						'posting_date': me.frm.doc.posting_date,
-						'posting_time': me.frm.doc.posting_time,
-						'company': me.frm.doc.company,
-						'voucher_type': me.frm.doc.doctype,
-						'voucher_no': me.frm.doc.name,
-						'allow_zero_valuation': 1
-					}
+						item_code: item.item_code,
+						warehouse: cstr(item.warehouse),
+						qty: flt(item.stock_qty),
+						serial_no: item.serial_no,
+						posting_date: me.frm.doc.posting_date,
+						posting_time: me.frm.doc.posting_time,
+						company: me.frm.doc.company,
+						voucher_type: me.frm.doc.doctype,
+						voucher_no: me.frm.doc.name,
+						allow_zero_valuation: 1,
+					},
 				},
-				callback: function(r) {
+				callback: function (r) {
 					if (!r.exc) {
 						me.calculate_totals();
 					}
-				}
+				},
 			});
 		}
 	}
@@ -331,11 +403,11 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 		return me.frm.call({
 			method: "set_warehouse_details",
 			doc: me.frm.doc,
-			callback: function(r) {
+			callback: function (r) {
 				if (!r.exc) {
 					me.calculate_totals();
 				}
-			}
+			},
 		});
 	}
 
@@ -344,11 +416,11 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 		return me.frm.call({
 			method: "set_asset_values",
 			doc: me.frm.doc,
-			callback: function(r) {
+			callback: function (r) {
 				if (!r.exc) {
 					me.calculate_totals();
 				}
-			}
+			},
 		});
 	}
 
@@ -360,33 +432,38 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 		me.frm.doc.service_items_total = 0;
 
 		$.each(me.frm.doc.stock_items || [], function (i, d) {
-			d.amount = flt(flt(d.stock_qty) * flt(d.valuation_rate), precision('amount', d));
+			d.amount = flt(flt(d.stock_qty) * flt(d.valuation_rate), precision("amount", d));
 			me.frm.doc.stock_items_total += d.amount;
 		});
 
 		$.each(me.frm.doc.asset_items || [], function (i, d) {
-			d.asset_value = flt(flt(d.asset_value), precision('asset_value', d));
+			d.asset_value = flt(flt(d.asset_value), precision("asset_value", d));
 			me.frm.doc.asset_items_total += d.asset_value;
 		});
 
 		$.each(me.frm.doc.service_items || [], function (i, d) {
-			d.amount = flt(flt(d.qty) * flt(d.rate), precision('amount', d));
+			d.amount = flt(flt(d.qty) * flt(d.rate), precision("amount", d));
 			me.frm.doc.service_items_total += d.amount;
 		});
 
-		me.frm.doc.stock_items_total = flt(me.frm.doc.stock_items_total, precision('stock_items_total'));
-		me.frm.doc.asset_items_total = flt(me.frm.doc.asset_items_total, precision('asset_items_total'));
-		me.frm.doc.service_items_total = flt(me.frm.doc.service_items_total, precision('service_items_total'));
+		me.frm.doc.stock_items_total = flt(me.frm.doc.stock_items_total, precision("stock_items_total"));
+		me.frm.doc.asset_items_total = flt(me.frm.doc.asset_items_total, precision("asset_items_total"));
+		me.frm.doc.service_items_total = flt(
+			me.frm.doc.service_items_total,
+			precision("service_items_total")
+		);
 
-		me.frm.doc.total_value = me.frm.doc.stock_items_total + me.frm.doc.asset_items_total + me.frm.doc.service_items_total;
-		me.frm.doc.total_value = flt(me.frm.doc.total_value, precision('total_value'));
+		me.frm.doc.total_value =
+			me.frm.doc.stock_items_total + me.frm.doc.asset_items_total + me.frm.doc.service_items_total;
+		me.frm.doc.total_value = flt(me.frm.doc.total_value, precision("total_value"));
 
-		me.frm.doc.target_qty = flt(me.frm.doc.target_qty, precision('target_qty'));
-		me.frm.doc.target_incoming_rate = me.frm.doc.target_qty ? me.frm.doc.total_value / flt(me.frm.doc.target_qty)
+		me.frm.doc.target_qty = flt(me.frm.doc.target_qty, precision("target_qty"));
+		me.frm.doc.target_incoming_rate = me.frm.doc.target_qty
+			? me.frm.doc.total_value / flt(me.frm.doc.target_qty)
 			: me.frm.doc.total_value;
 
 		me.frm.refresh_fields();
 	}
 };
 
-cur_frm.cscript = new erpnext.assets.AssetCapitalization({frm: cur_frm});
+cur_frm.cscript = new erpnext.assets.AssetCapitalization({ frm: cur_frm });

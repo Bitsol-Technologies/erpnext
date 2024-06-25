@@ -8,6 +8,7 @@ from frappe.utils import cint, flt
 
 from erpnext.accounts.party import get_partywise_advanced_payment_amount
 from erpnext.accounts.report.accounts_receivable.accounts_receivable import ReceivablePayableReport
+from erpnext.accounts.utils import get_currency_precision
 
 
 def execute(filters=None):
@@ -22,12 +23,8 @@ def execute(filters=None):
 class AccountsReceivableSummary(ReceivablePayableReport):
 	def run(self, args):
 		self.account_type = args.get("account_type")
-		self.party_type = frappe.db.get_all(
-			"Party Type", {"account_type": self.account_type}, pluck="name"
-		)
-		self.party_naming_by = frappe.db.get_value(
-			args.get("naming_by")[0], None, args.get("naming_by")[1]
-		)
+		self.party_type = frappe.db.get_all("Party Type", {"account_type": self.account_type}, pluck="name")
+		self.party_naming_by = frappe.db.get_value(args.get("naming_by")[0], None, args.get("naming_by")[1])
 		self.get_columns()
 		self.get_data(args)
 		return self.columns, self.data
@@ -35,6 +32,7 @@ class AccountsReceivableSummary(ReceivablePayableReport):
 	def get_data(self, args):
 		self.data = []
 		self.receivables = ReceivablePayableReport(self.filters).run(args)[1]
+		self.currency_precision = get_currency_precision() or 2
 
 		self.get_party_total(args)
 
@@ -58,7 +56,7 @@ class AccountsReceivableSummary(ReceivablePayableReport):
 			gl_balance_map = get_gl_balance(self.filters.report_date, self.filters.company)
 
 		for party, party_dict in self.party_total.items():
-			if party_dict.outstanding == 0:
+			if flt(party_dict.outstanding, self.currency_precision) == 0:
 				continue
 
 			row = frappe._dict()
@@ -99,13 +97,11 @@ class AccountsReceivableSummary(ReceivablePayableReport):
 
 			# Add all amount columns
 			for k in list(self.party_total[d.party]):
-				if k not in ["currency", "sales_person"]:
-
-					self.party_total[d.party][k] += d.get(k, 0.0)
+				if isinstance(self.party_total[d.party][k], float):
+					self.party_total[d.party][k] += d.get(k) or 0.0
 
 			# set territory, customer_group, sales person etc
 			self.set_party_details(d)
-			self.party_total[d.party].update({"party_type": d.party_type})
 
 	def init_party_total(self, row):
 		self.party_total.setdefault(
@@ -124,6 +120,7 @@ class AccountsReceivableSummary(ReceivablePayableReport):
 					"total_due": 0.0,
 					"future_amount": 0.0,
 					"sales_person": [],
+					"party_type": row.party_type,
 				}
 			),
 		)
@@ -133,13 +130,12 @@ class AccountsReceivableSummary(ReceivablePayableReport):
 
 		for key in ("territory", "customer_group", "supplier_group"):
 			if row.get(key):
-				self.party_total[row.party][key] = row.get(key)
-
+				self.party_total[row.party][key] = row.get(key, "")
 		if row.sales_person:
-			self.party_total[row.party].sales_person.append(row.sales_person)
+			self.party_total[row.party].sales_person.append(row.get("sales_person", ""))
 
 		if self.filters.sales_partner:
-			self.party_total[row.party]["default_sales_partner"] = row.get("default_sales_partner")
+			self.party_total[row.party]["default_sales_partner"] = row.get("default_sales_partner", "")
 
 	def get_columns(self):
 		self.columns = []

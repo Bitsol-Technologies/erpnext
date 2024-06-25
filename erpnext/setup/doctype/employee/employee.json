@@ -37,16 +37,8 @@
   "column_break_25",
   "designation",
   "reports_to",
-  "wfh_approver",
-  "wfh_approver_name",
   "column_break_18",
   "branch",
-  "team_lead",
-  "team_lead_name",
-  "medical_allowance_section",
-  "medical_allowance",
-  "medical_availed",
-  "medical_balance",
   "employment_details",
   "scheduled_confirmation_date",
   "column_break_32",
@@ -76,12 +68,6 @@
   "emergency_phone_number",
   "column_break_19",
   "relation",
-  "section_break_5iqdl",
-  "emergency_name_2",
-  "column_break_tom25",
-  "emergency_contact_2",
-  "column_break_9zjb6",
-  "relation_2",
   "attendance_and_leave_details",
   "attendance_device_id",
   "column_break_44",
@@ -156,7 +142,6 @@
    "oldfieldname": "naming_series",
    "oldfieldtype": "Select",
    "options": "HR-EMP-",
-   "reqd": 1,
    "set_only_once": 1
   },
   {
@@ -234,7 +219,6 @@
   {
    "fieldname": "employee_number",
    "fieldtype": "Data",
-   "hidden": 1,
    "in_global_search": 1,
    "label": "Employee Number",
    "oldfieldname": "employee_number",
@@ -535,17 +519,17 @@
   {
    "fieldname": "date_of_issue",
    "fieldtype": "Date",
-   "label": "Passport Date of Issue"
+   "label": "Date of Issue"
   },
   {
    "fieldname": "valid_upto",
    "fieldtype": "Date",
-   "label": "Passport Date of Expiry"
+   "label": "Valid Upto"
   },
   {
    "fieldname": "place_of_issue",
    "fieldtype": "Data",
-   "label": "Passport Place of Issue"
+   "label": "Place of Issue"
   },
   {
    "fieldname": "column_break6",
@@ -633,6 +617,7 @@
    "fieldtype": "Date",
    "label": "Relieving Date",
    "mandatory_depends_on": "eval:doc.status == \"Left\"",
+   "no_copy": 1,
    "oldfieldname": "relieving_date",
    "oldfieldtype": "Date"
   },
@@ -913,18 +898,54 @@
  "icon": "fa fa-user",
  "idx": 24,
  "image_field": "image",
+ "is_tree": 1,
  "links": [],
- "modified": "2023-09-05 14:39:10.374390",
+ "modified": "2024-01-03 17:36:20.984421",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee",
  "naming_rule": "By \"Naming Series\" field",
+ "nsm_parent_field": "reports_to",
  "owner": "Administrator",
- "permissions": [],
+ "permissions": [
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Employee"
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "import": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "import": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
  "search_fields": "employee_name",
  "show_name_in_global_search": 1,
- "sort_field": "user_id",
- "sort_order": "ASC",
+ "sort_field": "modified",
+ "sort_order": "DESC",
  "states": [],
  "title_field": "employee_name"
 }

@@ -7,17 +7,35 @@ from frappe.model.mapper import get_mapped_doc
 from frappe.utils import flt
 
 from erpnext.buying.doctype.purchase_order.purchase_order import is_subcontracting_order_created
+from erpnext.buying.doctype.purchase_order.purchase_order import update_status as update_po_status
 from erpnext.controllers.subcontracting_controller import SubcontractingController
-from erpnext.stock.stock_balance import get_ordered_qty, update_bin_qty
+from erpnext.stock.stock_balance import update_bin_qty
 from erpnext.stock.utils import get_bin
 
 
 class SubcontractingOrder(SubcontractingController):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+
+		self.status_updater = [
+			{
+				"source_dt": "Subcontracting Order Item",
+				"target_dt": "Material Request Item",
+				"join_field": "material_request_item",
+				"target_field": "ordered_qty",
+				"target_parent_dt": "Material Request",
+				"target_parent_field": "per_ordered",
+				"target_ref_field": "stock_qty",
+				"source_field": "qty",
+				"percent_join_field": "material_request",
+			}
+		]
+
 	def before_validate(self):
-		super(SubcontractingOrder, self).before_validate()
+		super().before_validate()
 
 	def validate(self):
-		super(SubcontractingOrder, self).validate()
+		super().validate()
 		self.validate_purchase_order_for_subcontracting()
 		self.validate_items()
 		self.validate_service_items()
@@ -26,11 +44,15 @@ class SubcontractingOrder(SubcontractingController):
 		self.reset_default_field_value("set_warehouse", "items", "warehouse")
 
 	def on_submit(self):
+		self.update_prevdoc_status()
+		self.update_requested_qty()
 		self.update_ordered_qty_for_subcontracting()
 		self.update_reserved_qty_for_subcontracting()
 		self.update_status()
 
 	def on_cancel(self):
+		self.update_prevdoc_status()
+		self.update_requested_qty()
 		self.update_ordered_qty_for_subcontracting()
 		self.update_reserved_qty_for_subcontracting()
 		self.update_status()
@@ -114,7 +136,30 @@ class SubcontractingOrder(SubcontractingController):
 			):
 				item_wh_list.append([item.item_code, item.warehouse])
 		for item_code, warehouse in item_wh_list:
-			update_bin_qty(item_code, warehouse, {"ordered_qty": get_ordered_qty(item_code, warehouse)})
+			update_bin_qty(item_code, warehouse, {"ordered_qty": self.get_ordered_qty(item_code, warehouse)})
+
+	@staticmethod
+	def get_ordered_qty(item_code, warehouse):
+		table = frappe.qb.DocType("Subcontracting Order")
+		child = frappe.qb.DocType("Subcontracting Order Item")
+
+		query = (
+			frappe.qb.from_(table)
+			.inner_join(child)
+			.on(table.name == child.parent)
+			.select((child.qty - child.received_qty) * child.conversion_factor)
+			.where(
+				(table.docstatus == 1)
+				& (child.item_code == item_code)
+				& (child.warehouse == warehouse)
+				& (child.qty > child.received_qty)
+				& (table.status != "Completed")
+			)
+		)
+
+		query = query.run()
+
+		return flt(query[0][0]) if query else 0
 
 	def update_reserved_qty_for_subcontracting(self):
 		for item in self.supplied_items:
@@ -139,7 +184,9 @@ class SubcontractingOrder(SubcontractingController):
 						"qty": si.fg_item_qty,
 						"stock_uom": item.stock_uom,
 						"bom": bom,
-					},
+						"material_request": si.material_request,
+						"material_request_item": si.material_request_item,
+					}
 				)
 			else:
 				frappe.throw(
@@ -163,7 +210,10 @@ class SubcontractingOrder(SubcontractingController):
 				elif self.per_received > 0 and self.per_received < 100:
 					status = "Partially Received"
 					for item in self.supplied_items:
-						if not item.returned_qty or (item.supplied_qty - item.consumed_qty - item.returned_qty) > 0:
+						if (
+							not item.returned_qty
+							or (item.supplied_qty - item.consumed_qty - item.returned_qty) > 0
+						):
 							break
 					else:
 						status = "Closed"
@@ -185,6 +235,9 @@ class SubcontractingOrder(SubcontractingController):
 			frappe.db.set_value(
 				"Subcontracting Order", self.name, "status", status, update_modified=update_modified
 			)
+
+			if status == "Closed":
+				update_po_status("Closed", self.purchase_order)
 
 
 @frappe.whitelist()

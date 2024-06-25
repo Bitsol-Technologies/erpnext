@@ -301,7 +301,8 @@
    "no_copy": 1,
    "options": "Delivery Note",
    "print_hide": 1,
-   "read_only": 1
+   "read_only": 1,
+   "search_index": 1
   },
   {
    "collapsible": 1,
@@ -679,7 +680,7 @@
   },
   {
    "fieldname": "other_charges_calculation",
-   "fieldtype": "Long Text",
+   "fieldtype": "Text Editor",
    "label": "Taxes and Charges Calculation",
    "no_copy": 1,
    "oldfieldtype": "HTML",
@@ -1252,6 +1253,7 @@
    "depends_on": "eval: doc.is_internal_customer",
    "fieldname": "set_target_warehouse",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "in_standard_filter": 1,
    "label": "Set Target Warehouse",
    "no_copy": 1,
@@ -1399,7 +1401,7 @@
  "idx": 146,
  "is_submittable": 1,
  "links": [],
- "modified": "2023-06-16 14:58:55.066602",
+ "modified": "2024-03-20 16:05:02.854990",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Delivery Note",
