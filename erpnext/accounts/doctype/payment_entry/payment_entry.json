@@ -108,7 +108,7 @@
    "fieldname": "naming_series",
    "fieldtype": "Select",
    "label": "Series",
-   "options": "ACC-PAY-.YYYY.-",
+   "options": "ACC-PAY-.posting_date.-",
    "print_hide": 1,
    "reqd": 1,
    "set_only_once": 1
@@ -749,7 +749,7 @@
    "table_fieldname": "payment_entries"
   }
  ],
- "modified": "2023-11-23 12:07:20.887885",
+ "modified": "2024-01-02 15:34:25.422796",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Payment Entry",
