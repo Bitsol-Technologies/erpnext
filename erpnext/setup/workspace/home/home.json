@@ -1,6 +1,11 @@
 {
- "charts": [],
- "content": "[{\"id\":\"aCk49ShVRs\",\"type\":\"onboarding\",\"data\":{\"onboarding_name\":\"Home\",\"col\":12}},{\"id\":\"kb3XPLg8lb\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\",\"col\":12}},{\"id\":\"nWd2KJPW8l\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Item\",\"col\":3}},{\"id\":\"snrzfbFr5Y\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Customer\",\"col\":3}},{\"id\":\"SHJKakmLLf\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Supplier\",\"col\":3}},{\"id\":\"CPxEyhaf3G\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Sales Invoice\",\"col\":3}},{\"id\":\"WU4F-HUcIQ\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Leaderboard\",\"col\":3}},{\"id\":\"d_KVM1gsf9\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"JVu8-FJZCu\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Reports &amp; Masters</b></span>\",\"col\":12}},{\"id\":\"JiuSi0ubOg\",\"type\":\"card\",\"data\":{\"card_name\":\"Accounting\",\"col\":4}},{\"id\":\"ji2Jlm3Q8i\",\"type\":\"card\",\"data\":{\"card_name\":\"Stock\",\"col\":4}},{\"id\":\"N61oiXpuwK\",\"type\":\"card\",\"data\":{\"card_name\":\"CRM\",\"col\":4}},{\"id\":\"6J0CVl1mPo\",\"type\":\"card\",\"data\":{\"card_name\":\"Data Import and Settings\",\"col\":4}}]",
+ "charts": [
+  {
+   "chart_name": "Leaves Balance Chart",
+   "label": "Total Leaves"
+  }
+ ],
+ "content": "[{\"id\":\"kb3XPLg8lb\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\",\"col\":12}},{\"id\":\"L7853FAEbu\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Check-in/Check-out\",\"col\":3}},{\"id\":\"fBkvOXpxYW\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Leave Request\",\"col\":3}},{\"id\":\"KxYMJ5nrQe\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Attendance\",\"col\":3}},{\"id\":\"nWd2KJPW8l\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Item\",\"col\":3}},{\"id\":\"snrzfbFr5Y\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Customer\",\"col\":3}},{\"id\":\"CPxEyhaf3G\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Sales Invoice\",\"col\":3}},{\"id\":\"SHJKakmLLf\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Supplier\",\"col\":3}},{\"id\":\"8EnAp49ypA\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Stats</b></span>\",\"col\":12}},{\"id\":\"WxCMGg5_B4\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Total Leaves\",\"col\":12}},{\"id\":\"JVu8-FJZCu\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Reports &amp; Masters</b></span>\",\"col\":12}},{\"id\":\"JiuSi0ubOg\",\"type\":\"card\",\"data\":{\"card_name\":\"Accounting\",\"col\":4}},{\"id\":\"ji2Jlm3Q8i\",\"type\":\"card\",\"data\":{\"card_name\":\"Stock\",\"col\":4}},{\"id\":\"N61oiXpuwK\",\"type\":\"card\",\"data\":{\"card_name\":\"CRM\",\"col\":4}},{\"id\":\"6J0CVl1mPo\",\"type\":\"card\",\"data\":{\"card_name\":\"Data Import and Settings\",\"col\":4}}]",
  "creation": "2020-01-23 13:46:38.833076",
  "custom_blocks": [],
  "docstatus": 0,
@@ -232,7 +237,7 @@
    "type": "Link"
   }
  ],
- "modified": "2023-05-24 14:47:18.765388",
+ "modified": "2023-08-30 15:05:14.579810",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Home",
@@ -243,8 +248,29 @@
  "quick_lists": [],
  "restrict_to_domain": "",
  "roles": [],
- "sequence_id": 1.0,
+ "sequence_id": 3.0,
  "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Attendance",
+   "link_to": "Attendance",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Leave Request",
+   "link_to": "Leave Application",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "List",
+   "label": "Check-in/Check-out",
+   "link_to": "Employee Checkin",
+   "type": "DocType"
+  },
   {
    "label": "Item",
    "link_to": "Item",

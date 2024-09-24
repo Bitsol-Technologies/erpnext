@@ -817,6 +817,82 @@
    "fieldname": "iban",
    "fieldtype": "Data",
    "label": "IBAN"
+  },
+  {
+   "fieldname": "section_break_5iqdl",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "emergency_name_2",
+   "fieldtype": "Data",
+   "label": "Emergency Contact Name 2"
+  },
+  {
+   "fieldname": "column_break_tom25",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "emergency_contact_2",
+   "fieldtype": "Data",
+   "label": "Emergency Contact Number 2",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "column_break_9zjb6",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "relation_2",
+   "fieldtype": "Data",
+   "label": "Relation 2"
+  },
+  {
+   "fieldname": "medical_allowance",
+   "fieldtype": "Currency",
+   "label": "Medical Allowance"
+  },
+  {
+   "fieldname": "medical_availed",
+   "fieldtype": "Currency",
+   "label": "Medical Availed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "medical_balance",
+   "fieldtype": "Currency",
+   "label": "Medical Balance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "medical_allowance_section",
+   "fieldtype": "Section Break",
+   "label": "Medical Allowance"
+  },
+  {
+   "fieldname": "wfh_approver",
+   "fieldtype": "Link",
+   "label": "WFH Approver",
+   "options": "User"
+  },
+  {
+   "fetch_from": "wfh_approver.full_name",
+   "fieldname": "wfh_approver_name",
+   "fieldtype": "Data",
+   "label": "WFH Approver Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "team_lead",
+   "fieldtype": "Link",
+   "label": "Team Lead",
+   "options": "User"
+  },
+  {
+   "fetch_from": "team_lead.full_name",
+   "fieldname": "team_lead_name",
+   "fieldtype": "Data",
+   "label": "Team Lead Name",
+   "read_only": 1
   }
  ],
  "icon": "fa fa-user",

@@ -26,6 +26,10 @@ class InactiveEmployeeStatusError(frappe.ValidationError):
 class Employee(NestedSet):
 	nsm_parent_field = "reports_to"
 
+	def before_save(self):
+		if self.medical_allowance and self.medical_availed:
+			self.set('medical_balance', self.medical_allowance - self.medical_availed)
+
 	def autoname(self):
 		set_name_by_naming_series(self)
 		self.employee = self.name

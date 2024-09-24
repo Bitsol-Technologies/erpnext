@@ -13,7 +13,8 @@
   "hide_currency_symbol",
   "disable_rounded_total",
   "disable_in_words",
-  "demo_company"
+  "year_start_date",
+  "year_end_date"
  ],
  "fields": [
   {
@@ -74,12 +75,16 @@
    "label": "Disable In Words"
   },
   {
-   "fieldname": "demo_company",
-   "fieldtype": "Link",
-   "hidden": 1,
-   "label": "Demo Company",
-   "options": "Company",
-   "read_only": 1
+   "default": "2023-01-01",
+   "fieldname": "year_start_date",
+   "fieldtype": "Date",
+   "label": "Default Start Date"
+  },
+  {
+   "default": "2023-12-31",
+   "fieldname": "year_end_date",
+   "fieldtype": "Date",
+   "label": "Default End Date"
   }
  ],
  "icon": "fa fa-cog",
@@ -87,7 +92,7 @@
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2023-07-01 19:45:00.323953",
+ "modified": "2023-08-08 06:50:23.800614",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Global Defaults",
