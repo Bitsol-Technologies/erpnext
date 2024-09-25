@@ -14,7 +14,8 @@
   "disable_rounded_total",
   "disable_in_words",
   "year_start_date",
-  "year_end_date"
+  "year_end_date",
+  "demo_company"
  ],
  "fields": [
   {
@@ -85,6 +86,14 @@
    "fieldname": "year_end_date",
    "fieldtype": "Date",
    "label": "Default End Date"
+  },
+  {
+   "fieldname": "demo_company",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Demo Company",
+   "options": "Company",
+   "read_only": 1
   }
  ],
  "icon": "fa fa-cog",
