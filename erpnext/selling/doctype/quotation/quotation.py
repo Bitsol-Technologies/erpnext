@@ -369,23 +369,24 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False):
 		if customer:
 			target.customer = customer.name
 			target.customer_name = customer.customer_name
+
+			# sales team
+			if not target.get("sales_team"):
+				for d in customer.get("sales_team") or []:
+					target.append(
+						"sales_team",
+						{
+							"sales_person": d.sales_person,
+							"allocated_percentage": d.allocated_percentage or None,
+							"commission_rate": d.commission_rate,
+						},
+					)
+
 		if source.referral_sales_partner:
 			target.sales_partner = source.referral_sales_partner
 			target.commission_rate = frappe.get_value(
 				"Sales Partner", source.referral_sales_partner, "commission_rate"
 			)
-
-		# sales team
-		if not target.get("sales_team"):
-			for d in customer.get("sales_team") or []:
-				target.append(
-					"sales_team",
-					{
-						"sales_person": d.sales_person,
-						"allocated_percentage": d.allocated_percentage or None,
-						"commission_rate": d.commission_rate,
-					},
-				)
 
 		target.flags.ignore_permissions = ignore_permissions
 		target.run_method("set_missing_values")
@@ -430,7 +431,7 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False):
 				"postprocess": update_item,
 				"condition": can_map_row,
 			},
-			"Sales Taxes and Charges": {"doctype": "Sales Taxes and Charges", "add_if_empty": True},
+			"Sales Taxes and Charges": {"doctype": "Sales Taxes and Charges", "reset_value": True},
 			"Sales Team": {"doctype": "Sales Team", "add_if_empty": True},
 			"Payment Schedule": {"doctype": "Payment Schedule", "add_if_empty": True},
 		},
@@ -495,7 +496,7 @@ def _make_sales_invoice(source_name, target_doc=None, ignore_permissions=False):
 				"postprocess": update_item,
 				"condition": lambda row: not row.is_alternative,
 			},
-			"Sales Taxes and Charges": {"doctype": "Sales Taxes and Charges", "add_if_empty": True},
+			"Sales Taxes and Charges": {"doctype": "Sales Taxes and Charges", "reset_value": True},
 			"Sales Team": {"doctype": "Sales Team", "add_if_empty": True},
 		},
 		target_doc,

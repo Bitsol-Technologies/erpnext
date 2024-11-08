@@ -121,6 +121,46 @@ class TestTaxWithholdingCategory(FrappeTestCase):
 		for d in reversed(invoices):
 			d.cancel()
 
+	def test_cumulative_threshold_with_party_ledger_amount_on_net_total(self):
+		invoices = []
+		frappe.db.set_value(
+			"Supplier", "Test TDS Supplier3", "tax_withholding_category", "Advance TDS Category"
+		)
+
+		# Invoice with tax and without exceeding single and cumulative thresholds
+		for _ in range(2):
+			pi = create_purchase_invoice(supplier="Test TDS Supplier3", rate=1000, do_not_save=True)
+			pi.apply_tds = 1
+			pi.append(
+				"taxes",
+				{
+					"category": "Total",
+					"charge_type": "Actual",
+					"account_head": "_Test Account VAT - _TC",
+					"cost_center": "Main - _TC",
+					"tax_amount": 500,
+					"description": "Test",
+					"add_deduct_tax": "Add",
+				},
+			)
+			pi.save()
+			pi.submit()
+			invoices.append(pi)
+
+		# Third Invoice exceeds single threshold and not exceeding cumulative threshold
+		pi1 = create_purchase_invoice(supplier="Test TDS Supplier3", rate=6000)
+		pi1.apply_tds = 1
+		pi1.save()
+		pi1.submit()
+		invoices.append(pi1)
+
+		# Cumulative threshold is 10,000
+		# Threshold calculation should be only on the third invoice
+		self.assertEqual(pi1.taxes[0].tax_amount, 800)
+
+		for d in reversed(invoices):
+			d.cancel()
+
 	def test_cumulative_threshold_tcs(self):
 		frappe.db.set_value(
 			"Customer", "Test TCS Customer", "tax_withholding_category", "Cumulative Threshold TCS"
@@ -204,6 +244,46 @@ class TestTaxWithholdingCategory(FrappeTestCase):
 		tcs_charged = sum([d.base_tax_amount for d in si2.taxes if d.account_head == "TCS - _TC"])
 		tcs_charged += sum([d.base_tax_amount for d in si3.taxes if d.account_head == "TCS - _TC"])
 		self.assertEqual(tcs_charged, 1500)
+
+		# cancel invoice and payments to avoid clashing
+		for d in reversed(vouchers):
+			d.reload()
+			d.cancel()
+
+	def test_tcs_on_allocated_advance_payments(self):
+		frappe.db.set_value(
+			"Customer", "Test TCS Customer", "tax_withholding_category", "Cumulative Threshold TCS"
+		)
+
+		vouchers = []
+
+		# create advance payment
+		pe = create_payment_entry(
+			payment_type="Receive", party_type="Customer", party="Test TCS Customer", paid_amount=30000
+		)
+		pe.paid_from = "Debtors - _TC"
+		pe.paid_to = "Cash - _TC"
+		pe.submit()
+		vouchers.append(pe)
+
+		si = create_sales_invoice(customer="Test TCS Customer", rate=50000)
+		advances = si.get_advance_entries()
+		si.append(
+			"advances",
+			{
+				"reference_type": advances[0].reference_type,
+				"reference_name": advances[0].reference_name,
+				"advance_amount": advances[0].amount,
+				"allocated_amount": 30000,
+			},
+		)
+		si.submit()
+		vouchers.append(si)
+
+		# assert tax collection on total invoice ,advance payment adjusted should be excluded.
+		tcs_charged = sum([d.base_tax_amount for d in si.taxes if d.account_head == "TCS - _TC"])
+		# tcs = (inv amt)50000+(adv amt)30000-(adv adj) 30000 - threshold(30000) * rate 10%
+		self.assertEqual(tcs_charged, 2000)
 
 		# cancel invoice and payments to avoid clashing
 		for d in reversed(vouchers):

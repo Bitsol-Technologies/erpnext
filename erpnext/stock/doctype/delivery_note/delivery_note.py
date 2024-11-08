@@ -1020,7 +1020,6 @@ def make_sales_invoice(source_name, target_doc=None, args=None):
 					"parent": "delivery_note",
 					"so_detail": "so_detail",
 					"against_sales_order": "sales_order",
-					"serial_no": "serial_no",
 					"cost_center": "cost_center",
 				},
 				"postprocess": update_item,
@@ -1030,7 +1029,7 @@ def make_sales_invoice(source_name, target_doc=None, args=None):
 			},
 			"Sales Taxes and Charges": {
 				"doctype": "Sales Taxes and Charges",
-				"add_if_empty": True,
+				"reset_value": not (args and args.get("merge_taxes")),
 				"ignore": args.get("merge_taxes") if args else 0,
 			},
 			"Sales Team": {
@@ -1188,18 +1187,19 @@ def make_shipment(source_name, target_doc=None):
 		# As we are using session user details in the pickup_contact then pickup_contact_person will be session user
 		target.pickup_contact_person = frappe.session.user
 
-		contact = frappe.db.get_value(
-			"Contact", source.contact_person, ["email_id", "phone", "mobile_no"], as_dict=1
-		)
-		delivery_contact_display = f"{source.contact_display}"
-		if contact:
-			if contact.email_id:
-				delivery_contact_display += "<br>" + contact.email_id
-			if contact.phone:
-				delivery_contact_display += "<br>" + contact.phone
-			if contact.mobile_no and not contact.phone:
-				delivery_contact_display += "<br>" + contact.mobile_no
-		target.delivery_contact = delivery_contact_display
+		if source.contact_person:
+			contact = frappe.db.get_value(
+				"Contact", source.contact_person, ["email_id", "phone", "mobile_no"], as_dict=1
+			)
+			delivery_contact_display = f"{source.contact_display}"
+			if contact:
+				if contact.email_id:
+					delivery_contact_display += "<br>" + contact.email_id
+				if contact.phone:
+					delivery_contact_display += "<br>" + contact.phone
+				if contact.mobile_no and not contact.phone:
+					delivery_contact_display += "<br>" + contact.mobile_no
+			target.delivery_contact = delivery_contact_display
 
 		if source.shipping_address_name:
 			target.delivery_address_name = source.shipping_address_name
