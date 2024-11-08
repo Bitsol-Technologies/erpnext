@@ -452,9 +452,14 @@
  "icon": "fa fa-puzzle-piece",
  "idx": 29,
  "index_web_pages_for_search": 1,
- "links": [],
+ "links": [
+  {
+   "link_doctype": "Project Assignment",
+   "link_fieldname": "project"
+  }
+ ],
  "max_attachments": 4,
- "modified": "2024-04-24 10:56:16.001032",
+ "modified": "2024-10-21 12:09:50.921454",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Project",
