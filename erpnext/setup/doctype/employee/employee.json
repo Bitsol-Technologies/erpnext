@@ -30,6 +30,7 @@
   "user_id",
   "create_user",
   "create_user_permission",
+  "role_profile",
   "company_details_section",
   "company",
   "department",
@@ -101,6 +102,20 @@
   "external_work_history",
   "history_in_company",
   "internal_work_history",
+  "background_check",
+  "ability",
+  "conduct",
+  "attitude",
+  "prev_reason_for_leaving",
+  "rehire_applicant",
+  "reason_for_not_hiring",
+  "column_break_qdfk",
+  "efficiency",
+  "attendance",
+  "punctuality",
+  "other_information",
+  "verified_by_name",
+  "verified_by_designation",
   "exit",
   "resignation_letter_date",
   "relieving_date",
@@ -117,7 +132,21 @@
   "lft",
   "rgt",
   "old_parent",
-  "connections_tab"
+  "connections_tab",
+  "section_break_5iqdl",
+  "emergency_name_2",
+  "column_break_tom25",
+  "emergency_contact_2",
+  "column_break_9zjb6",
+  "relation_2",
+  "medical_allowance",
+  "medical_availed",
+  "medical_balance",
+  "medical_allowance_section",
+  "wfh_approver",
+  "wfh_approver_name",
+  "team_lead",
+  "team_lead_name"
  ],
  "fields": [
   {
@@ -481,7 +510,8 @@
    "fieldname": "permanent_accommodation_type",
    "fieldtype": "Select",
    "label": "Permanent Address Is",
-   "options": "\nRented\nOwned"
+   "options": "\nRented\nOwned",
+   "permlevel": 1
   },
   {
    "fieldname": "permanent_address",
@@ -492,7 +522,8 @@
    "fieldname": "current_accommodation_type",
    "fieldtype": "Select",
    "label": "Current Address Is",
-   "options": "\nRented\nOwned"
+   "options": "\nRented\nOwned",
+   "permlevel": 1
   },
   {
    "fieldname": "current_address",
@@ -893,6 +924,92 @@
    "fieldtype": "Data",
    "label": "Team Lead Name",
    "read_only": 1
+  },
+  {
+   "fetch_from": "user_id.role_profile_name",
+   "fieldname": "role_profile",
+   "fieldtype": "Data",
+   "label": "User Role Profile",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "description": "Applicant rating based on their previous employment.",
+   "fieldname": "background_check",
+   "fieldtype": "Section Break",
+   "label": "Background Check"
+  },
+  {
+   "fieldname": "ability",
+   "fieldtype": "Select",
+   "label": "Ability",
+   "options": "Good\nFair\nPoor"
+  },
+  {
+   "fieldname": "conduct",
+   "fieldtype": "Select",
+   "label": "Conduct",
+   "options": "Good\nFair\nPoor"
+  },
+  {
+   "fieldname": "attitude",
+   "fieldtype": "Select",
+   "label": "Attitude",
+   "options": "Good\nFair\nPoor"
+  },
+  {
+   "fieldname": "prev_reason_for_leaving",
+   "fieldtype": "Small Text",
+   "label": "Reason For Leaving?"
+  },
+  {
+   "fieldname": "column_break_qdfk",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "efficiency",
+   "fieldtype": "Select",
+   "label": "Efficiency",
+   "options": "Good\nFair\nPoor"
+  },
+  {
+   "fieldname": "attendance",
+   "fieldtype": "Select",
+   "label": "Attendance",
+   "options": "Good\nFair\nPoor"
+  },
+  {
+   "fieldname": "punctuality",
+   "fieldtype": "Select",
+   "label": "Punctuality",
+   "options": "Good\nFair\nPoor"
+  },
+  {
+   "default": "0",
+   "fieldname": "rehire_applicant",
+   "fieldtype": "Check",
+   "label": "Would you rehire the applicant?"
+  },
+  {
+   "depends_on": "eval:doc.rehire_applicant!=1",
+   "fieldname": "reason_for_not_hiring",
+   "fieldtype": "Small Text",
+   "label": "If not, please give reasons?"
+  },
+  {
+   "fieldname": "other_information",
+   "fieldtype": "Small Text",
+   "label": "Any Other Information:"
+  },
+  {
+   "fieldname": "verified_by_name",
+   "fieldtype": "Data",
+   "label": "Verified By Name"
+  },
+  {
+   "fieldname": "verified_by_designation",
+   "fieldtype": "Data",
+   "label": "Designation"
   }
  ],
  "icon": "fa fa-user",
@@ -900,7 +1017,7 @@
  "image_field": "image",
  "is_tree": 1,
  "links": [],
- "modified": "2024-01-03 17:36:20.984421",
+ "modified": "2024-11-06 11:33:42.904824",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee",
@@ -934,6 +1051,30 @@
    "email": 1,
    "export": 1,
    "import": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Agent",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "permlevel": 1,
    "print": 1,
    "read": 1,
    "report": 1,

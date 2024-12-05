@@ -62,7 +62,33 @@
   "day_to_send",
   "weekly_time_to_send",
   "column_break_45",
-  "message"
+  "message",
+  "additional_details",
+  "source",
+  "lead",
+  "redacted_name",
+  "using_on_website",
+  "impact_on_media",
+  "great_ux",
+  "industry",
+  "is_live",
+  "tools_and_technologies",
+  "key_features",
+  "platform",
+  "design_file_link",
+  "drive_link",
+  "startup",
+  "client_name",
+  "client_email",
+  "column_break_inwv",
+  "dev_credentials",
+  "screenshot_url",
+  "actual_description",
+  "redacted_description_for_resumes",
+  "testimonials",
+  "project_notes",
+  "staff_augmentation",
+  "code_repo_link"
  ],
  "fields": [
   {
@@ -447,6 +473,145 @@
    "print_hide": 1,
    "reqd": 1,
    "set_only_once": 1
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "label": "Source"
+  },
+  {
+   "fieldname": "lead",
+   "fieldtype": "Link",
+   "label": "PM/Lead",
+   "options": "Employee"
+  },
+  {
+   "fieldname": "redacted_name",
+   "fieldtype": "Data",
+   "label": "Redacted Name"
+  },
+  {
+   "fieldname": "using_on_website",
+   "fieldtype": "Select",
+   "label": "Using On Website",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "impact_on_media",
+   "fieldtype": "Select",
+   "label": "Imapct On Media",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "great_ux",
+   "fieldtype": "Select",
+   "label": "Great UX",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "industry",
+   "fieldtype": "Select",
+   "label": "Category/Industry",
+   "options": "Ecommerce\nSocial Media"
+  },
+  {
+   "fieldname": "is_live",
+   "fieldtype": "Select",
+   "label": "Live Web",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "tools_and_technologies",
+   "fieldtype": "Table MultiSelect",
+   "label": "Tools & Technologies",
+   "options": "Project Tools and Technologies"
+  },
+  {
+   "fieldname": "key_features",
+   "fieldtype": "Small Text",
+   "label": "Key Features"
+  },
+  {
+   "fieldname": "platform",
+   "fieldtype": "Link",
+   "label": "Platform",
+   "options": "Project Type"
+  },
+  {
+   "fieldname": "design_file_link",
+   "fieldtype": "Data",
+   "label": "Design File Link"
+  },
+  {
+   "fieldname": "drive_link",
+   "fieldtype": "Data",
+   "label": "Drive Link"
+  },
+  {
+   "fieldname": "startup",
+   "fieldtype": "Select",
+   "label": "Startup",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "client_name",
+   "fieldtype": "Data",
+   "label": "Client Name"
+  },
+  {
+   "fieldname": "client_email",
+   "fieldtype": "Data",
+   "label": "Client Email"
+  },
+  {
+   "fieldname": "column_break_inwv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "dev_credentials",
+   "fieldtype": "Small Text",
+   "label": "Dev Credentials"
+  },
+  {
+   "fieldname": "screenshot_url",
+   "fieldtype": "Data",
+   "label": "Screenshot URL"
+  },
+  {
+   "fieldname": "actual_description",
+   "fieldtype": "Small Text",
+   "label": "Actual Description"
+  },
+  {
+   "fieldname": "redacted_description_for_resumes",
+   "fieldtype": "Small Text",
+   "label": "Redacted Description For Resumes"
+  },
+  {
+   "fieldname": "testimonials",
+   "fieldtype": "Small Text",
+   "label": "Testimonials"
+  },
+  {
+   "fieldname": "project_notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "staff_augmentation",
+   "fieldtype": "Select",
+   "label": "Staff Augmentation",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "code_repo_link",
+   "fieldtype": "Data",
+   "label": "Code Repo Link"
+  },
+  {
+   "fieldname": "additional_details",
+   "fieldtype": "Tab Break",
+   "label": "Additional Details"
   }
  ],
  "icon": "fa fa-puzzle-piece",
@@ -459,7 +624,7 @@
   }
  ],
  "max_attachments": 4,
- "modified": "2024-10-21 12:09:50.921454",
+ "modified": "2024-11-19 17:00:40.391955",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Project",
