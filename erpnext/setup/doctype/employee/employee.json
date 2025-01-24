@@ -1016,8 +1016,13 @@
  "idx": 24,
  "image_field": "image",
  "is_tree": 1,
- "links": [],
- "modified": "2024-11-06 11:33:42.904824",
+ "links": [
+  {
+   "link_doctype": "Project Assignment",
+   "link_fieldname": "employee"
+  }
+ ],
+ "modified": "2024-12-11 10:54:52.929461",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee",
