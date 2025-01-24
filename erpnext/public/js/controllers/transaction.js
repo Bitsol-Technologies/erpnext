@@ -302,12 +302,16 @@ erpnext.TransactionController = class TransactionController extends erpnext.taxe
 			return;
 		}
 
+		let show_qc_button = true;
+		if (["Sales Invoice", "Purchase Invoice"].includes(this.frm.doc.doctype)) {
+			show_qc_button = this.frm.doc.update_stock;
+		}
+
 		const me = this;
-		if (!this.frm.is_new() && this.frm.doc.docstatus === 0 && frappe.model.can_create("Quality Inspection")) {
+		if (!this.frm.is_new() && this.frm.doc.docstatus === 0 && frappe.model.can_create("Quality Inspection") && show_qc_button) {
 			this.frm.add_custom_button(__("Quality Inspection(s)"), () => {
 				me.make_quality_inspection();
 			}, __("Create"));
-			this.frm.page.set_inner_btn_group_as_primary(__('Create'));
 		}
 
 		const inspection_type = ["Purchase Receipt", "Purchase Invoice", "Subcontracting Receipt"].includes(this.frm.doc.doctype)
@@ -575,6 +579,8 @@ erpnext.TransactionController = class TransactionController extends erpnext.taxe
 							child_doctype: item.doctype,
 							child_docname: item.name,
 							is_old_subcontracting_flow: me.frm.doc.is_old_subcontracting_flow,
+							use_serial_batch_fields: item.use_serial_batch_fields,
+							serial_and_batch_bundle: item.serial_and_batch_bundle,
 						}
 					},
 
@@ -959,7 +965,6 @@ erpnext.TransactionController = class TransactionController extends erpnext.taxe
 				let is_drop_ship = me.frm.doc.items.some(item => item.delivered_by_supplier);
 
 				if (!is_drop_ship) {
-					console.log('get_shipping_address');
 					erpnext.utils.get_shipping_address(this.frm, function() {
 						set_party_account(set_pricing);
 					});
@@ -1822,18 +1827,16 @@ erpnext.TransactionController = class TransactionController extends erpnext.taxe
 
 	apply_rule_on_other_items(args) {
 		const me = this;
-		const fields = ["discount_percentage", "pricing_rules", "discount_amount", "rate"];
+		const fields = ["pricing_rules"];
 
 		for(var k in args) {
 			let data = args[k];
 
 			if (data && data.apply_rule_on_other_items && JSON.parse(data.apply_rule_on_other_items)) {
+				fields.push(frappe.scrub(data.pricing_rule_for))
 				me.frm.doc.items.forEach(d => {
-					if (in_list(JSON.parse(data.apply_rule_on_other_items), d[data.apply_rule_on]) && d.item_code === data.item_code) {
+					if (JSON.parse(data.apply_rule_on_other_items).includes(d[data.apply_rule_on])) {
 						for(var k in data) {
-							if (data.pricing_rule_for == "Discount Percentage" && data.apply_rule_on_other_items && k == "discount_amount") {
-								continue;
-							}
 
 							if (in_list(fields, k) && data[k] && (data.price_or_product_discount === 'Price' || k === 'pricing_rules')) {
 								frappe.model.set_value(d.doctype, d.name, k, data[k]);
@@ -2310,6 +2313,12 @@ erpnext.TransactionController = class TransactionController extends erpnext.taxe
 						fieldname: "batch_no",
 						label: __("Batch No"),
 						hidden: true
+					},
+					{
+						fieldtype: "Data",
+						fieldname: "child_row_reference",
+						label: __("Child Row Reference"),
+						hidden: true
 					}
 				]
 			}
@@ -2353,14 +2362,14 @@ erpnext.TransactionController = class TransactionController extends erpnext.taxe
 			if (this.has_inspection_required(item)) {
 				let dialog_items = dialog.fields_dict.items;
 				dialog_items.df.data.push({
-					"docname": item.name,
 					"item_code": item.item_code,
 					"item_name": item.item_name,
 					"qty": item.qty,
 					"description": item.description,
 					"serial_no": item.serial_no,
 					"batch_no": item.batch_no,
-					"sample_size": item.sample_quantity
+					"sample_size": item.sample_quantity,
+					"child_row_reference": item.name,
 				});
 				dialog_items.grid.refresh();
 			}

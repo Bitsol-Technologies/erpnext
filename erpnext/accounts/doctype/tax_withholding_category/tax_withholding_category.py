@@ -156,6 +156,9 @@ def get_party_tax_withholding_details(inv, tax_withholding_category=None):
 		}
 	)
 
+	if cint(tax_details.round_off_tax_amount):
+		inv.round_off_applicable_accounts_for_tax_withholding = tax_details.account_head
+
 	if inv.doctype == "Purchase Invoice":
 		return tax_row, tax_deducted_on_advances, voucher_wise_amount
 	else:
@@ -247,14 +250,14 @@ def get_tax_row_for_tds(tax_details, tax_amount):
 	}
 
 
-def get_lower_deduction_certificate(company, tax_details, pan_no):
+def get_lower_deduction_certificate(company, posting_date, tax_details, pan_no):
 	ldc_name = frappe.db.get_value(
 		"Lower Deduction Certificate",
 		{
 			"pan_no": pan_no,
 			"tax_withholding_category": tax_details.tax_withholding_category,
-			"valid_from": (">=", tax_details.from_date),
-			"valid_upto": ("<=", tax_details.to_date),
+			"valid_from": ("<=", posting_date),
+			"valid_upto": (">=", posting_date),
 			"company": company,
 		},
 		"name",
@@ -302,7 +305,11 @@ def get_tax_amount(party_type, parties, inv, tax_details, posting_date, pan_no=N
 	tax_amount = 0
 
 	if party_type == "Supplier":
-		ldc = get_lower_deduction_certificate(inv.company, tax_details, pan_no)
+		# if tds account is changed.
+		if not tax_deducted:
+			tax_deducted = is_tax_deducted_on_the_basis_of_inv(vouchers)
+
+		ldc = get_lower_deduction_certificate(inv.company, posting_date, tax_details, pan_no)
 		if tax_deducted:
 			net_total = inv.tax_withholding_net_total
 			if ldc:
@@ -334,6 +341,18 @@ def get_tax_amount(party_type, parties, inv, tax_details, posting_date, pan_no=N
 		tax_amount = normal_round(tax_amount)
 
 	return tax_amount, tax_deducted, tax_deducted_on_advances, voucher_wise_amount
+
+
+def is_tax_deducted_on_the_basis_of_inv(vouchers):
+	return frappe.db.exists(
+		"Purchase Taxes and Charges",
+		{
+			"parent": ["in", vouchers],
+			"is_tax_withholding_account": 1,
+			"parenttype": "Purchase Invoice",
+			"base_tax_amount_after_discount_amount": [">", 0],
+		},
+	)
 
 
 def get_invoice_vouchers(parties, tax_details, company, party_type="Supplier"):
@@ -539,7 +558,7 @@ def get_tds_amount(ldc, parties, inv, tax_details, vouchers):
 	)
 
 	supp_credit_amt = supp_jv_credit_amt
-	supp_credit_amt += inv.tax_withholding_net_total
+	supp_credit_amt += inv.get("tax_withholding_net_total", 0)
 
 	for type in payment_entry_amounts:
 		if type.payment_type == "Pay":
@@ -551,13 +570,15 @@ def get_tds_amount(ldc, parties, inv, tax_details, vouchers):
 	cumulative_threshold = tax_details.get("cumulative_threshold", 0)
 
 	if inv.doctype != "Payment Entry":
-		tax_withholding_net_total = inv.base_tax_withholding_net_total
+		tax_withholding_net_total = inv.get("base_tax_withholding_net_total", 0)
 	else:
-		tax_withholding_net_total = inv.tax_withholding_net_total
+		tax_withholding_net_total = inv.get("tax_withholding_net_total", 0)
 
-	if (threshold and tax_withholding_net_total >= threshold) or (
+	has_cumulative_threshold_breached = (
 		cumulative_threshold and (supp_credit_amt + supp_inv_credit_amt) >= cumulative_threshold
-	):
+	)
+
+	if (threshold and tax_withholding_net_total >= threshold) or (has_cumulative_threshold_breached):
 		# Get net total again as TDS is calculated on net total
 		# Grand is used to just check for threshold breach
 		net_total = (
@@ -565,9 +586,7 @@ def get_tds_amount(ldc, parties, inv, tax_details, vouchers):
 		)
 		supp_credit_amt += net_total
 
-		if (cumulative_threshold and supp_credit_amt >= cumulative_threshold) and cint(
-			tax_details.tax_on_excess_amount
-		):
+		if has_cumulative_threshold_breached and cint(tax_details.tax_on_excess_amount):
 			supp_credit_amt = net_total + tax_withholding_net_total - cumulative_threshold
 
 		if ldc and is_valid_certificate(ldc, inv.get("posting_date") or inv.get("transaction_date"), 0):

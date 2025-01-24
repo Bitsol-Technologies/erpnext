@@ -1838,6 +1838,52 @@ class TestPurchaseInvoice(FrappeTestCase, StockTestMixin):
 
 		frappe.db.set_single_value("Buying Settings", "maintain_same_rate", 1)
 
+	def test_adjust_incoming_rate_for_rejected_item(self):
+		frappe.db.set_single_value("Buying Settings", "maintain_same_rate", 0)
+
+		frappe.db.set_single_value("Buying Settings", "set_landed_cost_based_on_purchase_invoice_rate", 1)
+
+		# Cost of Item is zero in Purchase Receipt
+		pr = make_purchase_receipt(qty=1, rejected_qty=1, rate=0)
+
+		stock_value_difference = frappe.db.get_value(
+			"Stock Ledger Entry",
+			{"voucher_type": "Purchase Receipt", "voucher_no": pr.name},
+			"stock_value_difference",
+		)
+		self.assertEqual(stock_value_difference, 0)
+
+		pi = create_purchase_invoice_from_receipt(pr.name)
+		for row in pi.items:
+			row.qty = 1
+			row.rate = 150
+
+		pi.save()
+		pi.submit()
+
+		stock_value_difference = frappe.db.get_value(
+			"Stock Ledger Entry",
+			{"voucher_type": "Purchase Receipt", "voucher_no": pr.name, "warehouse": pi.items[0].warehouse},
+			"stock_value_difference",
+		)
+		self.assertEqual(stock_value_difference, 150)
+
+		stock_value_difference = frappe.db.get_value(
+			"Stock Ledger Entry",
+			{
+				"voucher_type": "Purchase Receipt",
+				"voucher_no": pr.name,
+				"warehouse": pi.items[0].rejected_warehouse,
+			},
+			"stock_value_difference",
+		)
+
+		self.assertFalse(stock_value_difference)
+
+		frappe.db.set_single_value("Buying Settings", "set_landed_cost_based_on_purchase_invoice_rate", 0)
+
+		frappe.db.set_single_value("Buying Settings", "maintain_same_rate", 1)
+
 	def test_item_less_defaults(self):
 		pi = frappe.new_doc("Purchase Invoice")
 		pi.supplier = "_Test Supplier"
@@ -2447,6 +2493,34 @@ class TestPurchaseInvoice(FrappeTestCase, StockTestMixin):
 		]
 		self.assertEqual(len(actual), 3)
 		self.assertEqual(expected, actual)
+
+	def test_invoice_against_returned_pr(self):
+		from erpnext.stock.doctype.item.test_item import make_item
+		from erpnext.stock.doctype.purchase_receipt.purchase_receipt import (
+			make_purchase_invoice as make_purchase_invoice_from_pr,
+		)
+		from erpnext.stock.doctype.purchase_receipt.purchase_receipt import (
+			make_purchase_return_against_rejected_warehouse,
+		)
+
+		item = make_item("_Test Item For Invoice Against Returned PR", properties={"is_stock_item": 1}).name
+
+		original_value = frappe.db.get_single_value(
+			"Buying Settings", "bill_for_rejected_quantity_in_purchase_invoice"
+		)
+		frappe.db.set_single_value("Buying Settings", "bill_for_rejected_quantity_in_purchase_invoice", 0)
+
+		pr = make_purchase_receipt(item_code=item, qty=5, rejected_qty=5, rate=100)
+		pr_return = make_purchase_return_against_rejected_warehouse(pr.name)
+		pr_return.submit()
+
+		pi = make_purchase_invoice_from_pr(pr.name)
+		pi.save()
+		self.assertEqual(pi.items[0].qty, 5.0)
+
+		frappe.db.set_single_value(
+			"Buying Settings", "bill_for_rejected_quantity_in_purchase_invoice", original_value
+		)
 
 
 def set_advance_flag(company, flag, default_account):

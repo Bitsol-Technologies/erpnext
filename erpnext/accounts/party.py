@@ -676,7 +676,7 @@ def set_taxes(
 ):
 	from erpnext.accounts.doctype.tax_rule.tax_rule import get_party_details, get_tax_template
 
-	args = {party_type.lower(): party, "company": company}
+	args = {frappe.scrub(party_type): party, "company": company}
 
 	if tax_category:
 		args["tax_category"] = tax_category
@@ -696,10 +696,10 @@ def set_taxes(
 	else:
 		args.update(get_party_details(party, party_type))
 
-	if party_type in ("Customer", "Lead", "Prospect"):
+	if party_type in ("Customer", "Lead", "Prospect", "CRM Deal"):
 		args.update({"tax_type": "Sales"})
 
-		if party_type in ["Lead", "Prospect"]:
+		if party_type in ["Lead", "Prospect", "CRM Deal"]:
 			args["customer"] = None
 			del args[frappe.scrub(party_type)]
 	else:
@@ -757,6 +757,20 @@ def validate_party_frozen_disabled(party_type, party_name):
 		elif party_type == "Employee":
 			if frappe.db.get_value("Employee", party_name, "status") != "Active":
 				frappe.msgprint(_("{0} {1} is not active").format(party_type, party_name), alert=True)
+
+
+def validate_account_party_type(self):
+	if self.is_cancelled:
+		return
+
+	if self.party_type and self.party:
+		account_type = frappe.get_cached_value("Account", self.account, "account_type")
+		if account_type and (account_type not in ["Receivable", "Payable"]):
+			frappe.throw(
+				_(
+					"Party Type and Party can only be set for Receivable / Payable account<br><br>" "{0}"
+				).format(self.account)
+			)
 
 
 def get_dashboard_info(party_type, party, loyalty_program=None):

@@ -637,6 +637,7 @@ class GrossProfitGenerator:
 				packed_item_row = row.copy()
 				packed_item_row.warehouse = packed_item.warehouse
 				packed_item_row.qty = packed_item.total_qty * -1
+				packed_item_row.serial_and_batch_bundle = packed_item.serial_and_batch_bundle
 				buying_amount += self.get_buying_amount(packed_item_row, packed_item.item_code)
 
 		return flt(buying_amount, self.currency_precision)
@@ -728,6 +729,7 @@ class GrossProfitGenerator:
 					"voucher_no": row.parent,
 					"allow_zero_valuation": True,
 					"company": self.filters.company,
+					"item_code": item_code,
 				}
 			)
 
@@ -748,12 +750,13 @@ class GrossProfitGenerator:
 			.inner_join(purchase_invoice)
 			.on(purchase_invoice.name == purchase_invoice_item.parent)
 			.select(
-				purchase_invoice.name,
 				purchase_invoice_item.base_rate / purchase_invoice_item.conversion_factor,
 			)
 			.where(purchase_invoice.docstatus == 1)
 			.where(purchase_invoice.posting_date <= self.filters.to_date)
 			.where(purchase_invoice_item.item_code == item_code)
+			.where(purchase_invoice.is_return == 0)
+			.where(purchase_invoice_item.parenttype == "Purchase Invoice")
 		)
 
 		if row.project:
@@ -790,7 +793,10 @@ class GrossProfitGenerator:
 			"""
 
 		if self.filters.group_by == "Sales Person":
-			sales_person_cols = ", sales.sales_person, sales.allocated_amount, sales.incentives"
+			sales_person_cols = """, sales.sales_person,
+				sales.allocated_percentage * `tabSales Invoice Item`.base_net_amount / 100 as allocated_amount,
+				sales.incentives
+			"""
 			sales_team_table = "left join `tabSales Team` sales on sales.parent = `tabSales Invoice`.name"
 		else:
 			sales_person_cols = ""
@@ -993,6 +999,7 @@ class GrossProfitGenerator:
 				"is_return": row.is_return,
 				"cost_center": row.cost_center,
 				"invoice": row.parent,
+				"serial_and_batch_bundle": row.serial_and_batch_bundle,
 			}
 		)
 
@@ -1044,6 +1051,7 @@ class GrossProfitGenerator:
 				pki.rate,
 				(pki.rate * pki.qty).as_("base_amount"),
 				pki.parent_detail_docname,
+				pki.serial_and_batch_bundle,
 			)
 			.where(pki.docstatus == 1)
 		)

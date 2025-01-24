@@ -351,7 +351,10 @@ doc_events = {
 			"erpnext.support.doctype.service_level_agreement.service_level_agreement.on_communication_update",
 			"erpnext.support.doctype.issue.issue.set_first_response_time",
 		],
-		"after_insert": "erpnext.crm.utils.link_communications_with_prospect",
+		"after_insert": [
+			"erpnext.crm.utils.link_communications_with_prospect",
+			"erpnext.crm.utils.update_modified_timestamp",
+		],
 	},
 	"Event": {
 		"after_insert": "erpnext.crm.utils.link_events_with_prospect",
@@ -412,7 +415,6 @@ scheduler_events = {
 	"cron": {
 		"0/15 * * * *": [
 			"erpnext.manufacturing.doctype.bom_update_log.bom_update_log.resume_bom_cost_update_jobs",
-			"erpnext.accounts.doctype.process_payment_reconciliation.process_payment_reconciliation.trigger_reconciliation_for_queued_docs",
 		],
 		"0/30 * * * *": [
 			"erpnext.utilities.doctype.video.video.update_youtube_data",

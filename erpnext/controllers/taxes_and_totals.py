@@ -18,7 +18,7 @@ from erpnext.controllers.accounts_controller import (
 	validate_inclusive_tax,
 	validate_taxes_and_charges,
 )
-from erpnext.stock.get_item_details import _get_item_tax_template
+from erpnext.stock.get_item_details import _get_item_tax_template, get_item_tax_map
 from erpnext.utilities.regional import temporary_flag
 
 
@@ -29,6 +29,11 @@ class calculate_taxes_and_totals:
 		frappe.flags.round_row_wise_tax = frappe.db.get_single_value(
 			"Accounts Settings", "round_row_wise_tax"
 		)
+
+		if doc.get("round_off_applicable_accounts_for_tax_withholding"):
+			frappe.flags.round_off_applicable_accounts.append(
+				doc.round_off_applicable_accounts_for_tax_withholding
+			)
 
 		self._items = self.filter_rows() if self.doc.doctype == "Quotation" else self.doc.get("items")
 
@@ -70,6 +75,7 @@ class calculate_taxes_and_totals:
 		self.validate_conversion_rate()
 		self.calculate_item_values()
 		self.validate_item_tax_template()
+		self.update_item_tax_map()
 		self.initialize_taxes()
 		self.determine_exclusive_rate()
 		self.calculate_net_total()
@@ -133,6 +139,14 @@ class calculate_taxes_and_totals:
 								item.idx, frappe.bold(item.item_code)
 							)
 						)
+
+	def update_item_tax_map(self):
+		for item in self.doc.items:
+			item.item_tax_rate = get_item_tax_map(
+				company=self.doc.get("company"),
+				item_tax_template=item.item_tax_template,
+				as_json=True,
+			)
 
 	def validate_conversion_rate(self):
 		# validate conversion rate
