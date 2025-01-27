@@ -268,6 +268,7 @@
    "label": "Date of Birth",
    "oldfieldname": "date_of_birth",
    "oldfieldtype": "Date",
+   "permlevel": 1,
    "reqd": 1
   },
   {
@@ -634,7 +635,8 @@
    "fieldname": "external_work_history",
    "fieldtype": "Table",
    "label": "External Work History",
-   "options": "Employee External Work History"
+   "options": "Employee External Work History",
+   "permlevel": 1
   },
   {
    "collapsible": 1,
@@ -647,7 +649,8 @@
    "fieldname": "internal_work_history",
    "fieldtype": "Table",
    "label": "Internal Work History",
-   "options": "Employee Internal Work History"
+   "options": "Employee Internal Work History",
+   "permlevel": 1
   },
   {
    "collapsible": 1,
@@ -661,7 +664,8 @@
    "fieldtype": "Date",
    "label": "Resignation Letter Date",
    "oldfieldname": "resignation_letter_date",
-   "oldfieldtype": "Date"
+   "oldfieldtype": "Date",
+   "permlevel": 1
   },
   {
    "fieldname": "relieving_date",
@@ -670,14 +674,16 @@
    "mandatory_depends_on": "eval:doc.status == \"Left\"",
    "no_copy": 1,
    "oldfieldname": "relieving_date",
-   "oldfieldtype": "Date"
+   "oldfieldtype": "Date",
+   "permlevel": 1
   },
   {
    "fieldname": "reason_for_leaving",
    "fieldtype": "Small Text",
    "label": "Reason for Leaving",
    "oldfieldname": "reason_for_leaving",
-   "oldfieldtype": "Data"
+   "oldfieldtype": "Data",
+   "permlevel": 1
   },
   {
    "fieldname": "leave_encashed",
@@ -685,7 +691,8 @@
    "label": "Leave Encashed?",
    "oldfieldname": "leave_encashed",
    "oldfieldtype": "Select",
-   "options": "\nYes\nNo"
+   "options": "\nYes\nNo",
+   "permlevel": 1
   },
   {
    "depends_on": "eval:doc.leave_encashed ==\"Yes\"",
@@ -693,7 +700,8 @@
    "fieldtype": "Date",
    "label": "Encashment Date",
    "oldfieldname": "encashment_date",
-   "oldfieldtype": "Date"
+   "oldfieldtype": "Date",
+   "permlevel": 1
   },
   {
    "fieldname": "exit_interview_details",
@@ -707,27 +715,31 @@
    "fieldtype": "Date",
    "label": "Exit Interview Held On",
    "oldfieldname": "held_on",
-   "oldfieldtype": "Date"
+   "oldfieldtype": "Date",
+   "permlevel": 1
   },
   {
    "fieldname": "new_workplace",
    "fieldtype": "Data",
    "label": "New Workplace",
    "oldfieldname": "new_workplace",
-   "oldfieldtype": "Data"
+   "oldfieldtype": "Data",
+   "permlevel": 1
   },
   {
    "fieldname": "feedback",
    "fieldtype": "Small Text",
    "label": "Feedback",
    "oldfieldname": "feedback",
-   "oldfieldtype": "Text"
+   "oldfieldtype": "Text",
+   "permlevel": 1
   },
   {
    "fieldname": "lft",
    "fieldtype": "Int",
    "hidden": 1,
    "label": "lft",
+   "permlevel": 1,
    "read_only": 1
   },
   {
@@ -735,6 +747,7 @@
    "fieldtype": "Int",
    "hidden": 1,
    "label": "rgt",
+   "permlevel": 1,
    "read_only": 1
   },
   {
@@ -742,13 +755,15 @@
    "fieldtype": "Data",
    "hidden": 1,
    "ignore_user_permissions": 1,
-   "label": "Old Parent"
+   "label": "Old Parent",
+   "permlevel": 1
   },
   {
    "fieldname": "attendance_device_id",
    "fieldtype": "Data",
    "label": "Attendance Device ID (Biometric/RF tag ID)",
    "no_copy": 1,
+   "permlevel": 1,
    "unique": 1
   },
   {
@@ -879,7 +894,8 @@
   {
    "fieldname": "emergency_name_2",
    "fieldtype": "Data",
-   "label": "Emergency Contact Name 2"
+   "label": "Emergency Contact Name 2",
+   "permlevel": 1
   },
   {
    "fieldname": "column_break_tom25",
@@ -889,7 +905,8 @@
    "fieldname": "emergency_contact_2",
    "fieldtype": "Data",
    "label": "Emergency Contact Number 2",
-   "options": "Phone"
+   "options": "Phone",
+   "permlevel": 1
   },
   {
    "fieldname": "column_break_9zjb6",
@@ -898,7 +915,8 @@
   {
    "fieldname": "relation_2",
    "fieldtype": "Data",
-   "label": "Relation 2"
+   "label": "Relation 2",
+   "permlevel": 1
   },
   {
    "fieldname": "medical_allowance",
@@ -966,24 +984,28 @@
    "fieldname": "ability",
    "fieldtype": "Select",
    "label": "Ability",
-   "options": "Good\nFair\nPoor"
+   "options": "Good\nFair\nPoor",
+   "permlevel": 1
   },
   {
    "fieldname": "conduct",
    "fieldtype": "Select",
    "label": "Conduct",
-   "options": "Good\nFair\nPoor"
+   "options": "Good\nFair\nPoor",
+   "permlevel": 1
   },
   {
    "fieldname": "attitude",
    "fieldtype": "Select",
    "label": "Attitude",
-   "options": "Good\nFair\nPoor"
+   "options": "Good\nFair\nPoor",
+   "permlevel": 1
   },
   {
    "fieldname": "prev_reason_for_leaving",
    "fieldtype": "Small Text",
-   "label": "Reason For Leaving?"
+   "label": "Reason For Leaving?",
+   "permlevel": 1
   },
   {
    "fieldname": "column_break_qdfk",
@@ -993,46 +1015,54 @@
    "fieldname": "efficiency",
    "fieldtype": "Select",
    "label": "Efficiency",
-   "options": "Good\nFair\nPoor"
+   "options": "Good\nFair\nPoor",
+   "permlevel": 1
   },
   {
    "fieldname": "attendance",
    "fieldtype": "Select",
    "label": "Attendance",
-   "options": "Good\nFair\nPoor"
+   "options": "Good\nFair\nPoor",
+   "permlevel": 1
   },
   {
    "fieldname": "punctuality",
    "fieldtype": "Select",
    "label": "Punctuality",
-   "options": "Good\nFair\nPoor"
+   "options": "Good\nFair\nPoor",
+   "permlevel": 1
   },
   {
    "default": "0",
    "fieldname": "rehire_applicant",
    "fieldtype": "Check",
-   "label": "Would you rehire the applicant?"
+   "label": "Would you rehire the applicant?",
+   "permlevel": 1
   },
   {
    "depends_on": "eval:doc.rehire_applicant!=1",
    "fieldname": "reason_for_not_hiring",
    "fieldtype": "Small Text",
-   "label": "If not, please give reasons?"
+   "label": "If not, please give reasons?",
+   "permlevel": 1
   },
   {
    "fieldname": "other_information",
    "fieldtype": "Small Text",
-   "label": "Any Other Information:"
+   "label": "Any Other Information:",
+   "permlevel": 1
   },
   {
    "fieldname": "verified_by_name",
    "fieldtype": "Data",
-   "label": "Verified By Name"
+   "label": "Verified By Name",
+   "permlevel": 1
   },
   {
    "fieldname": "verified_by_designation",
    "fieldtype": "Data",
-   "label": "Designation"
+   "label": "Designation",
+   "permlevel": 1
   }
  ],
  "icon": "fa fa-user",
@@ -1045,7 +1075,7 @@
    "link_fieldname": "employee"
   }
  ],
- "modified": "2025-01-25 11:01:55.400587",
+ "modified": "2025-01-27 10:18:41.027357",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee",

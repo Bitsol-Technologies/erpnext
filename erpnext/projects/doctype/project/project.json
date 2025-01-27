@@ -66,13 +66,14 @@
   "additional_details",
   "source",
   "lead",
+  "technical_lead",
   "redacted_name",
   "using_on_website",
   "impact_on_media",
+  "impact_detail",
   "great_ux",
   "industry",
   "is_live",
-  "tools_and_technologies",
   "key_features",
   "platform",
   "design_file_link",
@@ -83,12 +84,17 @@
   "column_break_inwv",
   "dev_credentials",
   "screenshot_url",
+  "android_app_url",
+  "ios_app_url",
+  "web_url",
   "actual_description",
   "redacted_description_for_resumes",
   "testimonials",
   "project_notes",
   "staff_augmentation",
-  "code_repo_link"
+  "code_repo_link",
+  "section_break_btyu",
+  "tools_and_technologies"
  ],
  "fields": [
   {
@@ -482,7 +488,7 @@
   {
    "fieldname": "lead",
    "fieldtype": "Link",
-   "label": "PM/Lead",
+   "label": "PM",
    "options": "Employee"
   },
   {
@@ -512,7 +518,7 @@
    "fieldname": "industry",
    "fieldtype": "Select",
    "label": "Category/Industry",
-   "options": "Ecommerce\nSocial Media"
+   "options": "Audio/Video\nBooks & References\nEcommerce\nEducation\nEvents\nFinance\nHealth\nHealthcare\nLifestyle\nMarketplace\nNews\nPolitics\nReal Estate\nSocial\nSocial Media\nTravel & Local\nSports\nTransport\nTraining\nLinkedIn Scrapping\nChildcare\nCommunications"
   },
   {
    "fieldname": "is_live",
@@ -522,7 +528,7 @@
   },
   {
    "fieldname": "tools_and_technologies",
-   "fieldtype": "Table MultiSelect",
+   "fieldtype": "Table",
    "label": "Tools & Technologies",
    "options": "Project Tools and Technologies"
   },
@@ -533,19 +539,21 @@
   },
   {
    "fieldname": "platform",
-   "fieldtype": "Link",
+   "fieldtype": "Select",
    "label": "Platform",
-   "options": "Project Type"
+   "options": "Backend\nBackend/Hybrid\nBackend/Native iOS\nBackend/Native Android\nBackend/Native Mobile\nWeb\nWeb/Hybrid\nWeb/Backend\nWeb/Backend/Hybrid\nWeb/Backend/Native Mobile\nWeb/Backend/Native iOS\nWeb/Backend/Native Android\nWeb/Native Mobile\nWeb/Native iOS\nWeb/Native Android\nHybrid\nNative Mobile\nNative iOS\nNative Android"
   },
   {
    "fieldname": "design_file_link",
    "fieldtype": "Data",
-   "label": "Design File Link"
+   "label": "Design File Link",
+   "length": 250
   },
   {
    "fieldname": "drive_link",
    "fieldtype": "Data",
-   "label": "Drive Link"
+   "label": "Drive Link",
+   "length": 250
   },
   {
    "fieldname": "startup",
@@ -575,7 +583,8 @@
   {
    "fieldname": "screenshot_url",
    "fieldtype": "Data",
-   "label": "Screenshot URL"
+   "label": "Screenshot URL",
+   "length": 250
   },
   {
    "fieldname": "actual_description",
@@ -606,12 +615,46 @@
   {
    "fieldname": "code_repo_link",
    "fieldtype": "Data",
-   "label": "Code Repo Link"
+   "label": "Code Repo Link",
+   "length": 250
   },
   {
    "fieldname": "additional_details",
    "fieldtype": "Tab Break",
    "label": "Additional Details"
+  },
+  {
+   "fieldname": "section_break_btyu",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "technical_lead",
+   "fieldtype": "Link",
+   "label": "Technical Lead",
+   "options": "Employee"
+  },
+  {
+   "fieldname": "android_app_url",
+   "fieldtype": "Data",
+   "label": "Android App Url",
+   "length": 250
+  },
+  {
+   "fieldname": "ios_app_url",
+   "fieldtype": "Data",
+   "label": "iOS App Url",
+   "length": 250
+  },
+  {
+   "fieldname": "web_url",
+   "fieldtype": "Data",
+   "label": "Web URL",
+   "length": 250
+  },
+  {
+   "fieldname": "impact_detail",
+   "fieldtype": "Data",
+   "label": "Impact Detail"
   }
  ],
  "icon": "fa fa-puzzle-piece",
@@ -624,7 +667,7 @@
   }
  ],
  "max_attachments": 4,
- "modified": "2024-11-19 17:00:40.391955",
+ "modified": "2024-12-13 15:03:50.182033",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Project",
@@ -678,5 +721,6 @@
  "states": [],
  "timeline_field": "customer",
  "title_field": "project_name",
+ "track_changes": 1,
  "track_seen": 1
 }

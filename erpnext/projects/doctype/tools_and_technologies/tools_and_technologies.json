@@ -1,31 +1,56 @@
 {
  "actions": [],
+ "allow_import": 1,
  "allow_rename": 1,
+ "autoname": "field:technology_name",
  "creation": "2024-11-19 16:10:48.696779",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
   "technology_name",
+  "type",
+  "column_break_nvpe",
+  "service_company",
   "description"
  ],
  "fields": [
   {
    "fieldname": "technology_name",
    "fieldtype": "Data",
-   "label": "Name"
+   "label": "Name",
+   "unique": 1
   },
   {
    "fieldname": "description",
    "fieldtype": "Small Text",
    "label": "Description"
+  },
+  {
+   "fieldname": "type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Type",
+   "options": "Language\nFeature\nFramework\nLibrary\nTool\nCloudService\nFileStorage\nDB\nCI/CD\nPaymentGateway\nGit",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_nvpe",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "service_company",
+   "fieldtype": "Select",
+   "label": "Service Company",
+   "options": "Amazon\nGoogle\nMicrosoft\nApple\nUnknown"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2024-11-19 16:34:38.383111",
+ "modified": "2024-12-13 12:53:12.500574",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Tools and Technologies",
+ "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
   {
@@ -39,8 +64,22 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Project Manager",
+   "select": 1,
+   "share": 1,
+   "write": 1
   }
  ],
+ "quick_entry": 1,
+ "search_fields": "type",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []
