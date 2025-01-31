@@ -1,9 +1,19 @@
 exclude: 'node_modules|.git'
-default_stages: [commit]
+default_stages: [pre-commit]
 fail_fast: false
 
 
 repos:
+  # - repo: local
+  #   hooks:
+  #     - id: pytest
+  #       name: pytest
+  #       entry: /workspace/development/frappe-bench/env/bin/pytest 
+  #       language: system  # Use system's Python environment
+  #       types: [python]  # Only run on Python files
+  #       pass_filenames: false  # Don't pass filenames to pytest, since we already specify a directory
+        # always_run: true  # Always run the hook (even if files aren't changed)
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.3.0
     hooks:
