@@ -263,6 +263,15 @@ execute:frappe.rename_doc("Report", "TDS Payable Monthly", "Tax Withholding Deta
 erpnext.patches.v14_0.update_proprietorship_to_individual
 
 [post_model_sync]
+erpnext.patches.v14_0.rename_daily_depreciation_to_depreciation_amount_based_on_num_days_in_month
+erpnext.patches.v14_0.update_asset_value_for_manual_depr_entries
+erpnext.patches.v14_0.rename_depreciation_amount_based_on_num_days_in_month_to_daily_prorata_based
+erpnext.patches.v14_0.delete_orphaned_asset_movement_item_records
+erpnext.patches.v14_0.remove_cancelled_asset_capitalization_from_asset
+erpnext.patches.v14_0.enable_all_leads
+erpnext.patches.v14_0.enable_allow_existing_serial_no
+erpnext.patches.v14_0.setup_clear_repost_logs
+erpnext.patches.v13_0.update_schedule_type_in_loans
 erpnext.patches.v14_0.correct_asset_value_if_je_with_workflow
 erpnext.patches.v14_0.france_depreciation_warning
 erpnext.patches.v15_0.create_asset_depreciation_schedules_from_assets
