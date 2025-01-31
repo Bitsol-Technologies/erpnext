@@ -34,6 +34,7 @@ def after_install():
 	add_standard_navbar_items()
 	add_app_name()
 	hide_workspaces()
+	setup_log_settings
 	update_roles()
 	frappe.db.commit()
 
@@ -43,6 +44,13 @@ def check_setup_wizard_not_completed():
 		message = """ERPNext can only be installed on a fresh site where the setup wizard is not completed.
 You can reinstall this site (after saving your data) using: bench --site [sitename] reinstall"""
 		frappe.throw(message)  # nosemgrep
+
+
+def setup_log_settings():
+	log_settings = frappe.get_single("Log Settings")
+	log_settings.append("logs_to_clear", {"ref_doctype": "Repost Item Valuation", "days": 60})
+
+	log_settings.save(ignore_permissions=True)
 
 
 def check_frappe_version():
