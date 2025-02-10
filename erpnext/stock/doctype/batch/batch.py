@@ -218,6 +218,7 @@ def get_batch_qty(
 	posting_time=None,
 	ignore_voucher_nos=None,
 	for_stock_levels=False,
+	consider_negative_batches=False,
 ):
 	"""Returns batch actual qty if warehouse is passed,
 	        or returns dict of qty by warehouse if warehouse is None
@@ -243,6 +244,7 @@ def get_batch_qty(
 			"batch_no": batch_no,
 			"ignore_voucher_nos": ignore_voucher_nos,
 			"for_stock_levels": for_stock_levels,
+			"consider_negative_batches": consider_negative_batches,
 		}
 	)
 
@@ -453,10 +455,14 @@ def get_available_batches(kwargs):
 
 	batches = get_auto_batch_nos(kwargs)
 	for batch in batches:
-		if batch.get("batch_no") not in batchwise_qty:
-			batchwise_qty[batch.get("batch_no")] = batch.get("qty")
+		key = batch.get("batch_no")
+		if kwargs.get("based_on_warehouse"):
+			key = (batch.get("batch_no"), batch.get("warehouse"))
+
+		if key not in batchwise_qty:
+			batchwise_qty[key] = batch.get("qty")
 		else:
-			batchwise_qty[batch.get("batch_no")] += batch.get("qty")
+			batchwise_qty[key] += batch.get("qty")
 
 	return batchwise_qty
 

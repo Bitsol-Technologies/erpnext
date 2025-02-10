@@ -348,8 +348,9 @@ class WorkOrder(Document):
 				if flt(self.material_transferred_for_manufacturing) > 0:
 					status = "In Process"
 
-				total_qty = flt(flt(self.produced_qty) + flt(self.process_loss_qty), self.precision("qty"))
-				if flt(total_qty) >= flt(self.qty):
+				precision = frappe.get_precision("Work Order", "produced_qty")
+				total_qty = flt(self.produced_qty, precision) + flt(self.process_loss_qty, precision)
+				if flt(total_qty, precision) >= flt(self.qty, precision):
 					status = "Completed"
 		else:
 			status = "Cancelled"
@@ -1518,7 +1519,9 @@ def close_work_order(work_order, status):
 	work_order = frappe.get_doc("Work Order", work_order)
 	if work_order.get("operations"):
 		job_cards = frappe.get_list(
-			"Job Card", filters={"work_order": work_order.name, "status": "Work In Progress"}, pluck="name"
+			"Job Card",
+			filters={"work_order": work_order.name, "status": "Work In Progress", "docstatus": 1},
+			pluck="name",
 		)
 
 		if job_cards:

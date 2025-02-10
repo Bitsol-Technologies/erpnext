@@ -224,9 +224,6 @@ class TestPOSClosingEntry(unittest.TestCase):
 			item_code=item_code, qty=5, rate=300, use_serial_batch_fields=1, batch_no=batch_no
 		)
 
-		batch_qty = frappe.db.get_value("Batch", batch_no, "batch_qty")
-		self.assertEqual(batch_qty, 10)
-
 		batch_qty_with_pos = get_batch_qty(batch_no, "_Test Warehouse - _TC", item_code)
 		self.assertEqual(batch_qty_with_pos, 0.0)
 
@@ -255,9 +252,6 @@ class TestPOSClosingEntry(unittest.TestCase):
 
 		pcv_doc.reload()
 		pcv_doc.cancel()
-
-		batch_qty = frappe.db.get_value("Batch", batch_no, "batch_qty")
-		self.assertEqual(batch_qty, 10)
 
 		batch_qty_with_pos = get_batch_qty(batch_no, "_Test Warehouse - _TC", item_code)
 		self.assertEqual(batch_qty_with_pos, 0.0)

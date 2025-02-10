@@ -650,7 +650,7 @@ class JobCard(Document):
 					)
 				)
 
-			if self.get("operation") == d.operation:
+			if self.get("operation") == d.operation or self.is_corrective_job_card:
 				self.append(
 					"items",
 					{
@@ -791,7 +791,7 @@ class JobCard(Document):
 			fields=["total_time_in_mins", "hour_rate"],
 			filters={"is_corrective_job_card": 1, "docstatus": 1, "work_order": self.work_order},
 		):
-			wo.corrective_operation_cost += flt(row.total_time_in_mins) * flt(row.hour_rate)
+			wo.corrective_operation_cost += (flt(row.total_time_in_mins) / 60) * flt(row.hour_rate)
 
 		wo.calculate_operating_cost()
 		wo.flags.ignore_validate_update_after_submit = True
@@ -982,7 +982,9 @@ class JobCard(Document):
 			if self.time_logs:
 				self.status = "Work In Progress"
 
-			if self.docstatus == 1 and (self.for_quantity <= self.total_completed_qty or not self.items):
+			if self.docstatus == 1 and (
+				self.for_quantity <= (self.total_completed_qty + self.process_loss_qty) or not self.items
+			):
 				self.status = "Completed"
 
 		if update_status:
