@@ -17,6 +17,18 @@ class ToolsandTechnologies(Document):
 		description: DF.SmallText | None
 		service_company: DF.Literal["Amazon", "Google", "Microsoft", "Apple", "Unknown"]
 		technology_name: DF.Data | None
-		type: DF.Literal["Language", "Feature", "Framework", "Library", "Tool", "CloudService", "FileStorage", "DB", "CI/CD", "PaymentGateway", "Git"]
+		type: DF.Literal[
+			"Language",
+			"Feature",
+			"Framework",
+			"Library",
+			"Tool",
+			"CloudService",
+			"FileStorage",
+			"DB",
+			"CI/CD",
+			"PaymentGateway",
+			"Git",
+		]
 	# end: auto-generated types
 	pass
