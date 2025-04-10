@@ -262,7 +262,7 @@ class PurchaseInvoice(BuyingController):
 		if not self.is_return:
 			self.po_required()
 			self.pr_required()
-			self.validate_supplier_invoice()
+			# self.validate_supplier_invoice()
 
 		# validate cash purchase
 		if self.is_paid == 1:
@@ -1653,7 +1653,8 @@ class PurchaseInvoice(BuyingController):
 		if self.bill_date:
 			if getdate(self.bill_date) > getdate(self.posting_date):
 				frappe.throw(_("Supplier Invoice Date cannot be greater than Posting Date"))
-
+		if not self.bill_no:
+			return
 		if self.bill_no:
 			if cint(frappe.db.get_single_value("Accounts Settings", "check_supplier_invoice_uniqueness")):
 				fiscal_year = get_fiscal_year(self.posting_date, company=self.company, as_dict=True)
@@ -1677,7 +1678,6 @@ class PurchaseInvoice(BuyingController):
 
 				if pi:
 					pi = pi[0][0]
-
 					frappe.throw(
 						_("Supplier Invoice No exists in Purchase Invoice {0}").format(
 							get_link_to_form("Purchase Invoice", pi)
