@@ -683,12 +683,20 @@ class BatchNoValuation(DeprecatedBatchNoValuation):
 		return query.run(as_dict=True)
 
 	def prepare_batches(self):
+		from erpnext.stock.utils import get_valuation_method
+
 		self.batches = self.batch_nos
 		if isinstance(self.batch_nos, dict):
 			self.batches = list(self.batch_nos.keys())
 
 		self.batchwise_valuation_batches = []
 		self.non_batchwise_valuation_batches = []
+
+		if get_valuation_method(self.sle.item_code) == "Moving Average" and frappe.db.get_single_value(
+			"Stock Settings", "do_not_use_batchwise_valuation"
+		):
+			self.non_batchwise_valuation_batches = self.batches
+			return
 
 		batches = frappe.get_all(
 			"Batch", filters={"name": ("in", self.batches), "use_batchwise_valuation": 1}, fields=["name"]
@@ -1006,6 +1014,10 @@ class SerialBatchCreation:
 		elif self.has_serial_no and not self.get("serial_nos"):
 			self.serial_nos = get_serial_nos_for_outward(kwargs)
 		elif not self.has_serial_no and self.has_batch_no and not self.get("batches"):
+			if self.get("posting_date"):
+				kwargs["posting_date"] = self.get("posting_date")
+				kwargs["posting_time"] = self.get("posting_time")
+
 			self.batches = get_available_batches(kwargs)
 
 	def set_auto_serial_batch_entries_for_inward(self):
@@ -1080,6 +1092,7 @@ class SerialBatchCreation:
 	def set_serial_batch_entries(self, doc):
 		incoming_rate = self.get("incoming_rate")
 
+		precision = frappe.get_precision("Serial and Batch Entry", "qty")
 		if self.get("serial_nos"):
 			serial_no_wise_batch = frappe._dict({})
 			if self.has_batch_no:
@@ -1109,7 +1122,8 @@ class SerialBatchCreation:
 					"entries",
 					{
 						"batch_no": batch_no,
-						"qty": batch_qty * (-1 if self.type_of_transaction == "Outward" else 1),
+						"qty": flt(batch_qty, precision)
+						* (-1 if self.type_of_transaction == "Outward" else 1),
 						"incoming_rate": incoming_rate,
 					},
 				)

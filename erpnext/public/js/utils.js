@@ -263,6 +263,10 @@ $.extend(erpnext.utils, {
 								fieldname: dimension["fieldname"],
 								label: __(dimension["doctype"]),
 								fieldtype: "MultiSelectList",
+								depends_on:
+									report_name === "Stock Balance"
+										? "eval:doc.show_dimension_wise_stock === 1"
+										: "",
 								get_data: function (txt) {
 									return frappe.db.get_link_options(dimension["doctype"], txt);
 								},
@@ -692,7 +696,7 @@ erpnext.utils.update_child_items = function (opts) {
 					},
 					callback: function (r) {
 						if (r.message) {
-							const { qty, price_list_rate: rate, uom, conversion_factor } = r.message;
+							const { qty, price_list_rate: rate, uom, conversion_factor, bom_no } = r.message;
 
 							const row = dialog.fields_dict.trans_items.df.data.find(
 								(doc) => doc.idx == me.doc.idx
@@ -703,6 +707,7 @@ erpnext.utils.update_child_items = function (opts) {
 									uom: me.doc.uom || uom,
 									qty: me.doc.qty || qty,
 									rate: me.doc.rate || rate,
+									bom_no: bom_no,
 								});
 								dialog.fields_dict.trans_items.grid.refresh();
 							}

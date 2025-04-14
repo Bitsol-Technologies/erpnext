@@ -33,6 +33,7 @@ class StockSettings(Document):
 		allow_partial_reservation: DF.Check
 		allow_to_edit_stock_uom_qty_for_purchase: DF.Check
 		allow_to_edit_stock_uom_qty_for_sales: DF.Check
+		allow_uom_with_conversion_rate_defined_in_item: DF.Check
 		auto_create_serial_and_batch_bundle_for_outward: DF.Check
 		auto_indent: DF.Check
 		auto_insert_price_list_rate_if_missing: DF.Check
@@ -55,6 +56,7 @@ class StockSettings(Document):
 		role_allowed_to_create_edit_back_dated_transactions: DF.Link | None
 		role_allowed_to_over_deliver_receive: DF.Link | None
 		sample_retention_warehouse: DF.Link | None
+		set_serial_and_batch_bundle_naming_based_on_naming_series: DF.Check
 		show_barcode_field: DF.Check
 		stock_auth_role: DF.Link | None
 		stock_frozen_upto: DF.Date | None
@@ -75,6 +77,7 @@ class StockSettings(Document):
 			"default_warehouse",
 			"set_qty_in_transactions_based_on_serial_no_input",
 			"use_serial_batch_fields",
+			"set_serial_and_batch_bundle_naming_based_on_naming_series",
 		]:
 			frappe.db.set_default(key, self.get(key, ""))
 
@@ -102,22 +105,6 @@ class StockSettings(Document):
 		self.validate_stock_reservation()
 		self.change_precision_for_for_sales()
 		self.change_precision_for_purchase()
-		self.validate_use_batch_wise_valuation()
-
-	def validate_use_batch_wise_valuation(self):
-		if not self.do_not_use_batchwise_valuation:
-			return
-
-		if self.valuation_method == "FIFO":
-			frappe.throw(_("Cannot disable batch wise valuation for FIFO valuation method."))
-
-		if frappe.get_all(
-			"Item", filters={"valuation_method": "FIFO", "is_stock_item": 1, "has_batch_no": 1}, limit=1
-		):
-			frappe.throw(_("Can't disable batch wise valuation for items with FIFO valuation method."))
-
-		if frappe.get_all("Batch", filters={"use_batchwise_valuation": 1}, limit=1):
-			frappe.throw(_("Can't disable batch wise valuation for active batches."))
 
 	def validate_warehouses(self):
 		warehouse_fields = ["default_warehouse", "sample_retention_warehouse"]

@@ -164,7 +164,7 @@ class WorkOrder(Document):
 		if self.source_warehouse:
 			self.set_warehouses()
 
-		validate_uom_is_integer(self, "stock_uom", ["qty", "produced_qty"])
+		validate_uom_is_integer(self, "stock_uom", ["required_qty"])
 
 		self.set_required_items(reset_only_qty=len(self.get("required_items")))
 
@@ -1616,11 +1616,13 @@ def create_job_card(work_order, row, enable_capacity_planning=False, auto_create
 			"posting_date": nowdate(),
 			"for_quantity": row.job_card_qty or work_order.get("qty", 0),
 			"operation_id": row.get("name"),
-			"bom_no": work_order.bom_no,
+			"bom_no": row.get("bom") or work_order.bom_no,
 			"project": work_order.project,
 			"company": work_order.company,
 			"sequence_id": row.get("sequence_id"),
-			"wip_warehouse": work_order.wip_warehouse,
+			"wip_warehouse": work_order.wip_warehouse or row.get("wip_warehouse")
+			if not work_order.skip_transfer or work_order.from_wip_warehouse
+			else work_order.source_warehouse or row.get("source_warehouse"),
 			"hour_rate": row.get("hour_rate"),
 			"serial_no": row.get("serial_no"),
 		}

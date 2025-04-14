@@ -663,7 +663,7 @@ class StockReconciliation(StockController):
 				title=_("Stock Reservation"),
 			)
 
-	def update_stock_ledger(self):
+	def update_stock_ledger(self, allow_negative_stock=False):
 		"""find difference between current and expected entries
 		and create stock ledger entries based on the difference"""
 		from erpnext.stock.stock_ledger import get_previous_sle
@@ -719,7 +719,11 @@ class StockReconciliation(StockController):
 				sl_entries.append(self.get_sle_for_items(row))
 
 		if sl_entries:
-			allow_negative_stock = cint(frappe.db.get_single_value("Stock Settings", "allow_negative_stock"))
+			if not allow_negative_stock:
+				allow_negative_stock = cint(
+					frappe.db.get_single_value("Stock Settings", "allow_negative_stock")
+				)
+
 			self.make_sl_entries(sl_entries, allow_negative_stock=allow_negative_stock)
 
 	def make_adjustment_entry(self, row, sl_entries):
@@ -963,6 +967,9 @@ class StockReconciliation(StockController):
 		for row in self.items:
 			if voucher_detail_no != row.name:
 				continue
+
+			if row.current_qty < 0:
+				return
 
 			val_rate = 0.0
 			current_qty = 0.0
@@ -1372,13 +1379,13 @@ def get_stock_balance_for(
 			or 0
 		)
 
-		if row.use_serial_batch_fields and row.batch_no:
+		if row.use_serial_batch_fields and row.batch_no and (qty or row.current_qty):
 			rate = get_incoming_rate(
 				frappe._dict(
 					{
 						"item_code": row.item_code,
 						"warehouse": row.warehouse,
-						"qty": row.qty * -1,
+						"qty": flt(qty or row.current_qty) * -1,
 						"batch_no": row.batch_no,
 						"company": company,
 						"posting_date": posting_date,

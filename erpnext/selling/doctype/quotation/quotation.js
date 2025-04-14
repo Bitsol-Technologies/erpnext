@@ -69,6 +69,8 @@ frappe.ui.form.on("Quotation", {
 erpnext.selling.QuotationController = class QuotationController extends erpnext.selling.SellingController {
 	onload(doc, dt, dn) {
 		super.onload(doc, dt, dn);
+
+		this.frm.trigger("disable_customer_if_creating_from_opportunity");
 	}
 	party_name() {
 		var me = this;
@@ -352,6 +354,32 @@ erpnext.selling.QuotationController = class QuotationController extends erpnext.
 			</p>`
 		);
 		dialog.show();
+	}
+
+	currency() {
+		super.currency();
+		let me = this;
+		const company_currency = this.get_company_currency();
+		if (this.frm.doc.currency && this.frm.doc.currency !== company_currency) {
+			this.get_exchange_rate(
+				this.frm.doc.transaction_date,
+				this.frm.doc.currency,
+				company_currency,
+				function (exchange_rate) {
+					if (exchange_rate != me.frm.doc.conversion_rate) {
+						me.set_margin_amount_based_on_currency(exchange_rate);
+						me.set_actual_charges_based_on_currency(exchange_rate);
+						me.frm.set_value("conversion_rate", exchange_rate);
+					}
+				}
+			);
+		}
+	}
+
+	disable_customer_if_creating_from_opportunity(doc) {
+		if (doc.opportunity) {
+			this.frm.set_df_property("party_name", "read_only", 1);
+		}
 	}
 };
 

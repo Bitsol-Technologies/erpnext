@@ -333,7 +333,7 @@ class BuyingController(SubcontractingController):
 						net_rate
 						+ item.item_tax_amount
 						+ flt(item.landed_cost_voucher_amount)
-						+ flt(item.get("rate_difference_with_purchase_invoice"))
+						+ flt(item.get("amount_difference_with_purchase_invoice"))
 					) / qty_in_stock_uom
 			else:
 				item.valuation_rate = 0.0
@@ -779,8 +779,10 @@ class BuyingController(SubcontractingController):
 
 							is_plural = "s" if len(created_assets) != 1 else ""
 							messages.append(
-								_("Asset{} {assets_link} created for {}").format(
-									is_plural, frappe.bold(d.item_code), assets_link=assets_link
+								_("Asset{is_plural} {assets_link} created for {item_code}").format(
+									is_plural=is_plural,
+									assets_link=assets_link,
+									item_code=frappe.bold(d.item_code),
 								)
 							)
 					else:
