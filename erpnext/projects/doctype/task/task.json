@@ -47,6 +47,7 @@
   "sb_more_info",
   "review_date",
   "closing_date",
+  "clockify_task_id",
   "column_break_22",
   "department",
   "company",
@@ -392,14 +393,20 @@
    "fieldtype": "Data",
    "hidden": 1,
    "label": "Template Task"
+  },
+  {
+   "fieldname": "clockify_task_id",
+   "fieldtype": "Data",
+   "label": "Clockify Task ID"
   }
  ],
+ "grid_page_length": 50,
  "icon": "fa fa-check",
  "idx": 1,
  "is_tree": 1,
  "links": [],
  "max_attachments": 5,
- "modified": "2024-01-08 16:00:41.296203",
+ "modified": "2025-05-30 10:19:21.456286",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Task",
@@ -420,9 +427,11 @@
   }
  ],
  "quick_entry": 1,
+ "row_format": "Dynamic",
  "search_fields": "subject",
  "show_name_in_global_search": 1,
  "show_preview_popup": 1,
+ "show_title_field_in_link": 1,
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

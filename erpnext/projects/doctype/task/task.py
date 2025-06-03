@@ -31,6 +31,7 @@ class Task(NestedSet):
 		act_end_date: DF.Date | None
 		act_start_date: DF.Date | None
 		actual_time: DF.Float
+		clockify_task_id: DF.Data | None
 		closing_date: DF.Date | None
 		color: DF.Color | None
 		company: DF.Link | None

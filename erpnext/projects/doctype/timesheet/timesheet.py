@@ -7,10 +7,17 @@ import json
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_to_date, flt, get_datetime, getdate, time_diff_in_hours
+from frappe.utils import add_to_date, flt, get_datetime, getdate, time_diff_in_hours, today, nowdate
 
 from erpnext.controllers.queries import get_match_cond
 from erpnext.setup.utils import get_exchange_rate
+
+from hrms.hr.doctype.employee_checkin.employee_checkin import (
+	get_clockify_report_task_id,
+	get_clockify_report_result,
+	get_system_clockify_settings,
+	get_clockify_user_id_by_email
+)
 
 
 class OverlapError(frappe.ValidationError):
@@ -71,6 +78,62 @@ class Timesheet(Document):
 		self.calculate_total_amounts()
 		self.calculate_percentage_billed()
 		self.set_dates()
+		self._link_employee_compliance_report()
+
+
+	def _link_employee_compliance_report(self):
+		"""
+		Finds and links an Employee Compliance Report to this Timesheet if:
+		- The Timesheet has an employee and a start_date.
+		- An Employee Compliance Report exists for the same employee and its report_date
+		  matches the Timesheet's start_date.
+		- Only links if a single, unique, submitted Employee Compliance Report is found.
+		"""
+		# IMPORTANT: Replace 'custom_employee_compliance_report' with your actual fieldname
+		link_field_name = "employee_compliance_report"
+
+		if not hasattr(self, link_field_name):
+			# Field doesn't exist on the doctype, log an error or raise it.
+			# This prevents errors if the custom field is not yet created or named differently.
+			frappe.log_error(
+				title="Timesheet Link Error",
+				message=f"Custom field '{link_field_name}' not found in Timesheet doctype. Cannot link Employee Compliance Report."
+			)
+			return
+
+		if not self.employee or not self.start_date:
+			setattr(self, link_field_name, None)
+			return
+
+		# Assuming Timesheets are daily, so start_date is the relevant date to match report_date
+		report_date_to_match = self.start_date
+
+		try:
+			matching_reports = frappe.get_all(
+				"Employee Compliance Report", 
+				filters={
+					"employee": self.employee,
+					"report_date": report_date_to_match,
+				},
+				fields=["name"],
+				limit_page_length=2 # Fetch max 2 to check for uniqueness
+			)
+
+			if len(matching_reports) == 1:
+				setattr(self, link_field_name, matching_reports[0].name)
+			else:
+				setattr(self, link_field_name, None)
+				if len(matching_reports) > 1:
+					frappe.log_error(
+						title="Multiple Employee Compliance Reports for Timesheet Link",
+						message=f"Timesheet {self.name} found multiple Employee Compliance Reports for employee {self.employee} and date {report_date_to_match}."
+					)
+		except Exception as e:
+			setattr(self, link_field_name, None)
+			frappe.log_error(
+				title="Employee Compliance Report Link Exception",
+				message=f"Error linking Employee Compliance Report for Timesheet {self.name}: {str(e)}"
+			)
 
 	def calculate_hours(self):
 		for row in self.time_logs:
@@ -558,3 +621,441 @@ def get_list_context(context=None):
 		"get_list": get_timesheets_list,
 		"row_template": "templates/includes/timesheet/timesheet_row.html",
 	}
+
+
+# --- Helper Functions for Clockify Sync ---
+
+def _get_erpnext_project_map(clockify_project_api_ids: list) -> dict:
+	"""Fetches ERPNext projects and maps their Clockify API ID to ERPNext project name."""
+	erpnext_project_map = {}
+	if not clockify_project_api_ids:
+		return erpnext_project_map
+
+	projects = frappe.get_all(
+		"Project",
+		filters={"clockify_project_id": ["in", list(set(clockify_project_api_ids))]},
+		fields=["name", "clockify_project_id"]
+	)
+	for p in projects:
+		if p.clockify_project_id:
+			erpnext_project_map[p.clockify_project_id] = p.name
+	return erpnext_project_map
+
+def _get_active_timesheets_data(employee_id: str, date_to_sync_obj: object) -> tuple[set, dict]:
+	"""Fetches active timesheets for the day for an employee.
+	Returns:
+		all_active_ts_names (set): Names of all active timesheets for the employee/day.
+		project_to_ts_info_map (dict): Maps ERPNext project name to its active timesheet info (name, docstatus).
+	"""
+	filters = {
+		"employee": employee_id,
+		"start_date": date_to_sync_obj,
+		"end_date": date_to_sync_obj,
+		"docstatus": ["in", [0, 1]]
+	}
+	active_ts_docs = frappe.get_all(
+		"Timesheet",
+		filters=filters,
+		fields=["name", "parent_project", "docstatus"]
+	)
+	
+	all_active_ts_names = {ts.get("name") for ts in active_ts_docs}
+	project_to_ts_info_map = {}
+	for ts in active_ts_docs:
+		if ts.get("parent_project"):
+			project_to_ts_info_map[ts.get("parent_project")] = {
+				"name": ts.get("name"),
+				"docstatus": ts.get("docstatus")
+			}
+	return all_active_ts_names, project_to_ts_info_map
+
+def _get_or_create_task_map(
+	clockify_time_entries: list, 
+	erpnext_project_name: str, 
+	company: str, 
+	script_log_title: str
+) -> dict:
+	"""Gets or creates ERPNext tasks for Clockify time entries of a project.
+	Returns a map: (clockify_task_api_id, clockify_task_subject) -> erpnext_task_name.
+	"""
+	task_map = {}
+	if not erpnext_project_name or not clockify_time_entries:
+		return task_map
+
+	unique_clockify_tasks = {}
+	for entry in clockify_time_entries:
+		api_id = entry.get("task_api_id")
+		subject = entry.get("task_subject", "").strip()
+		if api_id or subject: # Only process if we have some identifier
+			unique_clockify_tasks[(api_id, subject)] = None # Value will be ERPNext task name
+
+	if not unique_clockify_tasks:
+		return task_map
+
+	clockify_task_ids_to_fetch = [key[0] for key in unique_clockify_tasks if key[0]]
+	if clockify_task_ids_to_fetch:
+		existing_tasks_by_api_id = frappe.get_all(
+			"Task",
+			filters={"clockify_task_id": ["in", list(set(clockify_task_ids_to_fetch))], "project": erpnext_project_name},
+			fields=["name", "clockify_task_id", "subject"]
+		)
+		for task in existing_tasks_by_api_id:
+			for key_api_id, key_subject in unique_clockify_tasks:
+				if key_api_id == task.clockify_task_id:
+					task_map[(key_api_id, key_subject)] = task.name
+	
+	for (api_id, subject), erpnext_name in unique_clockify_tasks.items():
+		if (api_id, subject) in task_map: 
+			continue
+
+		if subject and not api_id: 
+			task_name_by_subject = frappe.db.get_value("Task", {"subject": subject, "project": erpnext_project_name}, "name")
+			if task_name_by_subject:
+				task_map[(api_id, subject)] = task_name_by_subject
+				if api_id and not frappe.db.get_value("Task", task_name_by_subject, "clockify_task_id"):
+					try:
+						frappe.db.set_value("Task", task_name_by_subject, "clockify_task_id", api_id)
+					except Exception as e_set:
+						frappe.log_error(message=f"Failed to set clockify_task_id on task {task_name_by_subject} found by subject: {e_set}", title=script_log_title)
+				continue 
+
+		if subject: 
+			try:
+				task_doc = frappe.new_doc("Task")
+				task_doc.subject = subject
+				task_doc.project = erpnext_project_name
+				task_doc.company = company
+				task_doc.status = "Open" 
+				if api_id: 
+					task_doc.clockify_task_id = api_id
+				task_doc.insert(ignore_permissions=True)
+				task_map[(api_id, subject)] = task_doc.name
+			except Exception as e_create:
+				frappe.log_error(message=f"Task creation failed for subject '{subject}' (API ID: {api_id}) in project '{erpnext_project_name}': {e_create}", title=script_log_title)
+		elif api_id and not subject:
+			frappe.log_error(message=f"Clockify Task API ID '{api_id}' provided without a subject/name for project '{erpnext_project_name}'. Cannot create task.", title=script_log_title)
+	return task_map
+
+def _cancel_erpnext_timesheet(timesheet_name: str, employee_id: str, date_str_for_log: str, log_reason_prefix: str, script_log_title: str) -> bool:
+	"""Cancels an ERPNext Timesheet (Draft or Submitted)."""
+	try:
+		ts_to_cancel_doc = frappe.get_doc("Timesheet", timesheet_name)
+		ts_to_cancel_doc.flags.ignore_permissions = True
+		original_docstatus = ts_to_cancel_doc.docstatus
+
+		if original_docstatus == 1: # Submitted
+			ts_to_cancel_doc.docstatus = 2
+			ts_to_cancel_doc.save()
+			frappe.logger(script_log_title).info(f"{log_reason_prefix}: Cancelled submitted TS '{timesheet_name}' for Emp {employee_id}, Date {date_str_for_log}")
+		elif original_docstatus == 0: # Draft
+			ts_to_cancel_doc.submit() # Submit first
+			ts_to_cancel_doc.docstatus = 2 # Then cancel
+			ts_to_cancel_doc.save()
+			frappe.logger(script_log_title).info(f"{log_reason_prefix}: Submitted and then Cancelled draft TS '{timesheet_name}' for Emp {employee_id}, Date {date_str_for_log}")
+		else: # Already cancelled or other state
+			print(f"DEBUG: Timesheet '{timesheet_name}' already in status {original_docstatus}, no cancellation action needed for '{log_reason_prefix}'.")
+			return True # Considered processed for this purpose
+		return True
+	except Exception as e:
+		frappe.log_error(message=f"Error during {log_reason_prefix.lower()} cancellation for TS '{timesheet_name}': {e}", title=script_log_title)
+		return False
+
+def _populate_timesheet_details(
+	timesheet_doc_to_populate: Document,
+	time_entries_data: list,
+	task_map: dict,
+	erpnext_project_name: str,
+	default_erpnext_activity_type: str,
+	start_dt_for_report: object,
+	script_log_title: str
+):
+	"""Populates time_logs for the given timesheet document."""
+	for entry_data in time_entries_data:
+		clockify_task_key = (entry_data.get("task_api_id"), entry_data.get("task_subject", "").strip())
+		erpnext_task_name = task_map.get(clockify_task_key)
+		
+		if not erpnext_task_name and entry_data.get("task_subject"): 
+			print(f"WARN: ERPNext task not mapped for Clockify task (ID: {entry_data.get('task_api_id')}, Subject: {entry_data.get('task_subject')}) for project {erpnext_project_name}. Skipping this time log entry.")
+			continue
+		
+		timesheet_doc_to_populate.append("time_logs", {
+			"activity_type": default_erpnext_activity_type,
+			"task": erpnext_task_name,
+			"description": entry_data["description"],
+			"hours": entry_data["hours"],
+			"project": erpnext_project_name, 
+			"from_time": start_dt_for_report,
+			"to_time": add_to_date(start_dt_for_report, hours=entry_data["hours"], as_datetime=True)
+		})
+
+def _handle_positive_hours_project(
+	employee_doc: Document,
+	erpnext_project_name: str, 
+	date_to_sync_obj: object, 
+	start_dt_for_report: object, 
+	current_project_total_hours: float,
+	time_entries_for_project: list,
+	existing_ts_info: dict, # { "name": str, "docstatus": int } or None
+	task_map: dict,
+	default_activity_type: str,
+	script_log_title: str
+) -> str | None:
+	"""Handles creation/update of timesheet when Clockify reports > 0 hours."""
+	timesheet_to_process = None
+	is_newly_created_ts = False
+	existing_active_ts_name = existing_ts_info.get("name") if existing_ts_info else None
+	existing_ts_docstatus = existing_ts_info.get("docstatus") if existing_ts_info else None
+
+	if existing_active_ts_name:
+		if existing_ts_docstatus == 1: # Submitted: Cancel this one, new one will be created
+			print(f"DEBUG: Existing TS {existing_active_ts_name} for Proj {erpnext_project_name} is Submitted. Cancelling before replacement.")
+			try:
+				original_ts_doc = frappe.get_doc("Timesheet", existing_active_ts_name)
+				original_ts_doc.flags.ignore_permissions = True
+				original_ts_doc.docstatus = 2 
+				original_ts_doc.save(ignore_permissions=True) 
+				frappe.logger(script_log_title).info(f"Cancelled submitted TS '{original_ts_doc.name}' for Emp {employee_doc.name}, Proj {erpnext_project_name} to be replaced.")
+				# The name is added to processed_timesheet_names by the caller if this helper returns a new name
+			except Exception as e_cancel:
+				frappe.log_error(f"Failed to cancel submitted TS {existing_active_ts_name} for replacement: {e_cancel}", title=script_log_title)
+				 # Proceed to create a new one anyway, orphan logic might catch the old one if cancellation failed badly.
+		elif existing_ts_docstatus == 0: # Draft: Update this one
+			print(f"DEBUG: Updating existing Draft TS {existing_active_ts_name} for Proj {erpnext_project_name}.")
+			try:
+				timesheet_to_process = frappe.get_doc("Timesheet", existing_active_ts_name)
+				timesheet_to_process.set("time_logs", []) 
+				is_newly_created_ts = False
+			except Exception as e_get_draft:
+				frappe.log_error(message=f"Failed to get draft TS {existing_active_ts_name} for update: {e_get_draft}. Will create new.", title=script_log_title)
+				timesheet_to_process = None # Force new creation
+	
+	if not timesheet_to_process: # Create new if no existing draft to update or submitted one was cancelled
+		timesheet_to_process = frappe.new_doc("Timesheet")
+		timesheet_to_process.employee = employee_doc.name
+		timesheet_to_process.parent_project = erpnext_project_name
+		timesheet_to_process.company = employee_doc.company 
+		timesheet_to_process.start_date = date_to_sync_obj
+		timesheet_to_process.end_date = date_to_sync_obj
+		is_newly_created_ts = True 
+		print(f"DEBUG: Prepared new TS for Proj: {erpnext_project_name}")
+
+	if not timesheet_to_process:
+		print(f"ERROR: Timesheet document could not be prepared for {erpnext_project_name} with positive hours.")
+		return None
+
+	_populate_timesheet_details(
+		timesheet_to_process, time_entries_for_project, task_map, 
+		erpnext_project_name, default_activity_type, start_dt_for_report, script_log_title
+	)
+	timesheet_to_process.total_hours = current_project_total_hours
+	
+	try:
+		timesheet_to_process.flags.ignore_permissions = True
+		timesheet_to_process.save() 
+		log_action = "created (as Draft)" if is_newly_created_ts else f"updated (Status: {timesheet_to_process.status})"
+		frappe.logger(script_log_title).info(f"Timesheet '{timesheet_to_process.name}' {log_action} for Emp {employee_doc.name}, Proj {erpnext_project_name}, Date {date_to_sync_obj.strftime('%Y-%m-%d')} (TH: {timesheet_to_process.total_hours})")
+		return timesheet_to_process.name
+	except Exception as e_save:
+		frappe.log_error(message=f"Save failed for TS for Emp {employee_doc.name}, Proj '{erpnext_project_name}'. Error: {e_save}", title=script_log_title)
+		return None
+
+def _handle_zero_hours_project(
+	existing_active_ts_name: str | None, 
+	employee_id: str, 
+	erpnext_project_name: str, 
+	date_to_sync_str: str, 
+	script_log_title: str
+) -> str | None:
+	"""Handles cancellation of existing timesheet if Clockify reports 0 hours."""
+	if existing_active_ts_name:
+		if _cancel_erpnext_timesheet(existing_active_ts_name, employee_id, date_to_sync_str, f"0 hrs for {erpnext_project_name}", script_log_title):
+			return existing_active_ts_name
+	return None
+
+# --- Main Sync Function ---
+def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
+	"""
+	Syncs Clockify time entries for a single employee for a specific date.
+	Strategy:
+	1. Fetch existing active (Draft/Submitted) ERPNext Timesheets for the employee/date.
+	2. Fetch Clockify data for the employee/day.
+	3. Process Clockify Projects:
+	   - If Clockify project has hours > 0:
+		 - If new TS: Create as Draft and save.
+		 - If existing TS (Draft/Submitted): Update details and save (docstatus unchanged by this script).
+	   - If Clockify project has 0 hours:
+		 - If existing active TS found: 
+		   - If Draft: Submit, then set docstatus = 2 and Save.
+		   - If Submitted: Set docstatus = 2 and Save.
+		 - Else, do nothing.
+	   - Mark TS name as processed.
+	4. Reconcile: For orphaned active ERPNext Timesheets:
+	   - If Draft: Submit, then set docstatus = 2 and Save.
+	   - If Submitted: Set docstatus = 2 and Save.
+	"""
+	script_log_title = "Clockify Timesheet Sync"
+	date_to_sync_obj = getdate(date_to_sync_str)
+
+	try:
+		all_active_ts_names_for_day, project_to_ts_info_map = _get_active_timesheets_data(employee_id, date_to_sync_obj)
+	except Exception as e:
+		frappe.log_error(message=f"Error fetching active timesheets for {employee_id} on {date_to_sync_str}: {e}", title=script_log_title)
+		return
+
+	processed_timesheet_names = set()
+
+	default_activity_type_name = "Task"
+	default_erpnext_activity_type = frappe.db.get_value("Activity Type", {"name": default_activity_type_name}, "name")
+	if not default_erpnext_activity_type:
+		try:
+			activity_type_doc = frappe.new_doc("Activity Type")
+			activity_type_doc.name = default_activity_type_name
+			activity_type_doc.activity_type = default_activity_type_name
+			activity_type_doc.insert(ignore_permissions=True)
+			default_erpnext_activity_type = activity_type_doc.name
+			frappe.logger(script_log_title).info(f"Successfully created Activity Type: {default_erpnext_activity_type}")
+		except Exception as e:
+			frappe.log_error(message=f"Failed to create Activity Type '{default_activity_type_name}'. Error: {e}. Please create it manually. Aborting sync for {employee_id}.", title=script_log_title)
+			return
+
+	custom_api_key, workspace_ids = get_system_clockify_settings()
+	employee_doc = None
+	clockify_user_id_for_report = None
+
+	if not custom_api_key or not workspace_ids:
+		frappe.log_error(message=f"Clockify API Key or Workspace IDs not configured in system settings", title=script_log_title)
+		return
+
+	try:
+		employee_doc = frappe.get_doc("Employee", employee_id)
+		clockify_user_id_for_report = employee_doc.get("custom_clockify_user_id")
+		if not clockify_user_id_for_report:
+			employee_email_for_clockify = employee_doc.company_email or employee_doc.user_id
+			if employee_email_for_clockify and "@" in employee_email_for_clockify:
+				for ws_id in workspace_ids:
+					fetched_user_id = get_clockify_user_id_by_email(custom_api_key, ws_id, employee_email_for_clockify)
+					if fetched_user_id:
+						clockify_user_id_for_report = fetched_user_id
+						break 
+		
+		if not clockify_user_id_for_report and (custom_api_key and workspace_ids): # Only critical if we intended to fetch Clockify data
+			frappe.log_error(message=f"Clockify User ID could not be determined for Emp {employee_id}. Reconciliation will run, but no new Clockify data will be fetched.", title=script_log_title)
+			all_clockify_project_data_from_report = [] # Ensure it's empty
+	except frappe.DoesNotExistError:
+		frappe.log_error(message=f"Employee {employee_id} not found. Aborting sync for this employee.", title=script_log_title)
+		return 
+	except Exception as e:
+		frappe.log_error(message=f"Error processing employee {employee_id} for Clockify User ID: {e}. Aborting sync.", title=script_log_title)
+		return
+
+	start_dt_for_report = get_datetime(f"{date_to_sync_str} 00:00:00")
+	all_clockify_project_data_from_report = []
+	if custom_api_key and workspace_ids and clockify_user_id_for_report:
+		for workspace_id in workspace_ids:
+			report_task_id = get_clockify_report_task_id(workspace_id, start_dt_for_report, get_datetime(f"{date_to_sync_str} 23:59:59"), clockify_user_id_for_report, custom_api_key)
+			if not report_task_id:
+				continue
+			report_result = get_clockify_report_result(workspace_id, report_task_id, custom_api_key)
+			if report_result and report_result.get("groupOne"):
+				all_clockify_project_data_from_report.extend(report_result["groupOne"])
+			else:
+				continue
+
+	clockify_project_api_ids_from_report = [p.get("_id") for p in all_clockify_project_data_from_report if p.get("_id")]
+	erpnext_project_map = _get_erpnext_project_map(clockify_project_api_ids_from_report)
+
+	for clockify_project_entry in all_clockify_project_data_from_report:
+		clockify_project_api_id = clockify_project_entry.get("_id")
+		erpnext_project_name = erpnext_project_map.get(clockify_project_api_id)
+
+		if not erpnext_project_name:
+			continue
+
+		current_project_total_hours_from_clockify = 0
+		time_entries_for_this_project_list = [] 
+		if clockify_project_entry.get("children"):
+			for task_level_entry in clockify_project_entry["children"]:
+				if task_level_entry.get("children"):
+					for time_entry_record in task_level_entry["children"]:
+						duration_seconds = time_entry_record.get("duration", 0)
+						if duration_seconds > 0:
+							hours = flt(duration_seconds / 3600.0, 2)
+							if hours > 0:
+								current_project_total_hours_from_clockify += hours
+								time_entries_for_this_project_list.append({
+									"task_api_id": task_level_entry.get("_id"),
+									"task_subject": task_level_entry.get("name", "").strip(),
+									"description": time_entry_record.get("name", "").strip(),
+									"hours": hours
+								})
+		
+		company_for_tasks = employee_doc.company if employee_doc else None # employee_doc should be valid if we are here
+		
+		task_map = _get_or_create_task_map(time_entries_for_this_project_list, erpnext_project_name, company_for_tasks, script_log_title)
+		existing_ts_info = project_to_ts_info_map.get(erpnext_project_name)
+
+		processed_ts_name_for_project = None
+		if current_project_total_hours_from_clockify > 0:
+			processed_ts_name_for_project = _handle_positive_hours_project(
+				employee_doc, erpnext_project_name, date_to_sync_obj, start_dt_for_report,
+				current_project_total_hours_from_clockify, time_entries_for_this_project_list,
+				existing_ts_info, task_map, default_erpnext_activity_type, script_log_title
+			)
+		else: # 0 hours from Clockify for this project
+			existing_ts_name_for_zero_hrs = existing_ts_info.get("name") if existing_ts_info else None
+			processed_ts_name_for_project = _handle_zero_hours_project(
+				existing_ts_name_for_zero_hrs, employee_id, erpnext_project_name, 
+				date_to_sync_str, script_log_title
+			)
+
+		if processed_ts_name_for_project:
+			processed_timesheet_names.add(processed_ts_name_for_project)
+			if existing_ts_info and existing_ts_info.get("name") != processed_ts_name_for_project:
+				# If a new timesheet replaced an old one (e.g. submitted was cancelled, new draft created)
+				# Ensure the old one (if it was different) is also marked as processed (implicitly by being cancelled and replaced)
+				processed_timesheet_names.add(existing_ts_info.get("name"))
+
+	# Reconcile orphaned timesheets
+	orphaned_timesheet_names = all_active_ts_names_for_day - processed_timesheet_names
+	for orphaned_ts_name in orphaned_timesheet_names:
+		_cancel_erpnext_timesheet(orphaned_ts_name, employee_id, date_to_sync_str, "Orphaned", script_log_title)
+
+
+# --- Scheduled Job Function ---
+def run_daily_clockify_sync():
+	"""
+	Scheduled job to sync Clockify data for all active employees for today.
+	"""
+	script_log_title = "Clockify Daily Timesheet Sync - Main"
+	# date_to_process_str = "2025-06-02"
+	date_to_process_str = nowdate() # Sync for today
+
+	frappe.logger(script_log_title).info(f"Starting Clockify daily sync for date: {date_to_process_str}")
+
+	# active_employees = frappe.get_all("Employee",
+	# 								  filters={"status": "Active", "custom_clockify_user_id": ["is", "set"]},
+	# 								  fields=["name"])
+	active_employees = [
+		{"user_id": "laiba.masood@bitsol.tech", "name": "HR-EMP-00056"},
+	]
+	if not active_employees:
+		frappe.logger(script_log_title).info("No active employees found with 'custom_clockify_user_id' set. Exiting sync.")
+		return
+
+	for emp in active_employees:
+		frappe.logger(script_log_title).info(f"Processing sync for employee: {emp['name']}")
+		try:
+			sync_single_employee_clockify_to_timesheet(emp['name'], date_to_process_str)
+		except Exception as e:
+			# Catching any unexpected errors during the processing for a single employee
+			frappe.log_error(message=f"Unhandled error syncing Clockify for employee {emp['name']} on {date_to_process_str}: {e}",
+							 title=f"{script_log_title} - Employee Error for {emp['name']}")
+	
+	try:
+		frappe.db.commit() # Commit all changes at the end of the batch
+		frappe.logger(script_log_title).info(f"Clockify daily sync completed and committed for date: {date_to_process_str}")
+	except Exception as e:
+		frappe.log_error(message=f"Error committing changes at the end of Clockify sync: {e}", title=script_log_title)
+		frappe.db.rollback()
+
+
