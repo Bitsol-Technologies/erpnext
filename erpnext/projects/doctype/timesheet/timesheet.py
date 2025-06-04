@@ -11,8 +11,7 @@ from frappe.utils import add_to_date, flt, get_datetime, getdate, nowdate, time_
 from hrms.hr.doctype.employee_checkin.employee_checkin import (
 	get_clockify_report_result,
 	get_clockify_report_task_id,
-	get_clockify_user_id_by_email,
-	get_system_clockify_settings,
+	get_employee_clockify_details
 )
 
 from erpnext.controllers.queries import get_match_cond
@@ -999,61 +998,38 @@ def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 			)
 			return
 
-	custom_api_key, workspace_ids = get_system_clockify_settings()
-	employee_doc = None
-	clockify_user_id_for_report = None
+	(
+		custom_api_key,
+		custom_user_id,
+		workspace_ids,
+		employee_doc, 
+		_user_id,   
+	) = get_employee_clockify_details(employee_id)
 
 	if not custom_api_key or not workspace_ids:
 		frappe.log_error(
-			message=f"Clockify API Key or Workspace IDs not configured in system settings",
+			message=f"Clockify system settings are missing for Emp {employee_id}",
 			title=script_log_title,
 		)
-		return
+		return 
 
-	try:
-		employee_doc = frappe.get_doc("Employee", employee_id)
-		clockify_user_id_for_report = employee_doc.get("custom_clockify_user_id")
-		if not clockify_user_id_for_report:
-			employee_email_for_clockify = employee_doc.company_email or employee_doc.user_id
-			if employee_email_for_clockify and "@" in employee_email_for_clockify:
-				for ws_id in workspace_ids:
-					fetched_user_id = get_clockify_user_id_by_email(
-						custom_api_key, ws_id, employee_email_for_clockify
-					)
-					if fetched_user_id:
-						clockify_user_id_for_report = fetched_user_id
-						break
+	if not custom_user_id:
+		frappe.log_error(
+			message=f"Clockify user ID is missing for Emp {employee_id}",
+			title=script_log_title,
+		)
+		return 
 
-		if not clockify_user_id_for_report and (
-			custom_api_key and workspace_ids
-		):  # Only critical if we intended to fetch Clockify data
-			frappe.log_error(
-				message=f"Clockify User ID could not be determined for Emp {employee_id}. Reconciliation will run, but no new Clockify data will be fetched.",
-				title=script_log_title,
-			)
-			all_clockify_project_data_from_report = []  # Ensure it's empty
-	except frappe.DoesNotExistError:
-		frappe.log_error(
-			message=f"Employee {employee_id} not found. Aborting sync for this employee.",
-			title=script_log_title,
-		)
-		return
-	except Exception as e:
-		frappe.log_error(
-			message=f"Error processing employee {employee_id} for Clockify User ID: {e}. Aborting sync.",
-			title=script_log_title,
-		)
-		return
 
 	start_dt_for_report = get_datetime(f"{date_to_sync_str} 00:00:00")
 	all_clockify_project_data_from_report = []
-	if custom_api_key and workspace_ids and clockify_user_id_for_report:
+	if custom_api_key and workspace_ids and custom_user_id:
 		for workspace_id in workspace_ids:
 			report_task_id = get_clockify_report_task_id(
 				workspace_id,
 				start_dt_for_report,
 				get_datetime(f"{date_to_sync_str} 23:59:59"),
-				clockify_user_id_for_report,
+				custom_user_id,
 				custom_api_key,
 			)
 			if not report_task_id:
@@ -1150,8 +1126,8 @@ def run_daily_clockify_sync():
 	Scheduled job to sync Clockify data for all active employees for today.
 	"""
 	script_log_title = "Clockify Daily Timesheet Sync - Main"
-	# date_to_process_str = "2025-06-02"
-	date_to_process_str = nowdate()  # Sync for today
+	# date_to_process_str = "2025-06-03"
+	date_to_process_str = frappe.utils.add_days(frappe.utils.nowdate(), -1)  # Sync for yesterday
 
 	frappe.logger(script_log_title).info(f"Starting Clockify daily sync for date: {date_to_process_str}")
 
@@ -1159,7 +1135,10 @@ def run_daily_clockify_sync():
 	# 								  filters={"status": "Active", "custom_clockify_user_id": ["is", "set"]},
 	# 								  fields=["name"])
 	active_employees = [
+		{"user_id": "wajahat@bitsol.tech", "name": "HR-EMP-00058"},
 		{"user_id": "laiba.masood@bitsol.tech", "name": "HR-EMP-00056"},
+		{"user_id": "waqas@bitsol.tech", "name": "HR-EMP-00012"},
+		{"user_id": "sameen@bitsol.tech", "name": "HR-EMP-00053"},
 	]
 	if not active_employees:
 		frappe.logger(script_log_title).info(
