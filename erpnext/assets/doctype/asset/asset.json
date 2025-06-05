@@ -23,9 +23,11 @@
   "naming_series",
   "asset_name",
   "asset_category",
+  "condition",
   "location",
   "split_from",
   "custodian",
+  "custodian_name",
   "department",
   "disposal_date",
   "accounting_dimensions_section",
@@ -549,6 +551,20 @@
    "hidden": 1,
    "label": "Purchase Invoice Item",
    "options": "Purchase Invoice Item"
+  },
+  {
+   "fetch_from": "custodian.employee_name",
+   "fieldname": "custodian_name",
+   "fieldtype": "Data",
+   "ignore_user_permissions": 1,
+   "label": "Custodian Name"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "condition",
+   "fieldtype": "Select",
+   "label": "Condition",
+   "options": "New\nUsed\nDamaged\nUnusable\nOutdated"
   }
  ],
  "idx": 72,
@@ -592,7 +608,7 @@
    "link_fieldname": "target_asset"
   }
  ],
- "modified": "2025-02-20 14:09:05.421913",
+ "modified": "2025-05-30 13:15:53.776351",
  "modified_by": "Administrator",
  "module": "Assets",
  "name": "Asset",
@@ -630,6 +646,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "show_name_in_global_search": 1,
  "sort_field": "modified",
  "sort_order": "DESC",
