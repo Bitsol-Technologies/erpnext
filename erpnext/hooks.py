@@ -427,6 +427,9 @@ scheduler_events = {
 		"45 0 * * *": [
 			"erpnext.stock.reorder_item.reorder_item",
 		],
+        "10 8 * * *": [
+            "erpnext.projects.doctype.timesheet.timesheet.run_daily_clockify_sync",
+        ],
 	},
 	"hourly": [
 		"erpnext.erpnext_integrations.doctype.plaid_settings.plaid_settings.automatic_synchronization",

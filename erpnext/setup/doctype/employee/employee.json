@@ -79,6 +79,7 @@
   "salary_mode",
   "bank_details_section",
   "bank_name",
+  "hourly_rate",
   "column_break_heye",
   "bank_ac_no",
   "iban",
@@ -1063,6 +1064,11 @@
    "fieldtype": "Data",
    "label": "Designation",
    "permlevel": 1
+  },
+  {
+   "fieldname": "hourly_rate",
+   "fieldtype": "Currency",
+   "label": "Hourly Rate"
   }
  ],
  "icon": "fa fa-user",
@@ -1075,7 +1081,7 @@
    "link_fieldname": "employee"
   }
  ],
- "modified": "2025-02-07 13:54:40.122345",
+ "modified": "2025-05-28 12:59:10.821641",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee",
@@ -1141,6 +1147,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "search_fields": "employee_name",
  "show_name_in_global_search": 1,
  "sort_field": "modified",
