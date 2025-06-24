@@ -11,7 +11,8 @@ from frappe.utils import add_to_date, flt, get_datetime, getdate, nowdate, time_
 from hrms.hr.doctype.employee_checkin.employee_checkin import (
 	get_clockify_report_result,
 	get_clockify_report_task_id,
-	get_employee_clockify_details
+	get_employee_clockify_details,
+	get_all_active_employees
 )
 
 from erpnext.controllers.queries import get_match_cond
@@ -643,8 +644,8 @@ def _get_erpnext_project_map(clockify_project_api_ids: list) -> dict:
 def _get_active_timesheets_data(employee_id: str, date_to_sync_obj: object) -> tuple[set, dict]:
 	"""Fetches active timesheets for the day for an employee.
 	Returns:
-	        all_active_ts_names (set): Names of all active timesheets for the employee/day.
-	        project_to_ts_info_map (dict): Maps ERPNext project name to its active timesheet info (name, docstatus).
+			all_active_ts_names (set): Names of all active timesheets for the employee/day.
+			project_to_ts_info_map (dict): Maps ERPNext project name to its active timesheet info (name, docstatus).
 	"""
 	filters = {
 		"employee": employee_id,
@@ -951,13 +952,13 @@ def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 	2. Fetch Clockify data for the employee/day.
 	3. Process Clockify Projects:
 	   - If Clockify project has hours > 0:
-	         - If new TS: Create as Draft and save.
-	         - If existing TS (Draft/Submitted): Update details and save (docstatus unchanged by this script).
+			 - If new TS: Create as Draft and save.
+			 - If existing TS (Draft/Submitted): Update details and save (docstatus unchanged by this script).
 	   - If Clockify project has 0 hours:
-	         - If existing active TS found:
-	           - If Draft: Submit, then set docstatus = 2 and Save.
-	           - If Submitted: Set docstatus = 2 and Save.
-	         - Else, do nothing.
+			 - If existing active TS found:
+			   - If Draft: Submit, then set docstatus = 2 and Save.
+			   - If Submitted: Set docstatus = 2 and Save.
+			 - Else, do nothing.
 	   - Mark TS name as processed.
 	4. Reconcile: For orphaned active ERPNext Timesheets:
 	   - If Draft: Submit, then set docstatus = 2 and Save.
@@ -1004,8 +1005,8 @@ def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 		custom_api_key,
 		custom_user_id,
 		workspace_ids,
-		employee_doc, 
-		_user_id,   
+		employee_doc,
+		_user_id,
 	) = get_employee_clockify_details(employee_id)
 
 	if not custom_api_key or not workspace_ids:
@@ -1013,14 +1014,14 @@ def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 			message=f"Clockify system settings are missing for Emp {employee_id}",
 			title=script_log_title,
 		)
-		return 
+		return
 
 	if not custom_user_id:
 		frappe.log_error(
 			message=f"Clockify user ID is missing for Emp {employee_id}",
 			title=script_log_title,
 		)
-		return 
+		return
 
 
 	start_dt_for_report = get_datetime(f"{date_to_sync_str} 00:00:00")
@@ -1131,15 +1132,7 @@ def _bulk_sync_clockify(from_date, to_date):
 	from_date_obj = getdate(from_date)
 	to_date_obj = getdate(to_date)
 
-	# active_employees = frappe.get_all(
-	# 	"Employee", filters={"status": "Active", "custom_clockify_user_id": ["is", "set"]}, fields=["name"]
-	# )
-	active_employees = [
-		{"user_id": "wajahat@bitsol.tech", "name": "HR-EMP-00058"},
-		{"user_id": "laiba.masood@bitsol.tech", "name": "HR-EMP-00056"},
-		{"user_id": "waqas@bitsol.tech", "name": "HR-EMP-00012"},
-		{"user_id": "ashar@bitsol.tech", "name": "HR-EMP-00013"},
-	]
+	active_employees = get_all_active_employees()
 
 	if not active_employees:
 		frappe.logger(script_log_title).info(
@@ -1198,15 +1191,8 @@ def run_daily_clockify_sync():
 
 	frappe.logger(script_log_title).info(f"Starting Clockify daily sync for date: {date_to_process_str}")
 
-	# active_employees = frappe.get_all("Employee",
-	# 								  filters={"status": "Active", "custom_clockify_user_id": ["is", "set"]},
-	# 								  fields=["name"])
-	active_employees = [
-		{"user_id": "wajahat@bitsol.tech", "name": "HR-EMP-00058"},
-		{"user_id": "laiba.masood@bitsol.tech", "name": "HR-EMP-00056"},
-		{"user_id": "waqas@bitsol.tech", "name": "HR-EMP-00012"},
-		{"user_id": "ashar@bitsol.tech", "name": "HR-EMP-00013"},
-	]
+	active_employees = get_all_active_employees()
+
 	if not active_employees:
 		frappe.logger(script_log_title).info(
 			"No active employees found with 'custom_clockify_user_id' set. Exiting sync."
