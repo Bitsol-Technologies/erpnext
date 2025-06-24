@@ -11,7 +11,8 @@ from frappe.utils import add_to_date, flt, get_datetime, getdate, nowdate, time_
 from hrms.hr.doctype.employee_checkin.employee_checkin import (
 	get_clockify_report_result,
 	get_clockify_report_task_id,
-	get_employee_clockify_details
+	get_employee_clockify_details,
+	get_all_active_employees
 )
 
 from erpnext.controllers.queries import get_match_cond
@@ -643,8 +644,8 @@ def _get_erpnext_project_map(clockify_project_api_ids: list) -> dict:
 def _get_active_timesheets_data(employee_id: str, date_to_sync_obj: object) -> tuple[set, dict]:
 	"""Fetches active timesheets for the day for an employee.
 	Returns:
-	        all_active_ts_names (set): Names of all active timesheets for the employee/day.
-	        project_to_ts_info_map (dict): Maps ERPNext project name to its active timesheet info (name, docstatus).
+			all_active_ts_names (set): Names of all active timesheets for the employee/day.
+			project_to_ts_info_map (dict): Maps ERPNext project name to its active timesheet info (name, docstatus).
 	"""
 	filters = {
 		"employee": employee_id,
@@ -757,26 +758,27 @@ def _cancel_erpnext_timesheet(
 	try:
 		ts_to_cancel_doc = frappe.get_doc("Timesheet", timesheet_name)
 		ts_to_cancel_doc.flags.ignore_permissions = True
-		original_docstatus = ts_to_cancel_doc.docstatus
 
-		if original_docstatus == 1:  # Submitted
+		if ts_to_cancel_doc.docstatus == 2:  # Already cancelled
+			return True
+
+		# If the document is already submitted, the standard .cancel() method is reliable.
+		if ts_to_cancel_doc.docstatus == 1:
+			ts_to_cancel_doc.cancel()
+
+		# For a Draft document, the submit-then-cancel sequence within one transaction is
+		# unreliable. We will perform the steps manually for robustness.
+		elif ts_to_cancel_doc.docstatus == 0:
+			ts_to_cancel_doc.submit()
+
+			# Manually run the cancellation logic
+			ts_to_cancel_doc.run_method("on_cancel")
 			ts_to_cancel_doc.docstatus = 2
 			ts_to_cancel_doc.save()
-			frappe.logger(script_log_title).info(
-				f"{log_reason_prefix}: Cancelled submitted TS '{timesheet_name}' for Emp {employee_id}, Date {date_str_for_log}"
-			)
-		elif original_docstatus == 0:  # Draft
-			ts_to_cancel_doc.submit()  # Submit first
-			ts_to_cancel_doc.docstatus = 2  # Then cancel
-			ts_to_cancel_doc.save()
-			frappe.logger(script_log_title).info(
-				f"{log_reason_prefix}: Submitted and then Cancelled draft TS '{timesheet_name}' for Emp {employee_id}, Date {date_str_for_log}"
-			)
-		else:  # Already cancelled or other state
-			print(
-				f"DEBUG: Timesheet '{timesheet_name}' already in status {original_docstatus}, no cancellation action needed for '{log_reason_prefix}'."
-			)
-			return True  # Considered processed for this purpose
+
+		frappe.logger(script_log_title).info(
+			f"{log_reason_prefix}: Cancelled TS '{timesheet_name}' for Emp {employee_id}, Date {date_str_for_log}"
+		)
 		return True
 	except Exception as e:
 		frappe.log_error(
@@ -941,6 +943,7 @@ def _handle_zero_hours_project(
 
 
 # --- Main Sync Function ---
+@frappe.whitelist()
 def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 	"""
 	Syncs Clockify time entries for a single employee for a specific date.
@@ -949,13 +952,13 @@ def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 	2. Fetch Clockify data for the employee/day.
 	3. Process Clockify Projects:
 	   - If Clockify project has hours > 0:
-	         - If new TS: Create as Draft and save.
-	         - If existing TS (Draft/Submitted): Update details and save (docstatus unchanged by this script).
+			 - If new TS: Create as Draft and save.
+			 - If existing TS (Draft/Submitted): Update details and save (docstatus unchanged by this script).
 	   - If Clockify project has 0 hours:
-	         - If existing active TS found:
-	           - If Draft: Submit, then set docstatus = 2 and Save.
-	           - If Submitted: Set docstatus = 2 and Save.
-	         - Else, do nothing.
+			 - If existing active TS found:
+			   - If Draft: Submit, then set docstatus = 2 and Save.
+			   - If Submitted: Set docstatus = 2 and Save.
+			 - Else, do nothing.
 	   - Mark TS name as processed.
 	4. Reconcile: For orphaned active ERPNext Timesheets:
 	   - If Draft: Submit, then set docstatus = 2 and Save.
@@ -1002,8 +1005,8 @@ def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 		custom_api_key,
 		custom_user_id,
 		workspace_ids,
-		employee_doc, 
-		_user_id,   
+		employee_doc,
+		_user_id,
 	) = get_employee_clockify_details(employee_id)
 
 	if not custom_api_key or not workspace_ids:
@@ -1011,14 +1014,14 @@ def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 			message=f"Clockify system settings are missing for Emp {employee_id}",
 			title=script_log_title,
 		)
-		return 
+		return
 
 	if not custom_user_id:
 		frappe.log_error(
 			message=f"Clockify user ID is missing for Emp {employee_id}",
 			title=script_log_title,
 		)
-		return 
+		return
 
 
 	start_dt_for_report = get_datetime(f"{date_to_sync_str} 00:00:00")
@@ -1120,6 +1123,63 @@ def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 		)
 
 
+def _bulk_sync_clockify(from_date, to_date):
+	"""
+	Internal function to sync clockify data for all employees for a given date range.
+	This is intended to be run in a background job.
+	"""
+	script_log_title = "Clockify Bulk Timesheet Sync"
+	from_date_obj = getdate(from_date)
+	to_date_obj = getdate(to_date)
+
+	active_employees = get_all_active_employees()
+
+	if not active_employees:
+		frappe.logger(script_log_title).info(
+			"No active employees found with 'custom_clockify_user_id' set. Exiting bulk sync."
+		)
+		return
+
+	current_date = from_date_obj
+	while current_date <= to_date_obj:
+		date_to_process_str = current_date.strftime("%Y-%m-%d")
+		for emp in active_employees:
+			try:
+				sync_single_employee_clockify_to_timesheet(emp["name"], date_to_process_str)
+			except Exception as e:
+				frappe.log_error(
+					message=f"Error in bulk sync for Emp {emp['name']} on {date_to_process_str}: {e}",
+					title=f"{script_log_title} - Employee Error",
+				)
+
+		current_date = add_to_date(current_date, days=1)
+
+	frappe.db.commit()
+	frappe.logger(script_log_title).info(
+		f"Clockify bulk sync completed for date range: {from_date} to {to_date}"
+	)
+
+
+@frappe.whitelist()
+def bulk_sync_clockify_timesheets(from_date, to_date):
+	"""
+	Enqueue a background job to sync Clockify timesheets for all active employees
+	for a given date range.
+	"""
+	frappe.enqueue(
+		_bulk_sync_clockify,
+		queue="long",
+		timeout=1800,
+		from_date=from_date,
+		to_date=to_date,
+	)
+	frappe.msgprint(
+		_("Clockify sync has been queued for the date range. This will run in the background."),
+		title="Sync Queued",
+		indicator="green",
+	)
+
+
 # --- Scheduled Job Function ---
 def run_daily_clockify_sync():
 	"""
@@ -1131,15 +1191,8 @@ def run_daily_clockify_sync():
 
 	frappe.logger(script_log_title).info(f"Starting Clockify daily sync for date: {date_to_process_str}")
 
-	# active_employees = frappe.get_all("Employee",
-	# 								  filters={"status": "Active", "custom_clockify_user_id": ["is", "set"]},
-	# 								  fields=["name"])
-	active_employees = [
-		{"user_id": "wajahat@bitsol.tech", "name": "HR-EMP-00058"},
-		{"user_id": "laiba.masood@bitsol.tech", "name": "HR-EMP-00056"},
-		{"user_id": "waqas@bitsol.tech", "name": "HR-EMP-00012"},
-		{"user_id": "sameen@bitsol.tech", "name": "HR-EMP-00053"},
-	]
+	active_employees = get_all_active_employees()
+
 	if not active_employees:
 		frappe.logger(script_log_title).info(
 			"No active employees found with 'custom_clockify_user_id' set. Exiting sync."

@@ -58,6 +58,31 @@ frappe.ui.form.on("Timesheet", {
 		}
 
 		if (frm.doc.docstatus < 1) {
+			if (frappe.user.has_role("HR Manager")) {
+				frm.add_custom_button(__("Resync Clockify"), function () {
+					if (!frm.doc.employee || !frm.doc.start_date) {
+						frappe.msgprint(__("Employee and Start Date must be set to sync from Clockify."));
+						return;
+					}
+
+					frappe.call({
+						method: "erpnext.projects.doctype.timesheet.timesheet.sync_single_employee_clockify_to_timesheet",
+						args: {
+							employee_id: frm.doc.employee,
+							date_to_sync_str: frm.doc.start_date,
+						},
+						callback: function (r) {
+							if (!r.exc) {
+								frappe.msgprint(__("Clockify data re-synced successfully."));
+								frm.reload_doc();
+							}
+						},
+						freeze: true,
+						freeze_message: __("Syncing from Clockify..."),
+					});
+				});
+			}
+
 			let button = __("Start Timer");
 			$.each(frm.doc.time_logs || [], function (i, row) {
 				if (row.from_time <= frappe.datetime.now_datetime() && !row.completed) {

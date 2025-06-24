@@ -142,7 +142,9 @@
   {
    "fieldname": "start_date",
    "fieldtype": "Date",
+   "in_filter": 1,
    "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Start Date",
    "print_hide": 1,
    "read_only": 1
@@ -328,7 +330,7 @@
  "idx": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-06-04 10:16:48.604590",
+ "modified": "2025-06-23 12:20:02.436383",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Timesheet",
