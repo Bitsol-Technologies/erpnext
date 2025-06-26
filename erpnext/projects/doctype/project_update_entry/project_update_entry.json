@@ -1,0 +1,103 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-06-25 10:59:45.476955",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "date",
+  "done_task",
+  "risks_red_flags",
+  "decision_support",
+  "deadline",
+  "deadline_desciption",
+  "column_break_lkmi",
+  "previous_issues",
+  "next_milestones",
+  "recources"
+ ],
+ "fields": [
+  {
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Date"
+  },
+  {
+   "fieldname": "done_task",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Done Tasks"
+  },
+  {
+   "fieldname": "risks_red_flags",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Risks or Red Flags"
+  },
+  {
+   "fieldname": "decision_support",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Decisions or Support"
+  },
+  {
+   "fieldname": "deadline",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Next Deadline"
+  },
+  {
+   "fieldname": "column_break_lkmi",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "previous_issues",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Previous Issues"
+  },
+  {
+   "fieldname": "next_milestones",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Next Milestones"
+  },
+  {
+   "fieldname": "recources",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Resources"
+  },
+  {
+   "fieldname": "deadline_desciption",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Deadline Description"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-06-25 11:13:10.128309",
+ "modified_by": "Administrator",
+ "module": "Projects",
+ "name": "Project Update Entry",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
