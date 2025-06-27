@@ -96,7 +96,8 @@
   "code_repo_link",
   "section_break_btyu",
   "tools_and_technologies",
-  "clockify_project_id"
+  "clockify_project_id",
+  "project_daily_update"
  ],
  "fields": [
   {
@@ -670,6 +671,12 @@
    "fieldname": "clockify_project_id",
    "fieldtype": "Data",
    "label": "Clockify Project ID"
+  },
+  {
+   "fieldname": "project_daily_update",
+   "fieldtype": "Table",
+   "label": "Project Daily Updates",
+   "options": "Project Update Entry"
   }
  ],
  "grid_page_length": 50,
@@ -683,7 +690,7 @@
   }
  ],
  "max_attachments": 4,
- "modified": "2025-05-29 12:11:39.979763",
+ "modified": "2025-06-25 11:06:30.092061",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Project",
