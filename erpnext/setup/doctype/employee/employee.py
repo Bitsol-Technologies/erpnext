@@ -27,7 +27,7 @@ class Employee(NestedSet):
 	nsm_parent_field = "reports_to"
 
 	def before_save(self):
-		if self.medical_allowance and self.medical_availed:
+		if self.get("medical_allowance"):
 			self.set("medical_balance", self.medical_allowance - self.medical_availed)
 
 	def autoname(self):
