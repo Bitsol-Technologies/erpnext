@@ -439,3 +439,38 @@ def has_upload_permission(doc, ptype="read", user=None):
 	if get_doc_permissions(doc, user=user, ptype=ptype).get(ptype):
 		return True
 	return doc.user_id == user
+
+
+@frappe.whitelist()
+def recalculate_medical_balance(employee_name):
+	"""
+	Reset and recalculate medical_availed and medical_balance for the given employee based on approved Medical reimbursements for the current year.
+	"""
+	employee = frappe.get_doc("Employee", employee_name)
+	employee.medical_availed = 0
+	employee.medical_balance = 0
+
+	from datetime import datetime
+	year_start = datetime.today().replace(month=1, day=1).date()
+	year_end = datetime.today().replace(month=12, day=31).date()
+
+	reimbursements = frappe.get_all(
+		"Reimbursement",
+		filters={
+			"employee": employee_name,
+			"reimbursement_type": "Medical",
+			"status": "Approved",
+			"docstatus": 1,
+			"reimbursement_date": ["between", [year_start, year_end]],
+		},
+		fields=["total_amount"],
+	)
+
+	total_availed = sum(r["total_amount"] for r in reimbursements)
+	employee.medical_availed = total_availed
+	employee.medical_balance = employee.medical_allowance - total_availed
+	employee.save(ignore_permissions=True)
+	return {
+		"medical_availed": employee.medical_availed,
+		"medical_balance": employee.medical_balance,
+	}

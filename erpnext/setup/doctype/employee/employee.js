@@ -17,6 +17,24 @@ erpnext.setup.EmployeeController = class EmployeeController extends frappe.ui.fo
 
 	refresh() {
 		erpnext.toggle_naming_series();
+
+		// Add custom button for recalculating medical balance
+		if (!this.frm.is_new()) {
+			this.frm.add_custom_button(__('Recalculate Medical Balance'), () => {
+				frappe.call({
+					method: 'erpnext.setup.doctype.employee.employee.recalculate_medical_balance',
+					args: { employee_name: this.frm.doc.name },
+					freeze: true,
+					callback: (r) => {
+						if (r.message) {
+							this.frm.set_value('medical_availed', r.message.medical_availed);
+							this.frm.set_value('medical_balance', r.message.medical_balance);
+							frappe.msgprint(__('Medical balance recalculated successfully.'));
+						}
+					}
+				});
+			});
+		}
 	}
 };
 
