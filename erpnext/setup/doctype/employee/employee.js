@@ -19,7 +19,7 @@ erpnext.setup.EmployeeController = class EmployeeController extends frappe.ui.fo
 		erpnext.toggle_naming_series();
 
 		// Add custom button for recalculating medical balance
-		if (!this.frm.is_new()) {
+		if (!this.frm.is_new() && frappe.user.has_role('HR Manager')) {
 			this.frm.add_custom_button(__('Recalculate Medical Balance'), () => {
 				frappe.call({
 					method: 'erpnext.setup.doctype.employee.employee.recalculate_medical_balance',

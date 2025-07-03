@@ -61,6 +61,16 @@ frappe.pages["editable_project_upd"].on_page_load = function (wrapper) {
                 padding: 2px 8px !important;
                 width: 60px;
             }
+            .date-sort-arrows {
+                font-size: 10px;
+                color: #888;
+                vertical-align: middle;
+                margin-left: 2px;
+                user-select: none;
+            }
+            .date-sort-arrows:hover {
+                color: #333;
+            }
         </style>
     `;
 	$(style).appendTo("head");
@@ -221,23 +231,36 @@ frappe.pages["editable_project_upd"].on_page_load = function (wrapper) {
 			return;
 		}
 
+		// Sorting state
+		if (typeof window.dateSortOrder === 'undefined') window.dateSortOrder = 'desc';
+
 		const columns = [
-			{ id: "date", label: "Date", format: (v) => (v ? frappe.datetime.str_to_user(v) : "") },
+			{ id: "date", label: `Date <span class='date-sort-arrows' style='cursor:pointer;'>${window.dateSortOrder === 'asc' ? '▲' : '▼'}</span>`, format: (v) => (v ? frappe.datetime.str_to_user(v) : "") },
 			{
 				id: "project_name",
 				label: "Project",
 				format: (v, row) => `<a href="/app/project/${row.parent}" target="_blank">${v}</a>`,
 			},
 			{ id: "done_task", label: "Done Task" },
-			{ id: "recources", label: "Resources" },
+			{ id: "previous_issues", label: "Previous Issues" },
 			{ id: "risks_red_flags", label: "Risks" },
-			{ id: "decision_support", label: "Support" },
-			{ id: "previous_issues", label: "Prev Issues" },
-			{ id: "deadline", label: "Deadline", format: (v) => (v ? frappe.datetime.str_to_user(v) : "") },
-			{ id: "deadline_desciption", label: "Description" },
-			{ id: "next_milestones", label: "Milestones" },
+			{ id: "recources", label: "Resources" },
+			{ id: "decision_support", label: "Decisions / Support" },
+			{ id: "deadline", label: "Next Deadline", format: (v) => (v ? frappe.datetime.str_to_user(v) : "") },
+			{ id: "next_milestones", label: "Next Milestones" },
 			{ id: "action", label: "Action" },
 		];
+
+		// Sort page_data by date
+		page_data.sort((a, b) => {
+			const dateA = a.date || '';
+			const dateB = b.date || '';
+			if (window.dateSortOrder === 'asc') {
+				return dateA.localeCompare(dateB);
+			} else {
+				return dateB.localeCompare(dateA);
+			}
+		});
 
 		let table_html = `<table class="table table-bordered"><thead><tr>`;
 		columns.forEach((col) => {
@@ -271,6 +294,12 @@ frappe.pages["editable_project_upd"].on_page_load = function (wrapper) {
 		add_row_container.html(`
             <button class="btn btn-primary btn-add-row">Add Row</button>
         `);
+
+		// Add click event for date sort arrows
+		table_container.find('.date-sort-arrows').on('click', function() {
+			window.dateSortOrder = window.dateSortOrder === 'asc' ? 'desc' : 'asc';
+			render_table();
+		});
 	}
 
 	// Delegated event listeners
