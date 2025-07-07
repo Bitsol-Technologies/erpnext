@@ -35,8 +35,51 @@ erpnext.setup.EmployeeController = class EmployeeController extends frappe.ui.fo
 				});
 			});
 		}
+
+		add_offboarding_button(this.frm);
 	}
 };
+
+function add_offboarding_button(frm) {
+	if (
+		frm.doc.name &&
+		(frm.doc.held_on || frm.doc.relieving_date || frm.doc.resignation_letter_date || frm.doc.reason_for_leaving)
+	) {
+		frappe.call({
+			method: "hrms.hr.doctype.employee_separation.employee_separation.check_employee_separation_exists",
+			args: { employee: frm.doc.name },
+			callback: function(r) {
+				if (!r.message.exists) {
+					frm.add_custom_button(__('Offboarding'), function () {
+						let d = new frappe.ui.Dialog({
+							title: __('Create Offboarding'),
+							fields: [
+								{ fieldtype: 'Date', fieldname: 'relieving_date', label: __('Relieving Date'), reqd: 1, default: frm.doc.relieving_date },
+								{ fieldtype: 'Link', fieldname: 'employee', label: __('Employee'), reqd: 1, options: 'Employee', default: frm.doc.name },
+								{ fieldtype: 'Link', fieldname: 'company', label: __('Company'), reqd: 1, default: frm.doc.company },
+								{ fieldtype: 'Link', fieldname: 'employee_separation_template', label: __('Employee Separation Template'), reqd: 1, options: 'Employee Separation Template', default: frm.doc.employee_separation_template },
+							],
+							primary_action_label: __('Create Offboarding'),
+							primary_action(values) {
+								frappe.call({
+									method: 'hrms.hr.doctype.employee_separation.employee_separation.create_employee_separation_from_employee',
+									args: values,
+									callback: function (r) {
+										if (r.message) {
+											frappe.set_route('Form', 'Employee Separation', r.message);
+											d.hide();
+										}
+									}
+								});
+							}
+						});
+						d.show();
+					});
+				}
+			}
+		});
+	}
+}
 
 frappe.ui.form.on("Employee", {
 	onload: function (frm) {
@@ -96,6 +139,10 @@ frappe.ui.form.on("Employee", {
 			},
 		});
 	},
+
+	refresh: function(frm) {
+		add_offboarding_button(frm);
+	}
 });
 
 cur_frm.cscript = new erpnext.setup.EmployeeController({
