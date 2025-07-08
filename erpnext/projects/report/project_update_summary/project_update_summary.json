@@ -1,0 +1,144 @@
+{
+ "add_total_row": 0,
+ "add_translate_data": 0,
+ "columns": [
+  {
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "width": 0
+  },
+  {
+   "fieldname": "parent",
+   "fieldtype": "Link",
+   "label": "Project",
+   "options": "Project",
+   "width": 0
+  },
+  {
+   "fieldname": "project_name",
+   "fieldtype": "Data",
+   "label": "Project Name",
+   "width": 0
+  },
+  {
+   "fieldname": "done_task",
+   "fieldtype": "Data",
+   "label": "Done Task",
+   "width": 0
+  },
+  {
+   "fieldname": "recources",
+   "fieldtype": "Data",
+   "label": "Resources",
+   "width": 0
+  },
+  {
+   "fieldname": "risks_red_flags",
+   "fieldtype": "Data",
+   "label": "Risks",
+   "width": 0
+  },
+  {
+   "fieldname": "decision_support",
+   "fieldtype": "Data",
+   "label": "Decision Support",
+   "width": 0
+  },
+  {
+   "fieldname": "previous_issues",
+   "fieldtype": "Data",
+   "label": "Previous Issues",
+   "width": 0
+  },
+  {
+   "fieldname": "deadline",
+   "fieldtype": "Date",
+   "label": "Deadline",
+   "width": 0
+  },
+  {
+   "fieldname": "deadline_desciption",
+   "fieldtype": "Data",
+   "label": "Deadline Description",
+   "width": 0
+  },
+  {
+   "fieldname": "next_milestones",
+   "fieldtype": "Data",
+   "label": "Next Milestones",
+   "width": 0
+  }
+ ],
+ "creation": "2025-06-25 10:54:50.060384",
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "filters": [
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "mandatory": 0,
+   "options": "Project",
+   "wildcard_filter": 0
+  },
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "label": "From Date",
+   "mandatory": 0,
+   "wildcard_filter": 0
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "To Date",
+   "mandatory": 0,
+   "wildcard_filter": 0
+  }
+ ],
+ "idx": 0,
+ "is_standard": "Yes",
+ "letterhead": null,
+ "modified": "2025-07-08 16:01:21.070216",
+ "modified_by": "Administrator",
+ "module": "Projects",
+ "name": "Project Update Summary",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "ref_doctype": "Project",
+ "report_name": "Project Update Summary",
+ "report_script": "if not filters:\r\n    filters = {}\r\n\r\nproject = filters.get(\"project\")\r\nfrom_date = filters.get(\"from_date\")\r\nto_date = filters.get(\"to_date\")\r\n\r\nresult = frappe.db.sql(\"\"\"\r\n    SELECT \r\n        pue.date,\r\n        pue.parent,\r\n        p.project_name,\r\n        pue.done_task,\r\n        pue.recources,\r\n        pue.risks_red_flags,\r\n        pue.decision_support,\r\n        pue.previous_issues,\r\n        pue.deadline,\r\n        pue.deadline_desciption,\r\n        pue.next_milestones\r\n    FROM \r\n        `tabProject` p\r\n    JOIN \r\n        `tabProject Update Entry` pue ON p.name = pue.parent\r\n    WHERE\r\n        (%(project)s IS NULL OR %(project)s = '' OR pue.parent = %(project)s)\r\n        AND (%(from_date)s IS NULL OR pue.date >= %(from_date)s)\r\n        AND (%(to_date)s IS NULL OR pue.date <= %(to_date)s)\r\n    ORDER BY \r\n        pue.date DESC\r\n\"\"\", {\r\n    \"project\": project,\r\n    \"from_date\": from_date,\r\n    \"to_date\": to_date\r\n})\r\n",
+ "report_type": "Script Report",
+ "roles": [
+  {
+   "role": "Projects Manager"
+  },
+  {
+   "role": "Projects User"
+  },
+  {
+   "role": "Employee"
+  },
+  {
+   "role": "HR Manager"
+  },
+  {
+   "role": "Project Manager"
+  },
+  {
+   "role": "Operation Manager"
+  },
+  {
+   "role": "QA Engineer"
+  },
+  {
+   "role": "Employee Self Service"
+  },
+  {
+   "role": "System Manager"
+  }
+ ],
+ "timeout": 0
+}

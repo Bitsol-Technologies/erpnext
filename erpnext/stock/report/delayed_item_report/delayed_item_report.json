@@ -1,14 +1,17 @@
 {
  "add_total_row": 0,
+ "add_translate_data": 0,
+ "columns": [],
  "creation": "2019-06-17 12:45:07.324014",
- "disable_prepared_report": 0,
  "disabled": 0,
  "docstatus": 0,
  "doctype": "Report",
+ "filters": [],
  "idx": 0,
  "is_standard": "Yes",
  "letter_head": "",
- "modified": "2019-06-17 12:45:07.324014",
+ "letterhead": null,
+ "modified": "2025-07-08 16:01:25.143651",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Delayed Item Report",
@@ -32,6 +35,10 @@
   },
   {
    "role": "Maintenance User"
+  },
+  {
+   "role": "System Manager"
   }
- ]
+ ],
+ "timeout": 0
 }
