@@ -586,7 +586,7 @@
    "type": "Link"
   }
  ],
- "modified": "2024-01-18 22:15:40.941711",
+ "modified": "2025-01-27 13:10:26.833704",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Accounting",
@@ -614,7 +614,7 @@
  "quick_lists": [],
  "restrict_to_domain": "",
  "roles": [],
- "sequence_id": 2.0,
+ "sequence_id": 3.0,
  "shortcuts": [
   {
    "color": "Grey",

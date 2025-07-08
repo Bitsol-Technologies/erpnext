@@ -237,7 +237,7 @@
    "type": "Link"
   }
  ],
- "modified": "2023-08-30 15:05:14.579810",
+ "modified": "2025-01-27 13:10:27.953574",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Home",
@@ -248,7 +248,7 @@
  "quick_lists": [],
  "restrict_to_domain": "",
  "roles": [],
- "sequence_id": 3.0,
+ "sequence_id": 8.0,
  "shortcuts": [
   {
    "color": "Grey",
@@ -290,11 +290,6 @@
    "label": "Sales Invoice",
    "link_to": "Sales Invoice",
    "type": "DocType"
-  },
-  {
-   "label": "Leaderboard",
-   "link_to": "leaderboard",
-   "type": "Page"
   }
  ],
  "title": "Home"

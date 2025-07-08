@@ -491,6 +491,7 @@
   {
    "fieldname": "lead",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "PM",
    "options": "Employee"
   },
@@ -521,7 +522,7 @@
    "fieldname": "industry",
    "fieldtype": "Select",
    "label": "Category/Industry",
-   "options": "Audio/Video\nBooks & References\nEcommerce\nEducation\nEvents\nFinance\nHealth\nHealthcare\nLifestyle\nMarketplace\nNews\nPolitics\nReal Estate\nSocial\nSocial Media\nTravel & Local\nSports\nTransport\nTraining\nLinkedIn Scrapping\nChildcare\nCommunications"
+   "options": "Audio/Video\nBooks & References\nEcommerce\nEducation\nEnvironment\nEvents\nFinance\nHealth\nHealthcare\nLifestyle\nMarketplace\nNews\nPolitics\nReal Estate\nSocial\nSocial Media\nTravel & Local\nSports\nTransport\nTraining\nLinkedIn Scrapping\nChildcare\nCommunications"
   },
   {
    "fieldname": "is_live",
@@ -633,6 +634,7 @@
   {
    "fieldname": "technical_lead",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Technical Lead",
    "options": "Employee"
   },

@@ -17,9 +17,8 @@ class AssetMovement(Document):
 	from typing import TYPE_CHECKING
 
 	if TYPE_CHECKING:
-		from frappe.types import DF
-
 		from erpnext.assets.doctype.asset_movement_item.asset_movement_item import AssetMovementItem
+		from frappe.types import DF
 
 		amended_from: DF.Link | None
 		assets: DF.Table[AssetMovementItem]
