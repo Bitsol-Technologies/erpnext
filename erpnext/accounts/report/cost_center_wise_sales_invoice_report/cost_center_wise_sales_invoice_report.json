@@ -10,7 +10,7 @@
  "idx": 0,
  "is_standard": "Yes",
  "letterhead": null,
- "modified": "2025-05-26 15:45:13.819070",
+ "modified": "2025-07-08 16:01:23.323649",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Cost Center Wise Sales Invoice Report",
@@ -28,6 +28,9 @@
   },
   {
    "role": "Employee Self Service"
+  },
+  {
+   "role": "System Manager"
   }
  ],
  "timeout": 0

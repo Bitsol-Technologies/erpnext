@@ -10,7 +10,7 @@
  "idx": 0,
  "is_standard": "Yes",
  "letterhead": null,
- "modified": "2025-05-26 17:28:08.930135",
+ "modified": "2025-07-08 16:01:30.958711",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Salary by Project Report",
@@ -19,6 +19,10 @@
  "ref_doctype": "Project",
  "report_name": "Salary by Project Report",
  "report_type": "Script Report",
- "roles": [],
+ "roles": [
+  {
+   "role": "System Manager"
+  }
+ ],
  "timeout": 0
 }

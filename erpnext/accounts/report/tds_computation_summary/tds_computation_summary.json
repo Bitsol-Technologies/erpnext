@@ -1,15 +1,16 @@
 {
  "add_total_row": 1,
+ "add_translate_data": 0,
  "columns": [],
  "creation": "2018-08-21 11:25:00.551823",
- "disable_prepared_report": 0,
  "disabled": 0,
  "docstatus": 0,
  "doctype": "Report",
  "filters": [],
  "idx": 0,
  "is_standard": "Yes",
- "modified": "2021-09-20 17:43:39.518851",
+ "letterhead": null,
+ "modified": "2025-07-08 16:01:29.162332",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "TDS Computation Summary",
@@ -30,6 +31,10 @@
   },
   {
    "role": "Auditor"
+  },
+  {
+   "role": "System Manager"
   }
- ]
+ ],
+ "timeout": 0
 }

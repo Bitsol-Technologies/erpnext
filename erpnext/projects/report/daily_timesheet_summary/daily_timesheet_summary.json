@@ -1,32 +1,40 @@
 {
- "add_total_row": 0, 
- "apply_user_permissions": 1, 
- "creation": "2016-07-06 19:31:25.534583", 
- "disabled": 0, 
- "docstatus": 0, 
- "doctype": "Report", 
- "idx": 2, 
- "is_standard": "Yes", 
- "modified": "2017-02-24 20:05:46.782115", 
- "modified_by": "Administrator", 
- "module": "Projects", 
- "name": "Daily Timesheet Summary", 
- "owner": "Administrator", 
- "ref_doctype": "Timesheet", 
- "report_name": "Daily Timesheet Summary", 
- "report_type": "Script Report", 
+ "add_total_row": 0,
+ "add_translate_data": 0,
+ "columns": [],
+ "creation": "2016-07-06 19:31:25.534583",
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "filters": [],
+ "idx": 13,
+ "is_standard": "Yes",
+ "letterhead": null,
+ "modified": "2025-07-08 16:01:27.744763",
+ "modified_by": "Administrator",
+ "module": "Projects",
+ "name": "Daily Timesheet Summary",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "ref_doctype": "Timesheet",
+ "report_name": "Daily Timesheet Summary",
+ "report_type": "Script Report",
  "roles": [
   {
    "role": "Projects User"
-  }, 
+  },
   {
    "role": "HR User"
-  }, 
+  },
   {
    "role": "Manufacturing User"
-  }, 
+  },
   {
    "role": "Accounts User"
+  },
+  {
+   "role": "System Manager"
   }
- ]
+ ],
+ "timeout": 0
 }

@@ -1,5 +1,6 @@
 {
- "add_total_row": 1,
+ "add_total_row": 0,
+ "add_translate_data": 0,
  "columns": [],
  "creation": "2016-04-08 14:56:37.235981",
  "disabled": 0,
@@ -9,7 +10,7 @@
  "idx": 2,
  "is_standard": "Yes",
  "letterhead": null,
- "modified": "2023-07-26 21:04:54.751077",
+ "modified": "2025-07-08 16:01:24.384042",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Asset Depreciations and Balances",
@@ -21,6 +22,10 @@
  "roles": [
   {
    "role": "Accounts User"
+  },
+  {
+   "role": "System Manager"
   }
- ]
+ ],
+ "timeout": 0
 }
