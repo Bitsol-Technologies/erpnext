@@ -1017,9 +1017,8 @@ def sync_single_employee_clockify_to_timesheet(employee_id, date_to_sync_str):
 		return
 
 	if not custom_user_id:
-		frappe.log_error(
-			message=f"Clockify user ID is missing for Emp {employee_id}",
-			title=script_log_title,
+		frappe.logger(script_log_title).info(
+			f"Clockify user ID is missing for Emp {employee_id}"
 		)
 		return
 
