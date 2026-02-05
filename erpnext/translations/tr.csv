@@ -2271,9 +2271,8 @@ Row {0}: Party Type and Party is required for Receivable / Payable account {1},S
 Row {0}: Payment against Sales/Purchase Order should always be marked as advance,Satır {0}: Satış / Satınalma Siparişi karşı Ödeme hep avans olarak işaretlenmiş olmalıdır,
 Row {0}: Please check 'Is Advance' against Account {1} if this is an advance entry.,Satır {0}: Kontrol edin Hesabı karşı 'Advance mı' {1} Bu bir avans girişi ise.,
 Row {0}: Please set at Tax Exemption Reason in Sales Taxes and Charges,{0} Satırı: Lütfen Satış Vergileri ve Masraflarında Vergi Muafiyeti Nedeni ayarını yapın,
-Row {0}: Please set the Mode of Payment in Payment Schedule,Satır {0} : Lütfen Ödeme Planında Ödeme Şeklini ayarlayın,
-Row {0}: Please set the correct code on Mode of Payment {1},Satır {0} : Lütfen {1} Ödeme Şeklinde doğru kodu ayarlayın,
-Row {0}: Qty is mandatory,Satır {0}: Miktar zorunludur,
+Row {0}: Please set the Mode of Payment in Payment Schedule,{0} Satırı: Lütfen Ödeme Planında Ödeme Modu ayarı,
+Row {0}: Please set the correct code on Mode of Payment {1},{0} Satırı: Lütfen {1} Ödeme Modunda doğru kodu ayarı,
 Row {0}: Quality Inspection rejected for item {1},{0} Satırı: {1} kalem için Kalite Denetimi reddedildi,
 Row {0}: UOM Conversion Factor is mandatory,Satır {0}: Ölçü Birimi Dönüşüm Faktörü Hizmetleri,
 Row {0}: select the workstation against the operation {1},{0} bilgisi: {1} işlemine karşı iş istasyonunu seçin,
@@ -3460,7 +3459,6 @@ Issue Type.,Sorun Tipi.,
 "It seems that there is an issue with the server's stripe configuration. In case of failure, the amount will get refunded to your account.","Sunucunun şerit çevresinde bir sorun var gibi görünüyor. Arıza durumunda, tutarları iade edilir.",
 Item Reported,Öğe Bildirildi,
 Item listing removed,öğe listesi kaldırıldı,
-Item quantity can not be zero,Ürün miktarı sıfır olamaz,
 Item taxes updated,Öğe vergileri güncellendi,
 Item {0}: {1} qty produced. ,Öğe {0}: {1} adet oluşturma.,
 Joining Date can not be greater than Leaving Date,Katılım Tarihi Ayrılık Tarihinden daha büyük olamaz,
@@ -3632,6 +3630,7 @@ Row #{0}: Cannot select Supplier Warehouse while suppling raw materials to subco
 Row #{0}: Cost Center {1} does not belong to company {2},"Satır # {0}: Maliyet Merkezi {1}, {2} işletme ait değil",
 Row #{0}: Operation {1} is not completed for {2} qty of finished goods in Work Order {3}. Please update operation status via Job Card {4}.,Satır # {0}: {3} İş Emri'nde {2} işlenmiş ürün adedi için {1} işlemi tamamlanmadı. Lütfen çalışma halindeyken {4} Job Card ile güncelleyin.,
 Row #{0}: Payment document is required to complete the transaction,Satır # {0}: İşlemi gizlemek için ödeme belgesi gereklidir,
+Row #{0}: Quantity for Item {1} cannot be zero.,Satır # {0}: Ürün {1} miktarı sıfır olamaz.,
 Row #{0}: Serial No {1} does not belong to Batch {2},"Satır # {0}: Seri No {1}, Parti {2} &#39;ye ait değil",
 Row #{0}: Service End Date cannot be before Invoice Posting Date,"Satır # {0}: Hizmet Bitiş Tarihi, Fatura Kayıt Tarihinden önce olamaz",
 Row #{0}: Service Start Date cannot be greater than Service End Date,"Satır # {0}: Hizmet Başlangıç Tarihi, Hizmet Bitiş Tarihinden fazla olamaz",
@@ -9809,7 +9808,7 @@ Dinamik değerler için <b>Konu</b> ve <b>Gövde</b> alanlarında <a href=""http
 
 <pre>Contract for Customer {{ party_name }}
 
--Valid From : {{ start_date }} 
+-Valid From : {{ start_date }}
 -Valid To : {{ end_date }}
 </pre>
 
@@ -9823,7 +9822,7 @@ Dinamik değerler için <b>Konu</b> ve <b>Gövde</b> alanlarında <a href=""http
 
 <pre>Müşteri için Sözleşme {{ party_name }}
 
--Geçerli Başlangıç : {{ start_date }} 
+-Geçerli Başlangıç : {{ start_date }}
 -Geçerli Bitiş : {{ end_date }}
 </pre>
 
@@ -9838,7 +9837,7 @@ Dinamik değerler için <b>Konu</b> ve <b>Gövde</b> alanlarında <a href=""http
 
 <pre>Delivery Terms for Order number {{ name }}
 
--Order Date : {{ transaction_date }} 
+-Order Date : {{ transaction_date }}
 -Expected Delivery Date : {{ delivery_date }}
 </pre>
 
@@ -9852,7 +9851,7 @@ Dinamik değerler için <b>Konu</b> ve <b>Gövde</b> alanlarında <a href=""http
 
 <pre>Sipariş numarası için Teslimat Koşulları {{ name }}
 
--Sipariş Tarihi: {{ transaction_date }} 
+-Sipariş Tarihi: {{ transaction_date }}
 -Beklenen Teslimat Tarihi: {{ delivery_date }}
 </pre>
 
@@ -9955,17 +9954,17 @@ Dinamik değerler için <b>Konu</b> ve <b>Gövde</b> alanlarında <a href=""http
 "<span class=""h4""><b>Settings</b></span>","<span class=""h4""><b>Ayarlar</b></span>",
 "<span class=""h4""><b>Shortcuts</b></span>","<span class=""h4""><b>Kısayollar</b></span>",
 "<span class=""h4""><b>Your Shortcuts
-			
-		
-			
-		
-			
+
+
+
+
+
 		</b></span>","<span class=""h4""><b>Kısayollar
-			
-		
-			
-		
-			
+
+
+
+
+
 		</b></span>",
 "<span class=""h4""><b>Your Shortcuts</b></span>","<span class=""h4""><b>Kısayollar</b></span>",
 <strong>Grand Total:</strong> {0},<strong>Genel Toplam:</strong> {0},
@@ -9993,7 +9992,7 @@ Dinamik değerler için <b>Konu</b> ve <b>Gövde</b> alanlarında <a href=""http
 
         </td>
          <td>
-                   <p><b>Example: </b> doc.doctype == ""Stock Entry"" and doc.purpose == ""Manufacture""</p>    
+                   <p><b>Example: </b> doc.doctype == ""Stock Entry"" and doc.purpose == ""Manufacture""</p>
           </td>
 </tr>
 
@@ -10028,7 +10027,7 @@ Dinamik değerler için <b>Konu</b> ve <b>Gövde</b> alanlarında <a href=""http
 
         </td>
          <td>
-                   <p><b>Örnek: </b> doc.doctype == ""Stok Girişi"" ve doc.purpose == ""Üretim""</p>    
+                   <p><b>Örnek: </b> doc.doctype == ""Stok Girişi"" ve doc.purpose == ""Üretim""</p>
           </td>
 </tr>
 
@@ -10891,8 +10890,8 @@ If enabled then system won't apply the pricing rule on the delivery note which w
 If enabled then system won't override the picked qty / batches / serial numbers.,"Etkinleştirilirse, sistem seçilen adet / parti / seri numaralarını geçersiz kılmaz.",
 "If enabled, a print of this document will be attached to each email","Etkinleştirilirse, bu belgenin bir çıktısı her e-postaya eklenecektir",
 "If enabled, all files attached to this document will be attached to each email",B belgeye eklenen tüm dosyalar her e-postaya da eklenir.,
-"If enabled, do not update serial / batch values in the stock transactions on creation of auto Serial 
- / Batch Bundle. ","Etkinleştirildiğinde, otomatik Seri 
+"If enabled, do not update serial / batch values in the stock transactions on creation of auto Serial
+ / Batch Bundle. ","Etkinleştirildiğinde, otomatik Seri
  / Toplu Paket oluşturulması durumunda stok hareketlerindeki seri / toplu değerleri güncellemez. ",
 "If enabled, the consolidated invoices will have rounded total disabled","Etkinleştirilirse, konsolide faturalarda yuvarlanmış toplam devre dışı bırakılır",
 "If enabled, the item rate won't adjust to the valuation rate during internal transfers, but accounting will still use the valuation rate.","İç transferler sırasında ürün fiyatı, değerleme oranına göre ayarlanmaz ancak muhasebe işlemleri yine de değerleme oranını kullanır.",
@@ -12487,3 +12486,351 @@ will be,olacak,
 {} is a child company.,{} bir alt şirkettir.,
 {} {} is already linked with another {},{} {} zaten başka bir {} ile bağlantılı,
 {} {} is already linked with {} {},{} {} zaten {} {} ile bağlantılı,
+Disable auto setting Grand Total to default Payment Mode,Genel Toplamın varsayılan Ödeme Yönteminin otomatik ayarlanmasını devre dışı bırak,
+Do you still want to enable immutable ledger?,Hala değiştirilemez defteri etkinleştirmek istiyor musunuz?,
+Exit Full Screen,Tam Ekrandan Çık,
+Full Screen,Tam Ekran,
+Has Corrective Cost,Düzeltici Maliyet,
+Ignore Is Opening check for reporting,Raporlama için Açılış kontrolünü yoksay,
+Ignores legacy Is Opening field in GL Entry that allows adding opening balance post the system is in use while generating reports,Raporlar oluşturulurken sistemin kullanımda olduğu açılış bakiyesi sonrası eklemeye izin veren Defter Girişindeki eski Açılış mı alanını yok sayar,
+Incorrect Serial and Batch Bundle,Geçersiz Seri ve Parti,
+Mobile: ,Cep Telefonu: ,
+Negative Batch Quantity,Negatif Parti Miktarı,
+Only applies for Normal Payments,Sadece Normal Ödemeler için geçerlidir,
+Payment Reconciliation Settings,Ödeme Mutabakat Ayarları,
+Pickup to,Teslim Edilecek Yer,
+Please set {0} first.,Lütfen önce {0} değerini ayarlayın.,
+Please specify a {0} first.,Lütfen önce bir {0} belirtin.,
+Posting Date Inheritance for Exchange Gain / Loss,Kur Farkı Karı / Zararı İçin Muhasebe Tarihi Devralımı,
+Printed on {0},{0} tarihinde yazdırıldı,
+Process Statement Of Accounts CC,Hesap Özeti İşlemi,
+Process Subscription,Aboneliği İşle,
+Process in Single Transaction,Tek Bir İşlemde İşle,
+Qty to Build,Üretilecek Miktar,
+Recording HTML,Kayıt HTML,
+Remove SABB Entry,Hatalı Seri ve Parti Kayıtlarını Kaldır,
+Return Against Subcontracting Receipt,Alt Yüklenici İade İrsaliyesi,
+Row {0}: {1} {2} cannot be same as {3} (Party Account) {4},"Satır {0}: {1} {2} , {3} (Cari Hesabı) {4} ile aynı olamaz",
+Row({0}): Outstanding Amount cannot be greater than actual Outstanding Amount {1} in {2},"Satır ({0}): Ödenmemiş Tutar, {2} içindeki gerçek Ödenmemiş Tutar {1} olan değerden büyük olamaz",
+SCO Supplied Item,Alt Yüklenici Tarafından Tedarik Edilen Ürün,
+Select Job Worker Address,Alt Yüklenici Adresini Seçin,
+Selected Serial and Batch Bundle entries have been removed.,Seçilen Seri No ve Parti girişleri kaldırıldı.,
+Stock Unreservation,Stok Rezervasyonu Kaldır,
+The Batch {0} has negative quantity {1} in warehouse {2}. Please correct the quantity.,{0} Partisinin {2} deposunda negatif {1} değer var. Lütfen miktarı düzeltin.,
+The Sales Person is linked with {0},Satış Personeli {0} ile bağlantılıdır,
+"The following Items, having Putaway Rules, could not be accomodated:","Aşağıdaki ürünler, Raf Yerleştirme Kurallarına (Putaway Rules) sahip olduğundan yerleştirilemedi:",
+The serial and batch bundle {0} not linked to {1} {2},"Seri ve parti paketi {0}, {1} {2} ile bağlantılı değil",
+"The stock for the item {0} in the {1} warehouse was negative on the {2}. You should create a positive entry {3} before the date {4} and time {5} to post the correct valuation rate. For more details, please read the <a href='https://docs.erpnext.com/docs/user/manual/en/stock-adjustment-cogs-with-negative-stock'>documentation<a>.","{1} deposundaki {0} ürünü için stok, {2} tarihinde negatife düştü. Bu durumu düzeltmek için {4} tarihi ve {5} saatinden önce {3} işlemiyle pozitif bir stok girişi oluşturmalısınız. Aksi takdirde, sistem doğru değerleme oranını hesaplayamaz.",
+The total Issue / Transfer quantity {0} in Material Request {1}  cannot be greater than allowed requested quantity {2} for Item {3},"Malzeme Talebi {1} içindeki toplam Çıkış / Transfer miktarı {0}, {3} ürünü için izin verilen talep miktarı {2} değerinden fazla olamaz.",
+The total Issue / Transfer quantity {0} in Material Request {1} cannot be greater than requested quantity {2} for Item {3},"Malzeme Talebi {1} içindeki toplam Çıkış / Transfer miktarı {0}, {3} ürünü için talep edilen miktar {2} değerinden fazla olamaz.",
+The user cannot submit the Serial and Batch Bundle manually,"Kullanıcı, Seri ve Parti Paketini manuel olarak gönderemez",
+There are only {0} asset created or linked to {1}. Please create or link {2} Assets with respective document.,{1} için yalnızca {0} varlık oluşturuldu veya bağlandı. Lütfen {2} Varlığı ilgili belgeyle oluşturun veya bağlayın.,
+This is a preview of the email to be sent. A PDF of the document will automatically be attached with the email.,"Bu, gönderilecek e-postanın bir önizlemesidir. Belgenin bir PDF'i otomatik olarak e-postaya eklenecektir.",
+This schedule was created when Asset {0} was consumed through Asset Capitalization {1}.,"Bu plan, Varlık {0}, Varlık Sermayeleştirme {1} işlemiyle tüketildiğinde oluşturuldu.",
+This schedule was created when Asset {0} was restored on Asset Capitalization {1}'s cancellation.,"Bu çizelge, Varlık Kapitalizasyonu {1}'un iptali üzerine Varlık {0} geri yüklendiğinde oluşturulmuştur.",
+This schedule was created when Asset {0} was sold through Sales Invoice {1}.,"Bu çizelge, Varlık {0} 'ın Satış Faturası {1} için iade edilmesiyle oluşturuldu.",
+This schedule was created when Asset {0} was updated after being split into new Asset {1}.,"Bu program, Varlık {0} yeni Varlık {1} olarak bölündükten sonra güncellendiğinde oluşturulmuştur.",
+This schedule was created when Asset {0}'s Asset Repair {1} was cancelled.,"Bu program, Varlık {0}'ın Varlık Onarımı {1} iptal edildiğinde oluşturuldu.",
+This schedule was created when Asset {0}'s Asset Value Adjustment {1} was cancelled.,"Bu program, Varlık {0}'ın Varlık Onarımı {1} iptal edildiğinde oluşturuldu.",
+This schedule was created when Asset {0}'s shifts were adjusted through Asset Shift Allocation {1}.,"Bu çizelge, Varlık {0} Varlık Değeri Ayarlaması {1} aracılığıyla ayarlandığında oluşturulmuştur.",
+This schedule was created when new Asset {0} was split from Asset {1}.,"Bu plan, Varlık {0} için Varlık Onarımı {1} ile onarıldığı zaman oluşturuldu.",
+This value shall be used when no matching Common Code for a record is found.,"Bu değer, bir kayıt için eşleşen Ortak Kod bulunmadığında kullanılacaktır.",
+To submit the invoice without purchase order please set {0} as {1} in {2},Alış irsaliyesi olmadan faturayı göndermek için {0} değerini {1} olarak {2} içinde ayarlayın,
+"To use a different finance book, please uncheck 'Include Default FB Entries'",Farklı bir finans defteri kullanmak için lütfen 'Varsayılan FD Girişlerini Dahil Et' seçeneğinin işaretini kaldırın,
+Type Of Call,Çağrı Türü,
+Voucher Qty,Belge Miktarı,
+Voucher {0} is over-allocated by {1},"Fatura {0}, {1} kadar fazla tahsis edilmiş",
+You can't process the serial number {0} as it has already been used in the SABB {1}. {2} if you want to inward same serial number multiple times then enabled 'Allow existing Serial No to be Manufactured/Received again' in the {3},"Seri ve Parti Paketi {1} içinde zaten kullanılmış olduğu için seri numarası {0} işlenemez. {2} Eğer aynı seri numarasını birden fazla kez almak veya üretmek istiyorsanız, {3} içinde ‘Mevcut Seri Numarasının Yeniden Üretilmesine/Alınmasına İzin Ver’ seçeneğini etkinleştirin.",
+or its descendants,veya onunla grubundan gelen,
+quotation_item,teklif_kalemi,
+{0} has Payment Term based allocation enabled. Select a Payment Term for Row #{1} in Payment References section,{0} için ödeme vadesine dayalı tahsis etkinleştirilmiş. Ödeme Referansları bölümünde Satır #{1} için bir ödeme vadesi seçin,
+{0} is a mandatory field.,{0} zorunlu bir alandır.,
+{0} items lost during process.,İşlem sırasında {0} ürün kayboldu.,
+{0} units of Item {1} is picked in another Pick List.,{0} adet {1} ürünü başka bir Çekme Listesinde işaretlenmiş.,
+{0} units of {1} are required in {2} with the inventory dimension: {3} ({4}) on {5} {6} for {7} to complete the transaction.,{2} içinde {3} ({4}) envanter boyutuyla {0} adet {1} ürünü gereklidir. İşlemi tamamlamak için {5} {6} tarihinde {7} için bu miktarın sağlanması gerekir.,
+{0} units of {1} needed in {2} on {3} {4} to complete this transaction.,Bu işlemi tamamlamak için {3} {4} tarihinde {2} içinde {0} adet {1} gereklidir.,
+{0} {1} is allocated twice in this Bank Transaction,{0} {1} bu Banka İşleminde iki kez tahsis edilmiştir,
+{0} {1} is already linked to Common Code {2}.,{0} {1} zaten Ortak Kod {2} ile bağlantılıdır.,
+{0}: {1} does not belong to the Company: {2},{0}: {1} Şirketine ait değildir: {2},
+% Delivered,% Teslim Edildi,
+"<h4>Contract Template Example</h4>
+
+<pre>Contract for Customer {{ party_name }}
+
+-Valid From : {{ start_date }} 
+-Valid To : {{ end_date }}
+</pre>
+
+<h4>How to get fieldnames</h4>
+
+<p>The field names you can use in your Contract Template are the fields in the Contract for which you are creating the template. You can find out the fields of any documents via Setup &gt; Customize Form View and selecting the document type (e.g. Contract)</p>
+
+<h4>Templating</h4>
+
+<p>Templates are compiled using the Jinja Templating Language. To learn more about Jinja, <a class=""strong"" href=""http://jinja.pocoo.org/docs/dev/templates/"">read this documentation.</a></p>","<h4>Sözleşme Şablonu Örneği</h4>
+
+<pre>Müşteri için Sözleşme {{ party_name }}
+
+-Geçerli Başlangıç : {{ start_date }} 
+-Geçerli Bitiş : {{ end_date }}
+</pre>
+
+<h4>Alan adları nasıl alınır</h4>
+
+<p>Sözleşme Şablonunuzda kullanabileceğiniz alan adları, şablonunu oluşturduğunuz Sözleşmedeki alanlardır. Herhangi bir belgenin alanlarını Kurulum &gt; Form Görünümünü Özelleştir aracılığıyla ve belge türünü (örneğin Sözleşme) seçerek öğrenebilirsiniz</p>
+
+<h4>Şablonlama</h4>
+
+<p>Şablonlar Jinja Templating Language kullanılarak derlenir. Jinja hakkında daha fazla bilgi edinmek için <a class=""strong"" href=""http://jinja.pocoo.org/docs/dev/templates/"">bu belgeyi okuyun</a>.</p>",
+"<h4>Standard Terms and Conditions Example</h4>
+
+<pre>Delivery Terms for Order number {{ name }}
+
+-Order Date : {{ transaction_date }} 
+-Expected Delivery Date : {{ delivery_date }}
+</pre>
+
+<h4>How to get fieldnames</h4>
+
+<p>The fieldnames you can use in your email template are the fields in the document from which you are sending the email. You can find out the fields of any documents via Setup &gt; Customize Form View and selecting the document type (e.g. Sales Invoice)</p>
+
+<h4>Templating</h4>
+
+<p>Templates are compiled using the Jinja Templating Language. To learn more about Jinja, <a class=""strong"" href=""http://jinja.pocoo.org/docs/dev/templates/"">read this documentation.</a></p>","<h4>Standart Şartlar ve Koşullar Örneği</h4>
+
+<pre>Sipariş numarası için Teslimat Koşulları {{ name }}
+
+-Sipariş Tarihi: {{ transaction_date }} 
+-Beklenen Teslimat Tarihi: {{ delivery_date }}
+</pre>
+
+<h4>Alan adları nasıl alınır</h4>
+
+<p>E-posta şablonunuzda kullanabileceğiniz alan adları, e-postayı gönderdiğiniz belgedeki alanlardır. Herhangi bir belgenin alanlarını Kurulum &gt; Form Görünümünü Özelleştir ve belge türünü (örneğin Satış Faturası) seçerek bulabilirsiniz</p>
+
+<h4>Şablonlama</h4>
+
+<p>Şablonlar Jinja Şablonlama Dili kullanılarak derlenir. Jinja hakkında daha fazla bilgi edinmek için <a class=""strong"" href=""http://jinja.pocoo.org/docs/dev/templates/"">bu dokümanı okuyun.</a></p>",
+<li>Item {0} in row(s) {1} billed more than {2}</li>,<li> {1} satır(lar) ındaki {0} öğesi {2} öğesinden daha fazla faturalandırılmıştır </li>,
+<p>Cannot overbill for the following Items:</p>,<p>Aşağıdaki kalemler için faturalandırma limitinizi aşamazsınız:</p>,
+"<span class=""h4""><b>Your Shortcuts
+			
+		
+			
+		
+			
+		</b></span>","<span class=""h4""><b>Kısayollar
+			
+		
+			
+		
+			
+		</b></span>",
+"<table class=""table table-bordered table-condensed"">
+<thead>
+  <tr>
+         <th class=""table-sr"" style=""width: 50%;"">Child Document</th>
+         <th class=""table-sr"" style=""width: 50%;"">Non Child Document</th>
+   </tr>
+</thead>
+<tbody>
+<tr>
+         <td>
+                  <p> To access parent document field use parent.fieldname and to access child table document field use doc.fieldname </p>
+
+         </td>
+         <td>
+                    <p>To access document field use doc.fieldname </p>
+         </td>
+</tr>
+<tr>
+        <td>
+                   <p><b>Example: </b> parent.doctype == ""Stock Entry"" and doc.item_code == ""Test"" </p>
+
+        </td>
+         <td>
+                   <p><b>Example: </b> doc.doctype == ""Stock Entry"" and doc.purpose == ""Manufacture""</p>    
+          </td>
+</tr>
+
+</tbody>
+</table>
+
+
+
+
+
+
+","<table class=""table table-bordered table-condensed"">
+<thead>
+  <tr>
+         <th class=""table-sr"" style=""width: 50%;"">Çocuk Belgesi</th>
+         <th class=""table-sr"" style=""width: 50%;"">Çocuk Olmayan Belge</th>
+   </tr>
+</thead>
+<tbody>
+<tr>
+         <td>
+                  <p> Üst belge alanına erişmek için parent.fieldname ve alt tablo belge alanına erişmek için doc.fieldname kullanın </p>
+
+         </td>
+         <td>
+                    <p>Belge alanına erişmek için doc.fieldname kullanın </p>
+         </td>
+</tr>
+<tr>
+        <td>
+                   <p><b>Örnek: </b> parent.doctype == ""Stok Girişi"" ve doc.item_code == ""Test"" </p>
+
+        </td>
+         <td>
+                   <p><b>Örnek: </b> doc.doctype == ""Stok Girişi"" ve doc.purpose == ""Üretim""</p>    
+          </td>
+</tr>
+
+</tbody>
+</table>
+
+
+
+
+
+
+",
+Accounts Receivable / Payable Tuning,Alacaklar / Borçlar Ayarlaması,
+Action if Same Rate is Not Maintained Throughout  Internal Transaction,Dahili İşlem Boyunca Aynı Oran Korunmazsa Yapılacak İşlem,
+Against Pick List,Seçim Listesine Karşı,
+Allow Implicit Pegged Currency Conversion,Gizli Sabitlenmiş Para Birimi Dönüşümüne İzin Ver,
+Allow Partial Payment,Parçalı Ödemeye İzin Ver,
+Allow Purchase Order with Zero Quantity,Sıfır Miktarlı Satın Alma Emrine İzin Ver,
+Allow Quotation with Zero Quantity,Sıfır Miktarla Fiyat Teklifine İzin Ver,
+Allow Request for Quotation with Zero Quantity,Sıfır Miktarlı Fiyat Teklifi Talebine İzin Ver,
+Allow Sales Order with Zero Quantity,Sıfır Miktarlı Satış Siparişine İzin Ver,
+Allow Supplier Quotation with Zero Quantity,Sıfır Miktarla Tedarikçi Teklifine İzin Ver,
+Allow UOM with Conversion Rate Defined in Item,Üründe Dönüşüm Oranı Tanımlı UOM'ye İzin Ver,
+Allow to Make Quality Inspection after Purchase / Delivery,Satın Alma / Teslimat Sonrası Kalite Kontrolü Yapılmasına İzin Verin,
+Allows users to submit Purchase Orders with zero quantity. Useful when rates are fixed but the quantities are not. Eg. Rate Contracts.,Kullanıcıların sıfır miktarlı Satınalma Siparişleri göndermesine olanak tanır. Oranların sabit olduğu ancak miktarların sabit olmadığı durumlarda kullanışlıdır. Örnek Fiyat Sözleşmeleri.,
+Allows users to submit Quotations with zero quantity. Useful when rates are fixed but the quantities are not. Eg. Rate Contracts.,Kullanıcıların sıfır miktarlı Teklifler göndermesine olanak tanır. Fiyatların sabit olduğu ancak miktarların sabit olmadığı durumlarda kullanışlıdır. Örnek Fiyat Sözleşmeleri.,
+Allows users to submit Request for Quotations with zero quantity. Useful when rates are fixed but the quantities are not. Eg. Rate Contracts.,Kullanıcıların Teklif Taleplerini sıfır miktarla göndermelerine olanak tanır. Fiyatların sabit olduğu ancak miktarların sabit olmadığı durumlarda kullanışlıdır. Örn. Fiyat Sözleşmeleri.,
+Allows users to submit Sales Orders with zero quantity. Useful when rates are fixed but the quantities are not. Eg. Rate Contracts.,Kullanıcıların sıfır miktarlı Satış Siparişleri göndermesine izin verir. Oranların sabit olduğu ancak miktarların sabit olmadığı durumlarda kullanışlıdır. Örn. Fiyat Sözleşmeleri.,
+Allows users to submit Supplier Quotations with zero quantity. Useful when rates are fixed but the quantities are not. Eg. Rate Contracts.,Kullanıcıların Tedarikçi Tekliflerini sıfır miktarla göndermelerine olanak tanır. Fiyatların sabit olduğu ancak miktarların sabit olmadığı durumlarda kullanışlıdır. Örn. Fiyat Sözleşmeleri.,
+Also you can't switch back to FIFO after setting the valuation method to Moving Average for this item.,"Ayrıca, bu öğe için değerleme yöntemini Hareketli Ortalama olarak ayarladıktan sonra FIFO'ya geri dönemezsiniz.",
+Amount Difference with Purchase Invoice,Satın Alma Faturası ile Fiyat Farkı,
+Amount in Words,Yazı ile Tutar,
+Analysis Chart,Analiz Grafiği,
+Asset cannot be scrapped before the last depreciation entry.,"Varlık, son amortisman girişinden önce hurdaya çıkarılamaz.",
+Auto Fetch Serial Numbers,Seri Numaralarını Otomatik Getir,
+Auto Reconciliation has started in the background,Otomatik Mutabakat arka planda başladı,
+Auto Tax Settings Error,Otomatik Vergi Ayarları Hatası,
+Available Serial No,Mevcut Seri No,
+Bank Account {} in Bank Transaction {} is not matching with Bank Account {},"Banka İşlemi {}'ndeki Banka Hesabı {}, Banka Hesabı {} ile eşleşmiyor",
+Billing Address does not belong to the {0},Fatura Adresi {0}'a ait değil,
+Bin Qty Recalculated,Bin Miktarı Yeniden Hesaplandı,
+Buffered Cursor,Tamponlu İmleç,
+Bulk Rename Jobs,Toplu Yeniden Adlandırma İşleri,
+Calculate Ageing With,İle Yaşlanmayı Hesaplayın,
+Calculated Discount Mismatch,Hesaplanan İskonto Uyuşmazlığı,
+Cannot Create Return,İade Oluşturulamıyor,
+Cannot create return for consolidated invoice {0}.,Konsolide fatura için iade oluşturulamıyor {0}.,
+Cannot disassemble more than produced quantity.,Üretilen miktardan fazla parça sökülemez.,
+Cannot find Item or Warehouse with this Barcode,Bu Barkod ile Ürün veya Depo Bulunamıyor,
+Categorize By,Kategorize Et,
+Categorize by,Kategorize Et,
+Categorize by Account,Hesaba Göre Kategorilendir,
+Categorize by Item,Ürüne Göre,
+Categorize by Party,Cariye Göre,
+Categorize by Supplier,Tedarikçiye Göre,
+Categorize by Voucher,Faturaya Göre,
+Categorize by Voucher (Consolidated),Faturaya Göre (Konsolide),
+"Changing the valuation method to Moving Average will affect new transactions. If backdated entries are added, earlier FIFO-based entries will be reposted, which may change closing balances.","Değerleme yönteminin Hareketli Ortalama olarak değiştirilmesi yeni işlemleri etkileyecektir. Geçmişe dönük kayıtlar eklenirse, daha önceki FIFO tabanlı kayıtlar yeniden kaydedilecek ve bu da kapanış bakiyelerini değiştirebilir.",
+Company {0} added multiple times,{0} şirketi birden fazla kez eklendi,
+Consider Process Loss,İşlem Kaybını Göz Önünde Bulundurun,
+Contact Person does not belong to the {0},İrtibat Kişisi {0}'a ait değil,
+Conversion rate cannot be 0,Dönüşüm oranı 0 olamaz,
+"Conversion rate is 1.00, but document currency is different from company currency","Dönüşüm oranı 1.00, ancak belge para birimi şirket para biriminden farklı",
+Conversion rate must be 1.00 if document currency is same as company currency,"Belge para birimi şirket para birimi ile aynıysa dönüşüm oranı 1,00 olmalıdır",
+Cost Center for Item rows has been updated to {0},Ürün satırları için Maliyet Merkezi {0} olarak güncellendi,
+Cost of Goods Sold Account in Items Table,Kalemler Tablosunda Satılan Malların Maliyet Hesabı,
+Costing and Billing fields has been updated,Maliyetlendirme ve Faturalama alanları güncellendi,
+Create Delivery Note,Teslimat Notu Oluştur,
+Data Fetch Method,Veri Alma Yöntemi,
+Delivered Qty (in Stock UOM),Teslim Edilen Miktar (Stokta Mevcut),
+Depreciation eliminated via reversal,Ters işlemle giderilen amortisman,
+Difference Account in Items Table,Kalemler Tablosundaki Fark Hesabı,
+"Difference Account must be a Asset/Liability type account (Temporary Opening), since this Stock Entry is an Opening Entry",Bu Stok Mutabakatı bir Hesap Açılış Kaydı olduğundan farklı hesabının aktif ya da pasif bir hesap tipi olması gerekmektedir,
+Discount Amount in Transaction,İşlemdeki İndirim Tutarı,
+Discount Percentage in Transaction,İşlemdeki İndirim Yüzdesi,
+Dispatch Address Details,Gönderim Adresi Ayrıntıları,
+Dispatch Address Template,Gönderim Adresi Şablonu,
+Distributed Discount Amount,Dağıtılan İndirim Tutarı,
+Do you want to change valuation method?,Değerleme yöntemini değiştirmek istiyor musunuz?,
+Don't Enforce Free Item Qty,Ücretsiz Ürün Miktarını Zorunlu Tutma,
+Drop Procedures,Prosedürleri Kaldır,
+Drops existing SQL Procedures and Function setup by Accounts Receivable report,Alacak Hesapları raporuna göre mevcut SQL Prosedürlerini ve Fonksiyonlarının kurulumunu kaldırır,
+Employee Exit,Çalışan Çıkışı,
+Employee {0} is currently working on another workstation. Please assign another employee.,Çalışan {0} şu anda başka bir iş istasyonunda çalışıyor. Lütfen başka bir çalışan atayın.,
+Enabling this checkbox will force each Job Card Time Log to have From Time and To Time,"Bu onay kutusunun etkinleştirilmesi, her İş Kartı Zaman Günlüğünün Şu Zamandan ve Şu Zamana sahip olmasını zorunlu kılar",
+Enforce Time Logs,Zaman Günlüklerini Uygula,
+Enter date to scrap asset,Varlığın hurdaya çıkarılacağı tarihi girin,
+Fetch Latest Exchange Rate,Son Döviz Kurunu Getir,
+Fetch Timesheet in Sales Invoice,Satış Faturasında Zaman Çizelgesini Getir,
+Fetch Valuation Rate for Internal Transaction,Dahili İşlem için Değerleme Oranını Getir,
+"For the new {0} to take effect, would you like to clear the current {1}?",Yeni {0} ' in etkili olması için mevcut {1}' i temizlemek ister misiniz?,Clear payment terms template and/or payment schedule when due date is changed
+Future date is not allowed,Gelecek tarihe izin verilmiyor,
+Hide timesheets,Zaman çizelgelerini gizle,
+"If enabled, do not update serial / batch values in the stock transactions on creation of auto Serial 
+ / Batch Bundle. ","Etkinleştirildiğinde, otomatik Seri 
+ / Toplu Paket oluşturulması durumunda stok hareketlerindeki seri / toplu değerleri güncellemez. ",
+"If enabled, the system will allow selecting UOMs in sales and purchase transactions only if the conversion rate is set in the item master.","Etkinleştirildiğinde, sistem yalnızca öğe ana kaydında dönüşüm oranı ayarlandığında satış ve satın alma işlemlerinde ölçü birimlerinin seçilmesine izin verir.",
+"If enabled, the system will generate an accounting entry for materials rejected in the Purchase Receipt.","Etkinleştirilirse, sistem Satın Alma Makbuzunda reddedilen malzemeler için bir muhasebe girişi oluşturacaktır.",
+"If no taxes are set, and Taxes and Charges Template is selected, the system will automatically apply the taxes from the chosen template.","Herhangi bir vergi ayarlanmamışsa ve Vergiler ve Ücretler Şablonu seçilmişse, sistem seçilen şablonda ki vergileri otomatik olarak uygulayacaktır.",
+Incompatible Setting Detected,Uyumsuz Ayar Algılandı,
+Inter Company Purchase Order,Şirketler Arası Satınalma Siparişi,
+Inter Company Sales Order,Şirketler Arası Satış Siparişi,
+Internal Purchase Order,Dahili Satınalma Siparişi,
+Internal Sales Order,Dahili Satış Siparişi,
+Invalid amount in accounting entries of {} {} for Account {}: {},Hesap {} için {} {} muhasebe girişlerinde geçersiz tutar: {},
+Invoice ID,Fatura No,
+Last GL Entry update was done {}. This operation is not allowed while system is actively being used. Please wait for 5 minutes before retrying.,Son GL Girişi güncellemesi {} 'da yapıldı. Sistem aktif olarak kullanılırken bu işleme izin verilmez. Lütfen tekrar denemeden önce 5 dakika bekleyin.,
+Last Scanned Warehouse,Son Taranan Depo,
+Legacy Fields,Eski Alanlar,
+Maintain Same Rate Throughout Internal Transaction,Dahili İşlem Boyunca Aynı Oranı Koruyun,
+Naming Series is mandatory,Seri İsimlendirme zorunludur,
+Net Purchase Amount,Net Satın Alma Tutarı,
+No Purchase Orders were created,Hiçbir Satın Alma Siparişi oluşturulmadı,
+No Selection,Seçim Yok,
+No open POS Opening Entry found for POS Profile {0}.,POS Profili {0} için açık POS Açılış Girişi bulunamadı.,
+Non Depreciable Category,Amortismana Tabi Olmayan Kategori,
+Not able to find the earliest Fiscal Year for the given company.,Belirtilen şirket için en erken Mali Yıl bulunamadı.,
+Only payment entries with apply tax withholding unchecked will be considered for checking cumulative threshold breach,Kümülatif eşik ihlalinin kontrolü için yalnızca vergi stopajı uygula seçeneği işaretlenmemiş ödeme girişleri dikkate alınacaktır,
+Outstanding (Company Currency),Ödenmemiş (Şirket Para Birimi),
+POS Closed,POS Kapalı,
+POS has been closed at {0}. Please refresh the page.,POS {0}'da kapatıldı. Lütfen sayfayı yenileyin.,
+Party Full Name,Cari Tam Ünvan,
+Payment Status,Ödeme Durumu,
+Please set Customer Address to determine if the transaction is an export.,İşlemin bir ihracat olup olmadığını belirlemek için lütfen Müşteri Adresini ayarlayın.,
+Please set both the Tax ID and Fiscal Code on Company {0},Lütfen {0} Şirketi için hem Vergi Kimlik Numarasını hem de Muhasebe Kodunu ayarlayın,
+Raw SQL,Ham SQL,
+Recreate Stock Ledgers,Stok Defterlerini Yeniden Oluştur,
+Scheduling...,Zamanlama...,
+Scrap date cannot be before purchase date,Hurdaya çıkarma tarihi satın alma tarihinden önce olamaz,
+Select Dispatch Address ,Sevkiyat Adresini Seçin ,
+Select the date,Tarihi seçin,
+Serial No (In/Out),Seri No (Giriş/Çıkış),
+Set Serial and Batch Bundle Naming Based on Naming Series,Seri ve Toplu Paket Adlandırmasını Adlandırma Serisine Göre Ayarlama,
+Set Valuation Rate for Rejected Materials,Reddedilen Malzemeler için Değerleme Oranı Belirleyin,
+Shipping Address does not belong to the {0},Gönderim Adresi {0}'a ait değil,
+Show Opening and Closing Balance,Açılış ve Kapanış Bakiyesini Göster,
+Sub Total,Ara Toplam,
+Subcontracted Purchase Order,Alt Yüklenici Satın Alma Emri,
+Subcontracting Conversion Factor,Alt Sözleşme Dönüşüm Faktörü,
+Suspected Discount Amount,Şüpheli İndirim Tutarı,
+System In Use,Sistem Kullanımda,
+"System will do an implicit conversion using the pegged currency. <br>
+Ex: Instead of AED -&gt; INR, system will do AED -&gt; USD -&gt; INR using the pegged exchange rate of AED against USD.","Sistem, sabitlenmiş para birimini kullanarak örtük bir dönüştürme yapacaktır. <br>
+Örn: AED -&gt; INR yerine, sistem AED -&gt; USD -&gt; INR işlemini AED'nin USD'ye karşı sabitlenmiş döviz kurunu kullanarak yapacaktır.",
+"The following batches are expired, please restock them: <br> {0}","Aşağıdaki partilerin son kullanma tarihi geçmiştir, lütfen yeniden stoklayın: <br> {0}",
+Total Weight (kg),Toplam Ağırlık (kg),
+Transaction Name,İşlem Adı,
+UOM {0} not found in Item {1},{1} Ürünü için {0} Ölçü Birimi bulunamadı,
+UnReconcile Allocations,Karşılıksız Tahsisler,

@@ -7,7 +7,7 @@ from collections import deque
 from operator import itemgetter
 
 import frappe
-from frappe import _
+from frappe import _, bold
 from frappe.core.doctype.version.version import get_diff
 from frappe.model.mapper import get_mapped_doc
 from frappe.utils import cint, cstr, flt, today
@@ -158,6 +158,7 @@ class BOM(WebsiteGenerator):
 		show_operations: DF.Check
 		thumbnail: DF.Data | None
 		total_cost: DF.Currency
+		track_semi_finished_goods: DF.Check
 		transfer_material_against: DF.Literal["", "Work Order", "Job Card"]
 		uom: DF.Link | None
 		web_long_description: DF.TextEditor | None
@@ -464,7 +465,7 @@ class BOM(WebsiteGenerator):
 				)
 			)
 
-	def get_rm_rate(self, arg):
+	def get_rm_rate(self, arg, notify=True):
 		"""Get raw material rate as per selected method, if bom exists takes bom cost"""
 		rate = 0
 		if not self.rm_cost_as_per:
@@ -490,7 +491,7 @@ class BOM(WebsiteGenerator):
 								),
 								alert=True,
 							)
-						else:
+						elif notify:
 							frappe.msgprint(
 								_("{0} not found for item {1}").format(self.rm_cost_as_per, arg["item_code"]),
 								alert=True,
@@ -655,9 +656,16 @@ class BOM(WebsiteGenerator):
 	def check_recursion(self, bom_list=None):
 		"""Check whether recursion occurs in any bom"""
 
-		def _throw_error(bom_name):
+		def _throw_error(bom_name, production_item=None):
+			msg = _("BOM recursion: {1} cannot be parent or child of {0}").format(self.name, bom_name)
+			if production_item and bom_name != self.name:
+				msg += "<br><br>"
+				msg += _(
+					"Note: If you want to use the finished good {0} as a raw material, then enable the 'Do Not Explode' checkbox in the Items table against the same raw material."
+				).format(bold(production_item))
+
 			frappe.throw(
-				_("BOM recursion: {1} cannot be parent or child of {0}").format(self.name, bom_name),
+				msg,
 				exc=BOMRecursionError,
 			)
 
@@ -674,7 +682,7 @@ class BOM(WebsiteGenerator):
 			if self.item == item.item_code and item.bom_no:
 				# Same item but with different BOM should not be allowed.
 				# Same item can appear recursively once as long as it doesn't have BOM.
-				_throw_error(item.bom_no)
+				_throw_error(item.bom_no, self.item)
 
 		if self.name in {d.bom_no for d in self.items}:
 			_throw_error(self.name)
@@ -788,11 +796,14 @@ class BOM(WebsiteGenerator):
 						"stock_uom": d.stock_uom,
 						"conversion_factor": d.conversion_factor,
 						"sourced_by_supplier": d.sourced_by_supplier,
-					}
+					},
+					notify=False,
 				)
 
 			d.base_rate = flt(d.rate) * flt(self.conversion_rate)
-			d.amount = flt(d.rate, d.precision("rate")) * flt(d.qty, d.precision("qty"))
+			d.amount = flt(
+				flt(d.rate, d.precision("rate")) * flt(d.qty, d.precision("qty")), d.precision("amount")
+			)
 			d.base_amount = d.amount * flt(self.conversion_rate)
 			d.qty_consumed_per_unit = flt(d.stock_qty, d.precision("stock_qty")) / flt(
 				self.quantity, self.precision("quantity")
@@ -815,7 +826,10 @@ class BOM(WebsiteGenerator):
 			d.base_rate = flt(d.rate, d.precision("rate")) * flt(
 				self.conversion_rate, self.precision("conversion_rate")
 			)
-			d.amount = flt(d.rate, d.precision("rate")) * flt(d.stock_qty, d.precision("stock_qty"))
+			d.amount = flt(
+				flt(d.rate, d.precision("rate")) * flt(d.stock_qty, d.precision("stock_qty")),
+				d.precision("amount"),
+			)
 			d.base_amount = flt(d.amount, d.precision("amount")) * flt(
 				self.conversion_rate, self.precision("conversion_rate")
 			)
@@ -980,7 +994,7 @@ class BOM(WebsiteGenerator):
 			self.transfer_material_against = "Work Order"
 		if not self.transfer_material_against and not self.is_new():
 			frappe.throw(
-				_("Setting {} is required").format(self.meta.get_label("transfer_material_against")),
+				_("Setting {0} is required").format(_(self.meta.get_label("transfer_material_against"))),
 				title=_("Missing value"),
 			)
 
@@ -1267,7 +1281,7 @@ def get_children(parent=None, is_root=False, **filters):
 
 		bom_items = frappe.get_all(
 			"BOM Item",
-			fields=["item_code", "bom_no as value", "stock_qty"],
+			fields=["item_code", "bom_no as value", "stock_qty", "qty"],
 			filters=[["parent", "=", frappe.form_dict.parent]],
 			order_by="idx",
 		)

@@ -42,6 +42,15 @@ frappe.ui.form.on("Material Request", {
 				},
 			};
 		});
+
+		frm.set_query("buying_price_list", () => {
+			return {
+				filters: {
+					buying: 1,
+					enabled: 1,
+				},
+			};
+		});
 	},
 
 	onload: function (frm) {
@@ -70,10 +79,14 @@ frappe.ui.form.on("Material Request", {
 		});
 
 		erpnext.accounts.dimensions.setup_dimension_filters(frm, frm.doctype);
+		if (!frm.doc.buying_price_list) {
+			frm.doc.buying_price_list = frappe.defaults.get_default("buying_price_list");
+		}
 	},
 
 	company: function (frm) {
 		erpnext.accounts.dimensions.update_dimension(frm, frm.doctype);
+		erpnext.utils.set_letter_head(frm);
 	},
 
 	onload_post_render: function (frm) {
@@ -83,6 +96,7 @@ frappe.ui.form.on("Material Request", {
 	refresh: function (frm) {
 		frm.events.make_custom_buttons(frm);
 		frm.toggle_reqd("customer", frm.doc.material_request_type == "Customer Provided");
+		frm.trigger("set_warehouse_label");
 	},
 
 	set_from_warehouse: function (frm) {
@@ -107,14 +121,6 @@ frappe.ui.form.on("Material Request", {
 
 			if (flt(frm.doc.per_received, precision) < 100) {
 				frm.add_custom_button(__("Stop"), () => frm.events.update_status(frm, "Stopped"));
-
-				if (frm.doc.material_request_type === "Purchase") {
-					frm.add_custom_button(
-						__("Purchase Order"),
-						() => frm.events.make_purchase_order(frm),
-						__("Create")
-					);
-				}
 			}
 
 			if (flt(frm.doc.per_ordered, precision) < 100) {
@@ -159,13 +165,17 @@ frappe.ui.form.on("Material Request", {
 
 				if (frm.doc.material_request_type === "Purchase") {
 					frm.add_custom_button(
+						__("Purchase Order"),
+						() => frm.events.make_purchase_order(frm),
+						__("Create")
+					);
+
+					frm.add_custom_button(
 						__("Request for Quotation"),
 						() => frm.events.make_request_for_quotation(frm),
 						__("Create")
 					);
-				}
 
-				if (frm.doc.material_request_type === "Purchase") {
 					frm.add_custom_button(
 						__("Supplier Quotation"),
 						() => frm.events.make_supplier_quotation(frm),
@@ -177,6 +187,14 @@ frappe.ui.form.on("Material Request", {
 					frm.add_custom_button(
 						__("Work Order"),
 						() => frm.events.raise_work_orders(frm),
+						__("Create")
+					);
+				}
+
+				if (frm.doc.material_request_type === "Subcontracting") {
+					frm.add_custom_button(
+						__("Subcontracted Purchase Order"),
+						() => frm.events.make_purchase_order(frm),
 						__("Create")
 					);
 				}
@@ -241,7 +259,9 @@ frappe.ui.form.on("Material Request", {
 					from_warehouse: item.from_warehouse,
 					warehouse: item.warehouse,
 					doctype: frm.doc.doctype,
-					buying_price_list: frappe.defaults.get_default("buying_price_list"),
+					buying_price_list: frm.doc.buying_price_list
+						? frm.doc.buying_price_list
+						: frappe.defaults.get_default("buying_price_list"),
 					currency: frappe.defaults.get_default("Currency"),
 					name: frm.doc.name,
 					qty: item.qty || 1,
@@ -313,6 +333,9 @@ frappe.ui.form.on("Material Request", {
 					label: __("For Warehouse"),
 					options: "Warehouse",
 					reqd: 1,
+					get_query: function () {
+						return { filters: { company: frm.doc.company } };
+					},
 				},
 				{ fieldname: "qty", fieldtype: "Float", label: __("Quantity"), reqd: 1, default: 1 },
 				{
@@ -477,6 +500,23 @@ frappe.ui.form.on("Material Request", {
 		if (frm.doc.material_request_type !== "Material Transfer" && frm.doc.set_from_warehouse) {
 			frm.set_value("set_from_warehouse", "");
 		}
+
+		frm.trigger("set_warehouse_label");
+	},
+
+	set_warehouse_label(frm) {
+		let warehouse_label =
+			frm.doc.material_request_type === "Material Transfer" ? "Target Warehouse" : "Warehouse";
+		if (frm.doc.material_request_type === "Material Issue") {
+			warehouse_label = "From Warehouse";
+		}
+
+		frm.fields_dict["items"].grid.update_docfield_property("warehouse", "label", __(warehouse_label));
+
+		warehouse_label = "Set " + warehouse_label;
+		frm.set_df_property("set_warehouse", "label", __(warehouse_label));
+
+		refresh_field("items");
 	},
 });
 
@@ -556,25 +596,23 @@ erpnext.buying.MaterialRequestController = class MaterialRequestController exten
 
 	onload() {
 		this.frm.set_query("item_code", "items", function (doc, cdt, cdn) {
+			let filters = { is_stock_item: 1 };
+
 			if (doc.material_request_type == "Customer Provided") {
-				return {
-					query: "erpnext.controllers.queries.item_query",
-					filters: {
-						customer: doc.customer,
-						is_stock_item: 1,
-					},
-				};
-			} else if (doc.material_request_type == "Purchase") {
-				return {
-					query: "erpnext.controllers.queries.item_query",
-					filters: { is_purchase_item: 1 },
-				};
-			} else {
-				return {
-					query: "erpnext.controllers.queries.item_query",
-					filters: { is_stock_item: 1 },
-				};
+				filters.customer = doc.customer;
+			} else if (
+				doc.material_request_type == "Purchase" ||
+				doc.material_request_type == "Subcontracting"
+			) {
+				filters = { is_purchase_item: 1 };
+			} else if (doc.material_request_type == "Manufacture") {
+				filters.include_item_in_manufacturing = 1;
 			}
+
+			return {
+				query: "erpnext.controllers.queries.item_query",
+				filters: filters,
+			};
 		});
 	}
 

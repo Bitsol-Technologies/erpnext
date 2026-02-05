@@ -323,7 +323,8 @@ def _make_customer(source_name, target_doc=None, ignore_permissions=False):
 			target.customer_type = "Individual"
 			target.customer_name = source.lead_name
 
-		target.customer_group = frappe.db.get_default("Customer Group")
+		if not target.customer_group:
+			target.customer_group = frappe.db.get_default("Customer Group")
 
 	doclist = get_mapped_doc(
 		"Lead",
@@ -431,7 +432,7 @@ def _set_missing_values(source, target):
 
 
 @frappe.whitelist()
-def get_lead_details(lead, posting_date=None, company=None):
+def get_lead_details(lead, posting_date=None, company=None, doctype=None):
 	if not lead:
 		return {}
 
@@ -453,7 +454,7 @@ def get_lead_details(lead, posting_date=None, company=None):
 		}
 	)
 
-	set_address_details(out, lead, "Lead", company=company)
+	set_address_details(out, lead, "Lead", doctype=doctype, company=company)
 
 	taxes_and_charges = set_taxes(
 		None,

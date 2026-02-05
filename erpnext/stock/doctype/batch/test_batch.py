@@ -35,8 +35,10 @@ class TestBatch(FrappeTestCase):
 	def make_batch_item(cls, item_name=None):
 		from erpnext.stock.doctype.item.test_item import make_item
 
-		if not frappe.db.exists(item_name):
+		if not frappe.db.exists("Item", item_name):
 			return make_item(item_name, dict(has_batch_no=1, create_new_batch=1, is_stock_item=1))
+
+		return frappe.get_doc("Item", item_name)
 
 	def test_purchase_receipt(self, batch_qty=100):
 		"""Test automated batch creation from Purchase Receipt"""
@@ -305,12 +307,54 @@ class TestBatch(FrappeTestCase):
 		self.assertEqual(
 			get_batch_qty(item_code="ITEM-BATCH-2", warehouse="_Test Warehouse - _TC"),
 			[
-				{"batch_no": "batch a", "qty": 90.0, "warehouse": "_Test Warehouse - _TC"},
-				{"batch_no": "batch b", "qty": 90.0, "warehouse": "_Test Warehouse - _TC"},
+				{
+					"batch_no": "batch a",
+					"qty": 90.0,
+					"warehouse": "_Test Warehouse - _TC",
+					"expiry_date": None,
+				},
+				{
+					"batch_no": "batch b",
+					"qty": 90.0,
+					"warehouse": "_Test Warehouse - _TC",
+					"expiry_date": None,
+				},
 			],
 		)
 
 		self.assertEqual(get_batch_qty("batch a", "_Test Warehouse - _TC"), 90)
+
+	def test_ignore_reserved_qty(self):
+		from erpnext.selling.doctype.sales_order.sales_order import create_pick_list
+		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
+
+		batch_item_name = "Reserve Batch Item"
+		batch_id = "Reserve Batch 1"
+		# Create Batch Item
+		self.make_batch_item(batch_item_name)
+		# Create Batch and Material Receipt Entry with qty 90
+		self.make_new_batch_and_entry(batch_item_name, batch_id, "_Test Warehouse - _TC")
+
+		# Enable Stock Reservation
+		frappe.db.set_single_value("Stock Settings", "enable_stock_reservation", 1)
+
+		# Create Sales Order with qty 50
+		sales_order = make_sales_order(
+			item_code=batch_item_name, warehouse="_Test Warehouse - _TC", qty=50, rate=20
+		)
+
+		# Create Pick List for the Sales Order
+		pl = create_pick_list(sales_order.name)
+		pl.submit()
+		# Create Stock Reservation Entries
+		pl.create_stock_reservation_entries(notify=False)
+
+		batch = frappe.get_doc("Batch", batch_id)
+		# Recalculate Batch Qty
+		batch.recalculate_batch_qty()
+		batch.reload()
+		# Case: Ignore Reserved Qty
+		self.assertEqual(batch.batch_qty, 90)
 
 	def test_total_batch_qty(self):
 		self.make_batch_item("ITEM-BATCH-3")

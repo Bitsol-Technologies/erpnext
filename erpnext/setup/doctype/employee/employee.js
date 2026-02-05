@@ -11,7 +11,13 @@ erpnext.setup.EmployeeController = class EmployeeController extends frappe.ui.fo
 			};
 		};
 		this.frm.fields_dict.reports_to.get_query = function (doc, cdt, cdn) {
-			return { query: "erpnext.controllers.queries.employee_query" };
+			return {
+				query: "erpnext.controllers.queries.employee_query",
+				filters: [
+					["status", "=", "Active"],
+					["name", "!=", doc.name],
+				],
+			};
 		};
 	}
 
@@ -82,6 +88,12 @@ function add_offboarding_button(frm) {
 }
 
 frappe.ui.form.on("Employee", {
+	setup: function (frm) {
+		frm.make_methods = {
+			"Bank Account": () => erpnext.utils.make_bank_account(frm.doc.doctype, frm.doc.name),
+		};
+	},
+
 	onload: function (frm) {
 		frm.set_query("department", function () {
 			return {

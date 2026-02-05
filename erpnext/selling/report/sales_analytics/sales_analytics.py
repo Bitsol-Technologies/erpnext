@@ -177,14 +177,17 @@ class Analytics:
 			entity = "supplier as entity"
 			entity_name = "supplier_name as entity_name"
 
+		filters = {
+			"docstatus": 1,
+			"company": ["in", self.filters.company],
+			self.date_field: ("between", [self.filters.from_date, self.filters.to_date]),
+		}
+
+		if self.filters.doc_type in ["Sales Invoice", "Purchase Invoice", "Payment Entry"]:
+			filters.update({"is_opening": "No"})
+
 		self.entries = frappe.get_all(
-			self.filters.doc_type,
-			fields=[entity, entity_name, value_field, self.date_field],
-			filters={
-				"docstatus": 1,
-				"company": ["in", self.filters.company],
-				self.date_field: ("between", [self.filters.from_date, self.filters.to_date]),
-			},
+			self.filters.doc_type, fields=[entity, entity_name, value_field, self.date_field], filters=filters
 		)
 
 		self.entity_names = {}
@@ -236,14 +239,19 @@ class Analytics:
 		else:
 			entity_field = "territory as entity"
 
+		filters = {
+			"docstatus": 1,
+			"company": ["in", self.filters.company],
+			self.date_field: ("between", [self.filters.from_date, self.filters.to_date]),
+		}
+
+		if self.filters.doc_type in ["Sales Invoice", "Purchase Invoice", "Payment Entry"]:
+			filters.update({"is_opening": "No"})
+
 		self.entries = frappe.get_all(
 			self.filters.doc_type,
 			fields=[entity_field, value_field, self.date_field],
-			filters={
-				"docstatus": 1,
-				"company": ["in", self.filters.company],
-				self.date_field: ("between", [self.filters.from_date, self.filters.to_date]),
-			},
+			filters=filters,
 		)
 		self.get_groups()
 
@@ -282,15 +290,18 @@ class Analytics:
 
 		entity = "project as entity"
 
+		filters = {
+			"docstatus": 1,
+			"company": ["in", self.filters.company],
+			"project": ["!=", ""],
+			self.date_field: ("between", [self.filters.from_date, self.filters.to_date]),
+		}
+
+		if self.filters.doc_type in ["Sales Invoice", "Purchase Invoice", "Payment Entry"]:
+			filters.update({"is_opening": "No"})
+
 		self.entries = frappe.get_all(
-			self.filters.doc_type,
-			fields=[entity, value_field, self.date_field],
-			filters={
-				"docstatus": 1,
-				"company": ["in", self.filters.company],
-				"project": ["!=", ""],
-				self.date_field: ("between", [self.filters.from_date, self.filters.to_date]),
-			},
+			self.filters.doc_type, fields=[entity, value_field, self.date_field], filters=filters
 		)
 
 	def get_rows(self):
@@ -449,7 +460,31 @@ class Analytics:
 			labels = [d.get("label") for d in self.columns[3 : length - 1]]
 		else:
 			labels = [d.get("label") for d in self.columns[1 : length - 1]]
-		self.chart = {"data": {"labels": labels, "datasets": []}, "type": "line"}
+
+		datasets = []
+		for curve in self.data:
+			data = {
+				"name": curve.get("entity_name", curve["entity"]),
+				"values": [curve.get(scrub(label), 0) for label in labels],
+			}
+			if self.filters.curves == "non-zeros" and not sum(data["values"]):
+				continue
+			elif self.filters.curves == "total" and "indent" in curve:
+				if curve["indent"] == 0:
+					datasets.append(data)
+			elif self.filters.curves == "total":
+				if datasets:
+					a = [
+						data["values"][idx] + datasets[0]["values"][idx] for idx in range(len(data["values"]))
+					]
+					datasets[0]["values"] = a
+				else:
+					datasets.append(data)
+					datasets[0]["name"] = _("Total")
+			else:
+				datasets.append(data)
+
+		self.chart = {"data": {"labels": labels, "datasets": datasets}, "type": "line"}
 
 		if self.filters["value_quantity"] == "Value":
 			self.chart["fieldtype"] = "Currency"

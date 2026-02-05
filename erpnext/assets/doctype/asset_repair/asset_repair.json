@@ -1,5 +1,6 @@
 {
  "actions": [],
+ "allow_import": 1,
  "autoname": "naming_series:",
  "creation": "2017-10-23 11:38:54.004355",
  "doctype": "DocType",
@@ -74,6 +75,7 @@
    "fieldname": "completion_date",
    "fieldtype": "Datetime",
    "label": "Completion Date",
+   "mandatory_depends_on": "eval:doc.repair_status==\"Completed\"",
    "no_copy": 1
   },
   {
@@ -138,6 +140,7 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Asset",
+   "link_filters": "[[\"Asset\",\"status\",\"not in\",[\"Work In Progress\",\"Capitalized\",\"Fully Depreciated\",\"Sold\",\"Scrapped\",\"Cancelled\",null]]]",
    "options": "Asset",
    "reqd": 1
   },
@@ -248,7 +251,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2024-06-13 16:14:14.398356",
+ "modified": "2026-01-06 15:48:13.862505",
  "modified_by": "Administrator",
  "module": "Assets",
  "name": "Asset Repair",
@@ -262,6 +265,7 @@
    "delete": 1,
    "email": 1,
    "export": 1,
+   "import": 1,
    "print": 1,
    "read": 1,
    "report": 1,
@@ -277,6 +281,7 @@
    "delete": 1,
    "email": 1,
    "export": 1,
+   "import": 1,
    "print": 1,
    "read": 1,
    "report": 1,
@@ -286,6 +291,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

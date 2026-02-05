@@ -64,15 +64,10 @@ class InventoryDimension(Document):
 		self.reset_value()
 		self.set_source_and_target_fieldname()
 		self.set_type_of_transaction()
-		self.set_fetch_value_from()
 
 	def set_type_of_transaction(self):
 		if self.apply_to_all_doctypes:
 			self.type_of_transaction = "Both"
-
-	def set_fetch_value_from(self):
-		if self.apply_to_all_doctypes:
-			self.fetch_from_parent = self.reference_document
 
 	def do_not_update_document(self):
 		if self.is_new() or not self.has_stock_ledger():
@@ -201,8 +196,7 @@ class InventoryDimension(Document):
 					options=self.reference_document,
 					label=_("Rejected " + self.dimension_name),
 					search_index=1,
-					reqd=self.reqd,
-					mandatory_depends_on=self.mandatory_depends_on,
+					mandatory_depends_on="eval:doc.rejected_qty > 0",
 				)
 			)
 
@@ -398,6 +392,7 @@ def get_inventory_dimensions():
 			"Inventory Dimension",
 			fields=[
 				"distinct target_fieldname as fieldname",
+				"source_fieldname",
 				"reference_document as doctype",
 				"validate_negative_stock",
 			],

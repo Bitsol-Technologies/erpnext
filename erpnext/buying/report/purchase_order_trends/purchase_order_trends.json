@@ -1,5 +1,5 @@
 {
- "add_total_row": 1,
+ "add_total_row": 0,
  "add_translate_data": 0,
  "columns": [],
  "creation": "2013-06-13 18:45:01",
@@ -10,7 +10,7 @@
  "idx": 3,
  "is_standard": "Yes",
  "letterhead": null,
- "modified": "2025-07-08 12:22:08.266741",
+ "modified": "2025-11-05 11:55:50.058154",
  "modified_by": "Administrator",
  "module": "Buying",
  "name": "Purchase Order Trends",

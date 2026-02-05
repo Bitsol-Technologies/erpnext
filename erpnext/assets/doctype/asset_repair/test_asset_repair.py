@@ -4,11 +4,14 @@
 import unittest
 
 import frappe
-from frappe.utils import flt, nowdate, nowtime, today
+from frappe import qb
+from frappe.query_builder.functions import Sum
+from frappe.utils import add_days, add_months, flt, get_first_day, nowdate, nowtime, today
 
 from erpnext.assets.doctype.asset.asset import (
 	get_asset_account,
 	get_asset_value_after_depreciation,
+	make_sales_invoice,
 )
 from erpnext.assets.doctype.asset.test_asset import (
 	create_asset,
@@ -32,6 +35,33 @@ class TestAssetRepair(unittest.TestCase):
 		create_asset_data()
 		create_item("_Test Stock Item")
 		frappe.db.sql("delete from `tabTax Rule`")
+
+	def test_asset_status(self):
+		date = nowdate()
+		purchase_date = add_months(get_first_day(date), -2)
+
+		asset = create_asset(
+			calculate_depreciation=1,
+			available_for_use_date=purchase_date,
+			purchase_date=purchase_date,
+			expected_value_after_useful_life=10000,
+			total_number_of_depreciations=10,
+			frequency_of_depreciation=1,
+			submit=1,
+		)
+
+		si = make_sales_invoice(asset=asset.name, item_code="Macbook Pro", company="_Test Company")
+		si.customer = "_Test Customer"
+		si.due_date = date
+		si.get("items")[0].rate = 25000
+		si.insert()
+		si.submit()
+
+		asset.reload()
+		self.assertEqual(frappe.db.get_value("Asset", asset.name, "status"), "Sold")
+		asset_repair = frappe.new_doc("Asset Repair")
+		asset_repair.update({"company": "_Test Company", "asset": asset.name, "asset_name": asset.asset_name})
+		self.assertRaises(frappe.ValidationError, asset_repair.save)
 
 	def test_update_status(self):
 		asset = create_asset(submit=1)
@@ -266,6 +296,31 @@ class TestAssetRepair(unittest.TestCase):
 		stock_entry = frappe.get_last_doc("Stock Entry")
 		self.assertEqual(stock_entry.asset_repair, asset_repair.name)
 
+	def test_gl_entries_with_capitalized_asset_repair(self):
+		asset = create_asset(is_existing_asset=1, calculate_depreciation=1, submit=1)
+		asset_repair = create_asset_repair(
+			asset=asset, capitalize_repair_cost=1, item="_Test Non Stock Item", submit=1
+		)
+		asset.reload()
+
+		GLEntry = qb.DocType("GL Entry")
+		res = (
+			qb.from_(GLEntry)
+			.select(Sum(GLEntry.debit_in_account_currency).as_("total_debit"))
+			.where(
+				(GLEntry.voucher_type == "Asset Repair")
+				& (GLEntry.voucher_no == asset_repair.name)
+				& (GLEntry.against_voucher_type == "Asset")
+				& (GLEntry.against_voucher == asset.name)
+				& (GLEntry.company == asset.company)
+				& (GLEntry.is_cancelled == 0)
+			)
+		).run(as_dict=True)
+		booked_value = res[0].total_debit if res else 0
+
+		self.assertEqual(asset.additional_asset_cost, asset_repair.repair_cost)
+		self.assertEqual(booked_value, asset_repair.repair_cost)
+
 
 def num_of_depreciations(asset):
 	return asset.finance_books[0].total_number_of_depreciations
@@ -331,6 +386,7 @@ def create_asset_repair(**args):
 
 	if args.submit:
 		asset_repair.repair_status = "Completed"
+		asset_repair.completion_date = add_days(args.failure_date, 1)
 		asset_repair.cost_center = frappe.db.get_value("Company", asset.company, "cost_center")
 
 		if args.stock_consumption:

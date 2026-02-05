@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 from frappe.desk.reportview import get_match_cond
 from frappe.model.document import Document
-from frappe.utils import add_days, add_months, format_date, getdate, today
+from frappe.utils import add_days, add_months, add_to_date, format_date, getdate, today
 from frappe.utils.jinja import validate_template
 from frappe.utils.pdf import get_pdf
 from frappe.www.printview import get_print_style
@@ -44,6 +44,7 @@ class ProcessStatementOfAccounts(Document):
 		ageing_based_on: DF.Literal["Due Date", "Posting Date"]
 		based_on_payment_terms: DF.Check
 		body: DF.TextEditor | None
+		categorize_by: DF.Literal["", "Categorize by Voucher", "Categorize by Voucher (Consolidated)"]
 		cc_to: DF.TableMultiSelect[ProcessStatementOfAccountsCC]
 		collection_name: DF.DynamicLink | None
 		company: DF.Link
@@ -54,9 +55,8 @@ class ProcessStatementOfAccounts(Document):
 		enable_auto_email: DF.Check
 		filter_duration: DF.Int
 		finance_book: DF.Link | None
-		frequency: DF.Literal["Weekly", "Monthly", "Quarterly"]
+		frequency: DF.Literal["Daily", "Weekly", "Biweekly", "Monthly", "Quarterly"]
 		from_date: DF.Date | None
-		group_by: DF.Literal["", "Group by Voucher", "Group by Voucher (Consolidated)"]
 		ignore_cr_dr_notes: DF.Check
 		ignore_exchange_rate_revaluation_journals: DF.Check
 		include_ageing: DF.Check
@@ -82,6 +82,10 @@ class ProcessStatementOfAccounts(Document):
 	# end: auto-generated types
 
 	def validate(self):
+		self.validate_account()
+		self.validate_company_for_table("Cost Center")
+		self.validate_company_for_table("Project")
+
 		if not self.subject:
 			self.subject = "Statement Of Accounts for {{ customer.customer_name }}"
 		if not self.body:
@@ -103,6 +107,43 @@ class ProcessStatementOfAccounts(Document):
 			if self.start_date and getdate(self.start_date) >= getdate(today()):
 				self.to_date = self.start_date
 				self.from_date = add_months(self.to_date, -1 * self.filter_duration)
+
+	def validate_account(self):
+		if not self.account:
+			return
+
+		if self.company != frappe.get_cached_value("Account", self.account, "company"):
+			frappe.throw(
+				_("Account {0} doesn't belong to Company {1}").format(
+					frappe.bold(self.account),
+					frappe.bold(self.company),
+				)
+			)
+
+	def validate_company_for_table(self, doctype):
+		field = frappe.scrub(doctype)
+		if not self.get(field):
+			return
+
+		fieldname = field + "_name"
+
+		values = set(d.get(fieldname) for d in self.get(field))
+		invalid_values = frappe.db.get_all(
+			doctype, filters={"name": ["in", values], "company": ["!=", self.company]}, pluck="name"
+		)
+
+		if invalid_values:
+			msg = _("<p>Following {0}s doesn't belong to Company {1} :</p>").format(
+				doctype, frappe.bold(self.company)
+			)
+
+			msg += (
+				"<ul>"
+				+ "".join(_("<li>{}</li>").format(frappe.bold(row)) for row in invalid_values)
+				+ "</ul>"
+			)
+
+			frappe.throw(_(msg))
 
 
 def get_report_pdf(doc, consolidated=True):
@@ -129,8 +170,8 @@ def get_statement_dict(doc, get_statement_dict=False):
 
 		tax_id = frappe.get_doc("Customer", entry.customer).tax_id
 		presentation_currency = (
-			get_party_account_currency("Customer", entry.customer, doc.company)
-			or doc.currency
+			doc.currency
+			or get_party_account_currency("Customer", entry.customer, doc.company)
 			or get_company_currency(doc.company)
 		)
 
@@ -204,7 +245,7 @@ def get_gl_filters(doc, entry, tax_id, presentation_currency):
 		"party": [entry.customer],
 		"party_name": [entry.customer_name] if entry.customer_name else None,
 		"presentation_currency": presentation_currency,
-		"group_by": doc.group_by,
+		"categorize_by": doc.categorize_by,
 		"currency": doc.currency,
 		"project": [p.project_name for p in doc.project],
 		"show_opening_entries": 0,
@@ -488,8 +529,9 @@ def send_emails(document_name, from_scheduler=False, posting_date=None):
 
 		if doc.enable_auto_email and from_scheduler:
 			new_to_date = getdate(posting_date or today())
-			if doc.frequency == "Weekly":
-				new_to_date = add_days(new_to_date, 7)
+			if doc.frequency in ("Daily", "Weekly", "Biweekly"):
+				frequency = {"Daily": 1, "Weekly": 7, "Biweekly": 14}
+				new_to_date = add_days(new_to_date, frequency[doc.frequency])
 			else:
 				new_to_date = add_months(new_to_date, 1 if doc.frequency == "Monthly" else 3)
 			new_from_date = add_months(new_to_date, -1 * doc.filter_duration)
@@ -509,7 +551,7 @@ def send_auto_email():
 	selected = frappe.get_list(
 		"Process Statement Of Accounts",
 		filters={"enable_auto_email": 1},
-		or_filters={"to_date": format_date(today()), "posting_date": format_date(today())},
+		or_filters={"to_date": today(), "posting_date": today()},
 	)
 	for entry in selected:
 		send_emails(entry.name, from_scheduler=True)

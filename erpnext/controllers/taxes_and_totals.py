@@ -7,6 +7,7 @@ import json
 import frappe
 from frappe import _, scrub
 from frappe.model.document import Document
+from frappe.query_builder import functions
 from frappe.utils import cint, flt, round_based_on_smallest_currency_fraction
 from frappe.utils.deprecations import deprecated
 
@@ -45,16 +46,22 @@ class calculate_taxes_and_totals:
 		items = list(filter(lambda item: not item.get("is_alternative"), self.doc.get("items")))
 		return items
 
-	def calculate(self):
+	def calculate(self, ignore_tax_template_validation=False):
 		if not len(self.doc.items):
 			return
 
 		self.discount_amount_applied = False
+		self.need_recomputation = False
+		self.ignore_tax_template_validation = ignore_tax_template_validation
+
 		self._calculate()
 
 		if self.doc.meta.get_field("discount_amount"):
 			self.set_discount_amount()
 			self.apply_discount_amount()
+
+		if not ignore_tax_template_validation and self.need_recomputation:
+			return self.calculate(ignore_tax_template_validation=True)
 
 		# Update grand total as per cash and non trade discount
 		if self.doc.apply_discount_on == "Grand Total" and self.doc.get("is_cash_or_non_trade_discount"):
@@ -99,6 +106,9 @@ class calculate_taxes_and_totals:
 			self.doc.base_tax_withholding_net_total = sum_base_net_amount
 
 	def validate_item_tax_template(self):
+		if self.ignore_tax_template_validation:
+			return
+
 		if self.doc.get("is_return") and self.doc.get("return_against"):
 			return
 
@@ -139,6 +149,10 @@ class calculate_taxes_and_totals:
 								item.idx, frappe.bold(item.item_code)
 							)
 						)
+
+						# For correct tax_amount calculation re-computation is required
+						if self.discount_amount_applied and self.doc.apply_discount_on == "Grand Total":
+							self.need_recomputation = True
 
 	def update_item_tax_map(self):
 		for item in self.doc.items:
@@ -377,20 +391,25 @@ class calculate_taxes_and_totals:
 			self._calculate()
 
 	def calculate_taxes(self):
+		# reset value from earlier calculations
 		self.grand_total_diff = 0
+
+		doc = self.doc
+		if not doc.get("taxes"):
+			return
 
 		# maintain actual tax rate based on idx
 		actual_tax_dict = dict(
 			[
 				[tax.idx, flt(tax.tax_amount, tax.precision("tax_amount"))]
-				for tax in self.doc.get("taxes")
+				for tax in doc.taxes
 				if tax.charge_type == "Actual"
 			]
 		)
 
 		for n, item in enumerate(self._items):
 			item_tax_map = self._load_item_tax_rate(item.item_tax_rate)
-			for i, tax in enumerate(self.doc.get("taxes")):
+			for i, tax in enumerate(doc.taxes):
 				# tax_amount represents the amount of tax for the current step
 				current_tax_amount = self.get_current_tax_amount(item, tax, item_tax_map)
 				if frappe.flags.round_row_wise_tax:
@@ -425,30 +444,39 @@ class calculate_taxes_and_totals:
 					tax.grand_total_for_current_item = flt(item.net_amount + current_tax_amount)
 				else:
 					tax.grand_total_for_current_item = flt(
-						self.doc.get("taxes")[i - 1].grand_total_for_current_item + current_tax_amount
+						doc.taxes[i - 1].grand_total_for_current_item + current_tax_amount
 					)
 
-				# set precision in the last item iteration
-				if n == len(self._items) - 1:
-					self.round_off_totals(tax)
-					self._set_in_company_currency(tax, ["tax_amount", "tax_amount_after_discount_amount"])
+		discount_amount_applied = self.discount_amount_applied
+		if doc.apply_discount_on == "Grand Total" and (
+			discount_amount_applied or doc.discount_amount or doc.additional_discount_percentage
+		):
+			tax_amount_precision = doc.taxes[0].precision("tax_amount")
 
-					self.round_off_base_values(tax)
-					self.set_cumulative_total(i, tax)
+			for i, tax in enumerate(doc.taxes):
+				if discount_amount_applied:
+					tax.tax_amount_after_discount_amount = flt(
+						tax.tax_amount_after_discount_amount, tax_amount_precision
+					)
 
-					self._set_in_company_currency(tax, ["total"])
+				self.set_cumulative_total(i, tax)
 
-					# adjust Discount Amount loss in last tax iteration
-					if (
-						i == (len(self.doc.get("taxes")) - 1)
-						and self.discount_amount_applied
-						and self.doc.discount_amount
-						and self.doc.apply_discount_on == "Grand Total"
-					):
-						self.grand_total_diff = flt(
-							self.doc.grand_total - flt(self.doc.discount_amount) - tax.total,
-							self.doc.precision("rounding_adjustment"),
-						)
+			if not discount_amount_applied:
+				self.grand_total_for_distributing_discount = doc.taxes[-1].total
+			else:
+				self.grand_total_diff = flt(
+					self.grand_total_for_distributing_discount - doc.discount_amount - doc.taxes[-1].total,
+					doc.precision("grand_total"),
+				)
+
+		for i, tax in enumerate(doc.taxes):
+			self.round_off_totals(tax)
+			self._set_in_company_currency(tax, ["tax_amount", "tax_amount_after_discount_amount"])
+
+			self.round_off_base_values(tax)
+			self.set_cumulative_total(i, tax)
+
+			self._set_in_company_currency(tax, ["total"])
 
 	def get_tax_amount_if_for_valuation_or_deduction(self, tax_amount, tax):
 		# if just for valuation, do not add the tax amount in total
@@ -571,16 +599,20 @@ class calculate_taxes_and_totals:
 
 			if diff and abs(diff) <= (5.0 / 10 ** last_tax.precision("tax_amount")):
 				self.grand_total_diff = diff
+			else:
+				self.grand_total_diff = 0
 
 	def calculate_totals(self):
+		grand_total_diff = self.grand_total_diff
+
 		if self.doc.get("taxes"):
-			self.doc.grand_total = flt(self.doc.get("taxes")[-1].total) + self.grand_total_diff
+			self.doc.grand_total = flt(self.doc.get("taxes")[-1].total) + grand_total_diff
 		else:
 			self.doc.grand_total = flt(self.doc.net_total)
 
 		if self.doc.get("taxes"):
 			self.doc.total_taxes_and_charges = flt(
-				self.doc.grand_total - self.doc.net_total - self.grand_total_diff,
+				self.doc.grand_total - self.doc.net_total - grand_total_diff,
 				self.doc.precision("total_taxes_and_charges"),
 			)
 		else:
@@ -667,6 +699,41 @@ class calculate_taxes_and_totals:
 				self.doc.precision("discount_amount"),
 			)
 
+		discount_amount = self.doc.discount_amount or 0
+		grand_total = self.doc.grand_total
+
+		if self.doc.get("is_return") and self.doc.get("return_against"):
+			doctype = frappe.qb.DocType(self.doc.doctype)
+
+			result = (
+				frappe.qb.from_(doctype)
+				.select(functions.Sum(doctype.discount_amount).as_("total_return_discount"))
+				.where(
+					(doctype.return_against == self.doc.return_against)
+					& (doctype.is_return == 1)
+					& (doctype.docstatus == 1)
+				)
+			).run(as_dict=True)
+
+			total_return_discount = abs(result[0].get("total_return_discount") or 0)
+			discount_amount += total_return_discount
+
+		# validate that discount amount cannot exceed the total before discount
+		if (
+			(grand_total >= 0 and discount_amount > grand_total)
+			or (grand_total < 0 and discount_amount < grand_total)  # returns
+		):
+			frappe.throw(
+				_(
+					"Additional Discount Amount ({discount_amount}) cannot exceed "
+					"the total before such discount ({total_before_discount})"
+				).format(
+					discount_amount=self.doc.get_formatted("discount_amount"),
+					total_before_discount=self.doc.get_formatted("grand_total"),
+				),
+				title=_("Invalid Discount Amount"),
+			)
+
 	def apply_discount_amount(self):
 		if self.doc.discount_amount:
 			if not self.doc.apply_discount_on:
@@ -695,6 +762,9 @@ class calculate_taxes_and_totals:
 					adjusted_net_amount = item.net_amount - distributed_amount
 					expected_net_total += adjusted_net_amount
 					item.net_amount = flt(adjusted_net_amount, item.precision("net_amount"))
+					item.distributed_discount_amount = flt(
+						distributed_amount, item.precision("distributed_discount_amount")
+					)
 					net_total += item.net_amount
 
 					# discount amount rounding adjustment
@@ -703,6 +773,10 @@ class calculate_taxes_and_totals:
 					):
 						item.net_amount = flt(
 							item.net_amount + rounding_difference, item.precision("net_amount")
+						)
+						item.distributed_discount_amount = flt(
+							distributed_amount + rounding_difference,
+							item.precision("distributed_discount_amount"),
 						)
 						net_total += rounding_difference
 
@@ -718,7 +792,8 @@ class calculate_taxes_and_totals:
 			self.doc.base_discount_amount = 0
 
 	def get_total_for_discount_amount(self):
-		if self.doc.apply_discount_on == "Net Total":
+		doc = self.doc
+		if doc.apply_discount_on == "Net Total" or not doc.get("taxes"):
 			return self.doc.net_total
 
 		total_actual_tax = 0
@@ -738,7 +813,7 @@ class calculate_taxes_and_totals:
 				"cumulative_tax_amount": total_actual_tax,
 			}
 
-		for tax in self.doc.get("taxes"):
+		for tax in doc.taxes:
 			if tax.charge_type in ["Actual", "On Item Quantity"]:
 				update_actual_tax_dict(tax, tax.tax_amount)
 				continue
@@ -757,7 +832,7 @@ class calculate_taxes_and_totals:
 			)
 			update_actual_tax_dict(tax, base_tax_amount * tax.rate / 100)
 
-		return self.doc.grand_total - total_actual_tax
+		return getattr(self, "grand_total_for_distributing_discount", doc.grand_total) - total_actual_tax
 
 	def calculate_total_advance(self):
 		if not self.doc.docstatus.is_cancelled():
@@ -791,12 +866,11 @@ class calculate_taxes_and_totals:
 					)
 				)
 
-			if self.doc.docstatus.is_draft():
-				if self.doc.get("write_off_outstanding_amount_automatically"):
-					self.doc.write_off_amount = 0
+			if self.doc.get("write_off_outstanding_amount_automatically"):
+				self.doc.write_off_amount = 0
 
-				self.calculate_outstanding_amount()
-				self.calculate_write_off_amount()
+			self.calculate_outstanding_amount()
+			self.calculate_write_off_amount()
 
 	def is_internal_invoice(self):
 		"""

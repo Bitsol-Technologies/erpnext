@@ -1,5 +1,5 @@
 {
- "add_total_row": 1,
+ "add_total_row": 0,
  "add_translate_data": 0,
  "columns": [],
  "creation": "2013-06-13 18:43:30",
@@ -10,7 +10,7 @@
  "idx": 3,
  "is_standard": "Yes",
  "letterhead": null,
- "modified": "2025-07-08 12:20:35.990987",
+ "modified": "2025-11-05 11:55:50.096303",
  "modified_by": "Administrator",
  "module": "Selling",
  "name": "Sales Order Trends",

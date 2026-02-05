@@ -554,7 +554,7 @@
    "collapsible": 1,
    "fieldname": "personal_details",
    "fieldtype": "Tab Break",
-   "label": "Personal"
+   "label": "Personal Details"
   },
   {
    "fieldname": "passport_number",
@@ -657,7 +657,7 @@
    "collapsible": 1,
    "fieldname": "exit",
    "fieldtype": "Tab Break",
-   "label": "Exit",
+   "label": "Employee Exit",
    "oldfieldtype": "Section Break"
   },
   {
@@ -886,7 +886,8 @@
    "fieldname": "iban",
    "fieldtype": "Data",
    "label": "IBAN",
-   "permlevel": 1
+   "permlevel": 1,
+   "options": "IBAN"
   },
   {
    "fieldname": "section_break_5iqdl",
@@ -1081,7 +1082,7 @@
    "link_fieldname": "employee"
   }
  ],
- "modified": "2025-05-28 12:59:10.821641",
+ "modified": "2025-08-29 11:52:12.819878",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee",

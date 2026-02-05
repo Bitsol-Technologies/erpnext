@@ -7,6 +7,35 @@ const SALES_DOCTYPES = ["Quotation", "Sales Order", "Delivery Note", "Sales Invo
 const PURCHASE_DOCTYPES = ["Purchase Order", "Purchase Receipt", "Purchase Invoice"];
 
 frappe.ui.form.on("Item", {
+	valuation_method(frm) {
+		if (!frm.is_new() && frm.doc.valuation_method === "Moving Average") {
+			let stock_exists = frm.doc.__onload && frm.doc.__onload.stock_exists ? 1 : 0;
+			let current_valuation_method = frm.doc.__onload.current_valuation_method;
+
+			if (stock_exists && current_valuation_method !== frm.doc.valuation_method) {
+				let msg = __(
+					"Changing the valuation method to Moving Average will affect new transactions. If backdated entries are added, earlier FIFO-based entries will be reposted, which may change closing balances."
+				);
+				msg += "<br>";
+				msg += __(
+					"Also you can't switch back to FIFO after setting the valuation method to Moving Average for this item."
+				);
+				msg += "<br>";
+				msg += __("Do you want to change valuation method?");
+
+				frappe.confirm(
+					msg,
+					() => {
+						frm.set_value("valuation_method", "Moving Average");
+					},
+					() => {
+						frm.set_value("valuation_method", current_valuation_method);
+					}
+				);
+			}
+		}
+	},
+
 	setup: function (frm) {
 		frm.add_fetch("attribute", "numeric_values", "numeric_values");
 		frm.add_fetch("attribute", "from_range", "from_range");
@@ -195,8 +224,15 @@ frappe.ui.form.on("Item", {
 		["is_stock_item", "has_serial_no", "has_batch_no", "has_variants"].forEach((fieldname) => {
 			frm.set_df_property(fieldname, "read_only", stock_exists);
 		});
-
+		frm.set_df_property("is_fixed_asset", "read_only", frm.doc.__onload?.asset_exists ? 1 : 0);
 		frm.toggle_reqd("customer", frm.doc.is_customer_provided_item ? 1 : 0);
+		frm.set_query("item_group", () => {
+			return {
+				filters: {
+					is_group: 0,
+				},
+			};
+		});
 	},
 
 	validate: function (frm) {
@@ -941,7 +977,7 @@ frappe.tour["Item"] = [
 		fieldname: "valuation_rate",
 		title: "Valuation Rate",
 		description: __(
-			"There are two options to maintain valuation of stock. FIFO (first in - first out) and Moving Average. To understand this topic in detail please visit <a href='https://docs.erpnext.com/docs/v13/user/manual/en/stock/articles/item-valuation-fifo-and-moving-average' target='_blank'>Item Valuation, FIFO and Moving Average.</a>"
+			"There are two options to maintain valuation of stock. FIFO (first in - first out) and Moving Average. To understand this topic in detail please visit <a href='https://docs.frappe.io/erpnext/user/manual/en/calculation-of-valuation-rate-in-fifo-and-moving-average' target='_blank'>Item Valuation, FIFO and Moving Average.</a>"
 		),
 	},
 	{

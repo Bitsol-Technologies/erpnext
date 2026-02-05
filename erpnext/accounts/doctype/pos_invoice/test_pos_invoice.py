@@ -7,6 +7,9 @@ import unittest
 import frappe
 from frappe import _
 
+from erpnext.accounts.doctype.mode_of_payment.test_mode_of_payment import (
+	set_default_account_for_mode_of_payment,
+)
 from erpnext.accounts.doctype.pos_invoice.pos_invoice import PartialPaymentValidationError, make_sales_return
 from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profile
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
@@ -31,6 +34,8 @@ class TestPOSInvoice(unittest.TestCase):
 
 		cls.test_user, cls.pos_profile = init_user_and_profile()
 		create_opening_entry(cls.pos_profile, cls.test_user)
+		mode_of_payment = frappe.get_doc("Mode of Payment", "Bank Draft")
+		set_default_account_for_mode_of_payment(mode_of_payment, "_Test Company", "_Test Bank - _TC")
 
 	def tearDown(self):
 		if frappe.session.user != "Administrator":
@@ -233,12 +238,8 @@ class TestPOSInvoice(unittest.TestCase):
 		pos = create_pos_invoice(qty=10, do_not_save=True)
 
 		pos.set("payments", [])
-		pos.append(
-			"payments", {"mode_of_payment": "Bank Draft", "account": "_Test Bank - _TC", "amount": 500}
-		)
-		pos.append(
-			"payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 500, "default": 1}
-		)
+		pos.append("payments", {"mode_of_payment": "Bank Draft", "amount": 500})
+		pos.append("payments", {"mode_of_payment": "Cash", "amount": 500, "default": 1})
 		pos.insert()
 		pos.submit()
 
@@ -276,9 +277,7 @@ class TestPOSInvoice(unittest.TestCase):
 			do_not_save=1,
 		)
 
-		pos.append(
-			"payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 1000, "default": 1}
-		)
+		pos.append("payments", {"mode_of_payment": "Cash", "amount": 1000, "default": 1})
 
 		pos.insert()
 		pos.submit()
@@ -318,9 +317,7 @@ class TestPOSInvoice(unittest.TestCase):
 			do_not_save=1,
 		)
 
-		pos.append(
-			"payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 2000, "default": 1}
-		)
+		pos.append("payments", {"mode_of_payment": "Cash", "amount": 2000, "default": 1})
 
 		pos.insert()
 		pos.submit()
@@ -331,9 +328,7 @@ class TestPOSInvoice(unittest.TestCase):
 		# partial return 1
 		pos_return1.get("items")[0].qty = -1
 		pos_return1.set("payments", [])
-		pos_return1.append(
-			"payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": -1000, "default": 1}
-		)
+		pos_return1.append("payments", {"mode_of_payment": "Cash", "amount": -1000, "default": 1})
 		pos_return1.paid_amount = -1000
 		pos_return1.submit()
 		pos_return1.reload()
@@ -350,9 +345,7 @@ class TestPOSInvoice(unittest.TestCase):
 		# partial return 2
 		pos_return2 = make_sales_return(pos.name)
 		pos_return2.set("payments", [])
-		pos_return2.append(
-			"payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": -1000, "default": 1}
-		)
+		pos_return2.append("payments", {"mode_of_payment": "Cash", "amount": -1000, "default": 1})
 		pos_return2.paid_amount = -1000
 		pos_return2.submit()
 
@@ -372,10 +365,8 @@ class TestPOSInvoice(unittest.TestCase):
 		)
 
 		pos.set("payments", [])
-		pos.append("payments", {"mode_of_payment": "Bank Draft", "account": "_Test Bank - _TC", "amount": 50})
-		pos.append(
-			"payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 60, "default": 1}
-		)
+		pos.append("payments", {"mode_of_payment": "Bank Draft", "amount": 50})
+		pos.append("payments", {"mode_of_payment": "Cash", "amount": 60, "default": 1})
 
 		pos.insert()
 		pos.submit()
@@ -393,7 +384,7 @@ class TestPOSInvoice(unittest.TestCase):
 		pos_inv = create_pos_invoice(rate=10000, do_not_save=1)
 		pos_inv.append(
 			"payments",
-			{"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 9000},
+			{"mode_of_payment": "Cash", "amount": 9000},
 		)
 		pos_inv.insert()
 		self.assertRaises(PartialPaymentValidationError, pos_inv.submit)
@@ -424,9 +415,7 @@ class TestPOSInvoice(unittest.TestCase):
 			do_not_save=1,
 		)
 
-		pos.append(
-			"payments", {"mode_of_payment": "Bank Draft", "account": "_Test Bank - _TC", "amount": 1000}
-		)
+		pos.append("payments", {"mode_of_payment": "Bank Draft", "amount": 1000})
 
 		pos.insert()
 		pos.submit()
@@ -445,9 +434,7 @@ class TestPOSInvoice(unittest.TestCase):
 			do_not_save=1,
 		)
 
-		pos2.append(
-			"payments", {"mode_of_payment": "Bank Draft", "account": "_Test Bank - _TC", "amount": 1000}
-		)
+		pos2.append("payments", {"mode_of_payment": "Bank Draft", "amount": 1000})
 
 		pos2.insert()
 		self.assertRaises(frappe.ValidationError, pos2.submit)
@@ -494,11 +481,10 @@ class TestPOSInvoice(unittest.TestCase):
 			rate=1000,
 			serial_no=[serial_nos[0]],
 			do_not_save=1,
+			ignore_sabb_validation=True,
 		)
 
-		pos2.append(
-			"payments", {"mode_of_payment": "Bank Draft", "account": "_Test Bank - _TC", "amount": 1000}
-		)
+		pos2.append("payments", {"mode_of_payment": "Bank Draft", "amount": 1000})
 
 		pos2.insert()
 		self.assertRaises(frappe.ValidationError, pos2.submit)
@@ -561,9 +547,7 @@ class TestPOSInvoice(unittest.TestCase):
 		)
 		pos.get("items")[0].has_serial_no = 1
 		pos.set("payments", [])
-		pos.append(
-			"payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 1000, "default": 1}
-		)
+		pos.append("payments", {"mode_of_payment": "Cash", "amount": 1000, "default": 1})
 		pos = pos.save().submit()
 
 		# make a return
@@ -609,7 +593,7 @@ class TestPOSInvoice(unittest.TestCase):
 		inv = create_pos_invoice(customer="Test Loyalty Customer", rate=10000, do_not_save=1)
 		inv.append(
 			"payments",
-			{"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 10000},
+			{"mode_of_payment": "Cash", "amount": 10000},
 		)
 		inv.insert()
 		inv.submit()
@@ -641,7 +625,7 @@ class TestPOSInvoice(unittest.TestCase):
 		pos_inv = create_pos_invoice(customer="Test Loyalty Customer", rate=10000, do_not_save=1)
 		pos_inv.append(
 			"payments",
-			{"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 10000},
+			{"mode_of_payment": "Cash", "amount": 10000},
 		)
 		pos_inv.paid_amount = 10000
 		pos_inv.submit()
@@ -656,7 +640,7 @@ class TestPOSInvoice(unittest.TestCase):
 		inv.loyalty_amount = inv.loyalty_points * before_lp_details.conversion_factor
 		inv.append(
 			"payments",
-			{"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 10000 - inv.loyalty_amount},
+			{"mode_of_payment": "Cash", "amount": 10000 - inv.loyalty_amount},
 		)
 		inv.paid_amount = 10000
 		inv.submit()
@@ -677,12 +661,12 @@ class TestPOSInvoice(unittest.TestCase):
 		frappe.db.sql("delete from `tabPOS Invoice`")
 		test_user, pos_profile = init_user_and_profile()
 		pos_inv = create_pos_invoice(rate=300, additional_discount_percentage=10, do_not_submit=1)
-		pos_inv.append("payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 270})
+		pos_inv.append("payments", {"mode_of_payment": "Cash", "amount": 270})
 		pos_inv.save()
 		pos_inv.submit()
 
 		pos_inv2 = create_pos_invoice(rate=3200, do_not_submit=1)
-		pos_inv2.append("payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 3200})
+		pos_inv2.append("payments", {"mode_of_payment": "Cash", "amount": 3200})
 		pos_inv2.save()
 		pos_inv2.submit()
 
@@ -703,7 +687,7 @@ class TestPOSInvoice(unittest.TestCase):
 		frappe.db.sql("delete from `tabPOS Invoice`")
 		test_user, pos_profile = init_user_and_profile()
 		pos_inv = create_pos_invoice(rate=300, do_not_submit=1)
-		pos_inv.append("payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 300})
+		pos_inv.append("payments", {"mode_of_payment": "Cash", "amount": 300})
 		pos_inv.append(
 			"taxes",
 			{
@@ -720,7 +704,7 @@ class TestPOSInvoice(unittest.TestCase):
 
 		pos_inv2 = create_pos_invoice(rate=300, qty=2, do_not_submit=1)
 		pos_inv2.additional_discount_percentage = 10
-		pos_inv2.append("payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 540})
+		pos_inv2.append("payments", {"mode_of_payment": "Cash", "amount": 540})
 		pos_inv2.append(
 			"taxes",
 			{
@@ -758,7 +742,7 @@ class TestPOSInvoice(unittest.TestCase):
 		frappe.db.sql("delete from `tabPOS Invoice`")
 		test_user, pos_profile = init_user_and_profile()
 		pos_inv = create_pos_invoice(item=item, rate=300, do_not_submit=1)
-		pos_inv.append("payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 300})
+		pos_inv.append("payments", {"mode_of_payment": "Cash", "amount": 300})
 		pos_inv.append(
 			"taxes",
 			{
@@ -773,7 +757,7 @@ class TestPOSInvoice(unittest.TestCase):
 		self.assertRaises(frappe.ValidationError, pos_inv.submit)
 
 		pos_inv2 = create_pos_invoice(item=item, rate=400, do_not_submit=1)
-		pos_inv2.append("payments", {"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 400})
+		pos_inv2.append("payments", {"mode_of_payment": "Cash", "amount": 400})
 		pos_inv2.append(
 			"taxes",
 			{
@@ -818,7 +802,7 @@ class TestPOSInvoice(unittest.TestCase):
 		pos_inv1 = create_pos_invoice(item="_BATCH ITEM Test For Reserve", rate=300, qty=15, do_not_save=1)
 		pos_inv1.append(
 			"payments",
-			{"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 4500},
+			{"mode_of_payment": "Cash", "amount": 4500},
 		)
 		pos_inv1.items[0].batch_no = batch_no
 		pos_inv1.save()
@@ -839,7 +823,7 @@ class TestPOSInvoice(unittest.TestCase):
 		)
 		pos_inv2.append(
 			"payments",
-			{"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 3000},
+			{"mode_of_payment": "Cash", "amount": 3000},
 		)
 		pos_inv2.save()
 		pos_inv2.submit()
@@ -853,6 +837,53 @@ class TestPOSInvoice(unittest.TestCase):
 		for batch in batches:
 			if batch.batch_no == batch_no and batch.warehouse == "_Test Warehouse - _TC":
 				self.assertEqual(batch.qty, 5)
+
+	def test_pos_batch_reservation_with_return_qty(self):
+		"""
+		Test POS Invoice reserved qty for batch without bundle with return invoices.
+		"""
+		from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
+			get_auto_batch_nos,
+		)
+		from erpnext.stock.doctype.stock_reconciliation.test_stock_reconciliation import (
+			create_batch_item_with_batch,
+		)
+
+		create_batch_item_with_batch("_Batch Item Reserve Return", "TestBatch-RR 01")
+		se = make_stock_entry(
+			target="_Test Warehouse - _TC",
+			item_code="_Batch Item Reserve Return",
+			qty=30,
+			basic_rate=100,
+		)
+
+		se.reload()
+
+		batch_no = get_batch_from_bundle(se.items[0].serial_and_batch_bundle)
+
+		# POS Invoice for the batch without bundle
+		pos_inv = create_pos_invoice(item="_Batch Item Reserve Return", rate=300, qty=15, do_not_save=1)
+		pos_inv.append(
+			"payments",
+			{"mode_of_payment": "Cash", "amount": 4500},
+		)
+		pos_inv.items[0].batch_no = batch_no
+		pos_inv.save()
+		pos_inv.submit()
+
+		# POS Invoice return
+		pos_return = make_sales_return(pos_inv.name)
+
+		pos_return.insert()
+		pos_return.submit()
+
+		batches = get_auto_batch_nos(
+			frappe._dict({"item_code": "_Batch Item Reserve Return", "warehouse": "_Test Warehouse - _TC"})
+		)
+
+		for batch in batches:
+			if batch.batch_no == batch_no and batch.warehouse == "_Test Warehouse - _TC":
+				self.assertEqual(batch.qty, 30)
 
 	def test_pos_batch_item_qty_validation(self):
 		from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
@@ -879,7 +910,7 @@ class TestPOSInvoice(unittest.TestCase):
 		)
 		pos_inv1.append(
 			"payments",
-			{"mode_of_payment": "Cash", "account": "Cash - _TC", "amount": 300},
+			{"mode_of_payment": "Cash", "amount": 300},
 		)
 		pos_inv1.save()
 		pos_inv1.submit()
@@ -973,6 +1004,7 @@ class TestPOSInvoice(unittest.TestCase):
 				qty=1,
 				rate=100,
 				do_not_submit=True,
+				ignore_sabb_validation=True,
 			)
 
 			self.assertRaises(frappe.ValidationError, pos_inv.submit)
@@ -980,6 +1012,84 @@ class TestPOSInvoice(unittest.TestCase):
 		finally:
 			frappe.db.rollback(save_point="before_test_delivered_serial_no_case")
 			frappe.set_user("Administrator")
+
+	def test_bundle_stock_availability_validation(self):
+		from erpnext.accounts.doctype.pos_invoice.pos_invoice import ProductBundleStockValidationError
+		from erpnext.accounts.doctype.pos_invoice_merge_log.test_pos_invoice_merge_log import (
+			init_user_and_profile,
+		)
+		from erpnext.selling.doctype.product_bundle.test_product_bundle import make_product_bundle
+		from erpnext.stock.doctype.item.test_item import create_item
+
+		init_user_and_profile()
+
+		frappe.set_user("Administrator")
+
+		warehouse = "_Test Warehouse - _TC"
+		company = "_Test Company"
+
+		# Create stock sub-items
+		sub_item_a = "_Test Bundle SubA"
+		if not frappe.db.exists("Item", sub_item_a):
+			create_item(
+				item_code=sub_item_a,
+				is_stock_item=1,
+			)
+
+		sub_item_b = "_Test Bundle SubB"
+		if not frappe.db.exists("Item", sub_item_b):
+			create_item(
+				item_code=sub_item_b,
+				is_stock_item=1,
+			)
+
+		# Add initial stock: SubA=5, SubB=2
+		make_stock_entry(item_code=sub_item_a, target=warehouse, qty=5, company=company)
+		make_stock_entry(item_code=sub_item_b, target=warehouse, qty=2, company=company)
+
+		# Create Product Bundle: Test Bundle (SubA x2 + SubB x1)
+		bundle_item = "_Test Bundle"
+		if not frappe.db.exists("Item", bundle_item):
+			create_item(
+				item_code=bundle_item,
+				is_stock_item=0,
+			)
+
+		if not frappe.db.exists("Product Bundle", bundle_item):
+			make_product_bundle(parent=bundle_item, items=[sub_item_a, sub_item_b])
+
+		# Test Case 1: Sufficient stock (bundle qty=1: requires SubA=2 (<=5), SubB=1 (<=2)) -> No error
+		pos_inv_sufficient = create_pos_invoice(
+			item=bundle_item,
+			qty=1,
+			rate=100,
+			warehouse=warehouse,
+			pos_profile=self.pos_profile.name,
+			do_not_save=1,
+		)
+		pos_inv_sufficient.append("payments", {"mode_of_payment": "Cash", "amount": 100, "default": 1})
+		pos_inv_sufficient.insert()
+		pos_inv_sufficient.submit()
+
+		pos_inv_sufficient.cancel()
+		pos_inv_sufficient.delete()
+
+		# Test Case 2: Insufficient stock (reduce SubB to 1, bundle qty=2: requires SubB=2 >1) -> Error with details
+		make_stock_entry(item_code=sub_item_b, from_warehouse=warehouse, qty=1, company=company)
+
+		pos_inv_insufficient = create_pos_invoice(
+			item=bundle_item,
+			qty=2,
+			rate=100,
+			warehouse=warehouse,
+			pos_profile=self.pos_profile.name,
+			do_not_save=1,
+		)
+		pos_inv_insufficient.append("payments", {"mode_of_payment": "Cash", "amount": 200, "default": 1})
+		pos_inv_insufficient.save()
+		self.assertRaises(ProductBundleStockValidationError, pos_inv_insufficient.submit)
+
+		frappe.set_user("test@example.com")
 
 
 def create_pos_invoice(**args):
@@ -1036,6 +1146,7 @@ def create_pos_invoice(**args):
 					"posting_time": pos_inv.posting_time,
 					"type_of_transaction": type_of_transaction,
 					"do_not_submit": True,
+					"ignore_sabb_validation": args.ignore_sabb_validation,
 				}
 			)
 		).name
@@ -1088,10 +1199,3 @@ def create_pos_invoice(**args):
 		pos_inv.payment_schedule = []
 
 	return pos_inv
-
-
-def make_batch_item(item_name):
-	from erpnext.stock.doctype.item.test_item import make_item
-
-	if not frappe.db.exists(item_name):
-		return make_item(item_name, dict(has_batch_no=1, create_new_batch=1, is_stock_item=1))

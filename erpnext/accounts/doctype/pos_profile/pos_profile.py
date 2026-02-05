@@ -29,6 +29,7 @@ class POSProfile(Document):
 
 		account_for_change_amount: DF.Link | None
 		allow_discount_change: DF.Check
+		allow_partial_payment: DF.Check
 		allow_rate_change: DF.Check
 		applicable_for_users: DF.Table[POSProfileUser]
 		apply_discount_on: DF.Literal["Grand Total", "Net Total"]
@@ -54,6 +55,7 @@ class POSProfile(Document):
 		payments: DF.Table[POSPaymentMethod]
 		print_format: DF.Link | None
 		print_receipt_on_order_complete: DF.Check
+		project: DF.Link | None
 		select_print_heading: DF.Link | None
 		selling_price_list: DF.Link | None
 		tax_category: DF.Link | None
@@ -68,6 +70,7 @@ class POSProfile(Document):
 	# end: auto-generated types
 
 	def validate(self):
+		self.validate_disabled()
 		self.validate_default_profile()
 		self.validate_all_link_fields()
 		self.validate_duplicate_groups()
@@ -91,6 +94,21 @@ class POSProfile(Document):
 					),
 					title=_("Mandatory Accounting Dimension"),
 				)
+
+	def validate_disabled(self):
+		old_doc = self.get_doc_before_save()
+
+		if (
+			old_doc
+			and self.disabled
+			and old_doc.disabled != self.disabled
+			and frappe.db.exists("POS Opening Entry", {"pos_profile": self.name, "status": "Open"})
+		):
+			frappe.throw(
+				_("POS Profile {0} cannot be disabled as there are ongoing POS sessions.").format(
+					frappe.bold(self.name)
+				)
+			)
 
 	def validate_default_profile(self):
 		for row in self.applicable_for_users:

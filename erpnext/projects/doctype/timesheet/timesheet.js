@@ -21,6 +21,7 @@ frappe.ui.form.on("Timesheet", {
 				filters: {
 					project: child.project,
 					status: ["!=", "Cancelled"],
+					is_group: 0,
 				},
 			};
 		};
@@ -321,6 +322,7 @@ frappe.ui.form.on("Timesheet Detail", {
 
 	hours: function (frm, cdt, cdn) {
 		calculate_end_time(frm, cdt, cdn);
+		update_billing_hours(frm, cdt, cdn);
 		calculate_billing_costing_amount(frm, cdt, cdn);
 		calculate_time_and_amount(frm);
 	},
