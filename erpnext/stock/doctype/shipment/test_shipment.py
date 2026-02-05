@@ -4,12 +4,12 @@
 from datetime import date, timedelta
 
 import frappe
-from frappe.tests.utils import FrappeTestCase
+from frappe.tests import IntegrationTestCase
 
 from erpnext.stock.doctype.delivery_note.delivery_note import make_shipment
 
 
-class TestShipment(FrappeTestCase):
+class TestShipment(IntegrationTestCase):
 	def test_shipment_from_delivery_note(self):
 		delivery_note = create_test_delivery_note()
 		delivery_note.submit()
@@ -19,6 +19,17 @@ class TestShipment(FrappeTestCase):
 		self.assertEqual(second_shipment.value_of_goods, delivery_note.grand_total)
 		self.assertEqual(len(second_shipment.shipment_delivery_note), 1)
 		self.assertEqual(second_shipment.shipment_delivery_note[0].delivery_note, delivery_note.name)
+
+	def test_get_total_weight(self):
+		shipment = frappe.new_doc("Shipment")
+		shipment.extend(
+			"shipment_parcel",
+			[
+				{"length": 5, "width": 5, "height": 5, "weight": 5, "count": 5},
+				{"length": 5, "width": 5, "height": 5, "weight": 10, "count": 1},
+			],
+		)
+		self.assertEqual(shipment.get_total_weight(), 35)
 
 
 def create_test_delivery_note():
@@ -76,9 +87,7 @@ def create_test_shipment(delivery_notes=None):
 	shipment.description_of_content = "unit test entry"
 	for delivery_note in delivery_notes:
 		shipment.append("shipment_delivery_note", {"delivery_note": delivery_note.name})
-	shipment.append(
-		"shipment_parcel", {"length": 5, "width": 5, "height": 5, "weight": 5, "count": 5}
-	)
+	shipment.append("shipment_parcel", {"length": 5, "width": 5, "height": 5, "weight": 5, "count": 5})
 	shipment.insert()
 	return shipment
 
@@ -96,9 +105,7 @@ def get_shipment_customer_contact(customer_name):
 
 def get_shipment_customer_address(customer_name):
 	address_title = customer_name + " address 123"
-	customer_address = frappe.get_all(
-		"Address", fields=["name"], filters={"address_title": address_title}
-	)
+	customer_address = frappe.get_all("Address", fields=["name"], filters={"address_title": address_title})
 	if len(customer_address):
 		return customer_address[0]
 	else:
@@ -160,9 +167,7 @@ def create_customer_contact(fname, lname):
 	customer.is_primary_contact = 1
 	customer.is_billing_contact = 1
 	customer.append("email_ids", {"email_id": "randomme@email.com", "is_primary": 1})
-	customer.append(
-		"phone_nos", {"phone": "123123123", "is_primary_phone": 1, "is_primary_mobile_no": 1}
-	)
+	customer.append("phone_nos", {"phone": "123123123", "is_primary_phone": 1, "is_primary_mobile_no": 1})
 	customer.status = "Passive"
 	customer.insert()
 	return customer

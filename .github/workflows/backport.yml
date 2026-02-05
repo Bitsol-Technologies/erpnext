@@ -5,13 +5,16 @@ on:
       - closed
       - labeled
 
+permissions:
+  contents: read
+
 jobs:
   main:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Checkout Actions
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
         with:
           repository: "frappe/backport"
           path: ./actions
@@ -21,6 +24,6 @@ jobs:
       - name: Run backport
         uses: ./actions/backport
         with:
-          token: ${{secrets.BACKPORT_BOT_TOKEN}}
+          token: ${{secrets.RELEASE_TOKEN}}
           labelsToAdd: "backport"
           title: "{{originalTitle}}"

@@ -24,8 +24,9 @@
   "current_invoice_start",
   "current_invoice_end",
   "days_until_due",
+  "generate_invoice_at",
+  "number_of_days",
   "cancel_at_period_end",
-  "generate_invoice_at_period_start",
   "sb_4",
   "plans",
   "sb_1",
@@ -50,7 +51,7 @@
    "fieldtype": "Select",
    "label": "Status",
    "no_copy": 1,
-   "options": "\nTrialling\nActive\nPast Due Date\nCancelled\nUnpaid\nCompleted",
+   "options": "\nTrialing\nActive\nGrace Period\nCancelled\nUnpaid\nCompleted",
    "read_only": 1
   },
   {
@@ -86,12 +87,14 @@
    "fieldname": "current_invoice_start",
    "fieldtype": "Date",
    "label": "Current Invoice Start Date",
+   "no_copy": 1,
    "read_only": 1
   },
   {
    "fieldname": "current_invoice_end",
    "fieldtype": "Date",
    "label": "Current Invoice End Date",
+   "no_copy": 1,
    "read_only": 1
   },
   {
@@ -106,12 +109,6 @@
    "fieldname": "cancel_at_period_end",
    "fieldtype": "Check",
    "label": "Cancel At End Of Period"
-  },
-  {
-   "default": "0",
-   "fieldname": "generate_invoice_at_period_start",
-   "fieldtype": "Check",
-   "label": "Generate Invoice At Beginning Of Period"
   },
   {
    "allow_on_submit": 1,
@@ -151,13 +148,13 @@
   {
    "fieldname": "additional_discount_percentage",
    "fieldtype": "Percent",
-   "label": "Additional DIscount Percentage"
+   "label": "Additional Discount Percentage"
   },
   {
    "collapsible": 1,
    "fieldname": "additional_discount_amount",
    "fieldtype": "Currency",
-   "label": "Additional DIscount Amount"
+   "label": "Additional Discount Amount"
   },
   {
    "collapsible": 1,
@@ -240,6 +237,21 @@
    "fieldname": "submit_invoice",
    "fieldtype": "Check",
    "label": "Submit Generated Invoices"
+  },
+  {
+   "default": "End of the current subscription period",
+   "fieldname": "generate_invoice_at",
+   "fieldtype": "Select",
+   "label": "Generate Invoice At",
+   "options": "End of the current subscription period\nBeginning of the current subscription period\nDays before the current subscription period",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.generate_invoice_at === \"Days before the current subscription period\"",
+   "fieldname": "number_of_days",
+   "fieldtype": "Int",
+   "label": "Number of Days",
+   "mandatory_depends_on": "eval:doc.generate_invoice_at === \"Days before the current subscription period\""
   }
  ],
  "index_web_pages_for_search": 1,
@@ -255,7 +267,7 @@
    "link_fieldname": "subscription"
   }
  ],
- "modified": "2022-02-18 23:24:57.185054",
+ "modified": "2025-12-23 19:42:52.036034",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Subscription",
@@ -299,7 +311,8 @@
    "write": 1
   }
  ],
- "sort_field": "modified",
+ "row_format": "Dynamic",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "track_changes": 1

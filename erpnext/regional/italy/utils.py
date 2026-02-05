@@ -8,6 +8,7 @@ from frappe.utils.file_manager import remove_file
 
 from erpnext.controllers.taxes_and_totals import get_itemised_tax
 from erpnext.regional.italy import state_codes
+from erpnext.stock.utils import get_default_stock_uom
 
 
 def update_itemised_tax_data(doc):
@@ -17,7 +18,7 @@ def update_itemised_tax_data(doc):
 	if doc.doctype == "Purchase Invoice":
 		return
 
-	itemised_tax = get_itemised_tax(doc.taxes)
+	itemised_tax = get_itemised_tax(doc)
 
 	for row in doc.items:
 		tax_rate = 0.0
@@ -39,7 +40,7 @@ def export_invoices(filters=None):
 
 	attachments = get_e_invoice_attachments(invoices)
 
-	zip_filename = "{0}-einvoices.zip".format(frappe.utils.get_datetime().strftime("%Y%m%d_%H%M%S"))
+	zip_filename = "{}-einvoices.zip".format(frappe.utils.get_datetime().strftime("%Y%m%d_%H%M%S"))
 
 	download_zip(attachments, zip_filename)
 
@@ -78,7 +79,7 @@ def prepare_invoice(invoice, progressive_number):
 		invoice.transmission_format_code = "FPR12"
 
 	invoice.e_invoice_items = [item for item in invoice.items]
-	tax_data = get_invoice_summary(invoice.e_invoice_items, invoice.taxes)
+	tax_data = get_invoice_summary(invoice.e_invoice_items, invoice.taxes, invoice.item_wise_tax_details)
 	invoice.tax_data = tax_data
 
 	# Check if stamp duty (Bollo) of 2 EUR exists.
@@ -139,8 +140,16 @@ def download_zip(files, output_filename):
 	zip_stream.close()
 
 
-def get_invoice_summary(items, taxes):
+def get_invoice_summary(items, taxes, item_wise_tax_details):
 	summary_data = frappe._dict()
+	taxes_wise_tax_details = {}
+
+	for d in item_wise_tax_details:
+		if d.tax_row not in taxes_wise_tax_details:
+			taxes_wise_tax_details[d.tax_row] = []
+
+		taxes_wise_tax_details[d.tax_row].append(d)
+
 	for tax in taxes:
 		# Include only VAT charges.
 		if tax.charge_type == "Actual":
@@ -150,89 +159,61 @@ def get_invoice_summary(items, taxes):
 		if tax.charge_type in ["On Previous Row Total", "On Previous Row Amount"]:
 			reference_row = next((row for row in taxes if row.idx == int(tax.row_id or 0)), None)
 			if reference_row:
-				items.append(
-					frappe._dict(
-						idx=len(items) + 1,
-						item_code=reference_row.description,
-						item_name=reference_row.description,
-						description=reference_row.description,
-						rate=reference_row.tax_amount,
-						qty=1.0,
-						amount=reference_row.tax_amount,
-						stock_uom=frappe.db.get_single_value("Stock Settings", "stock_uom") or _("Nos"),
-						tax_rate=tax.rate,
-						tax_amount=(reference_row.tax_amount * tax.rate) / 100,
-						net_amount=reference_row.tax_amount,
-						taxable_amount=reference_row.tax_amount,
-						item_tax_rate={tax.account_head: tax.rate},
-						charges=True,
-					)
-				)
+				append_row_as_charges(items, tax, reference_row, summary_data)
 
-		# Check item tax rates if tax rate is zero.
-		if tax.rate == 0:
-			for item in items:
-				item_tax_rate = item.item_tax_rate
-				if isinstance(item.item_tax_rate, str):
-					item_tax_rate = json.loads(item.item_tax_rate)
+		for row in taxes_wise_tax_details.get(tax.name) or []:
+			update_summary_details(summary_data, tax, row.rate, row.amount, row.taxable_amount)
 
-				if item_tax_rate and tax.account_head in item_tax_rate:
-					key = cstr(item_tax_rate[tax.account_head])
-					if key not in summary_data:
-						summary_data.setdefault(
-							key,
-							{
-								"tax_amount": 0.0,
-								"taxable_amount": 0.0,
-								"tax_exemption_reason": "",
-								"tax_exemption_law": "",
-							},
-						)
-
-					summary_data[key]["tax_amount"] += item.tax_amount
-					summary_data[key]["taxable_amount"] += item.net_amount
-					if key == "0.0":
-						summary_data[key]["tax_exemption_reason"] = tax.tax_exemption_reason
-						summary_data[key]["tax_exemption_law"] = tax.tax_exemption_law
-
-			if summary_data.get("0.0") and tax.charge_type in [
-				"On Previous Row Total",
-				"On Previous Row Amount",
-			]:
-				summary_data[key]["taxable_amount"] = tax.total
-
-			if summary_data == {}:  # Implies that Zero VAT has not been set on any item.
-				summary_data.setdefault(
-					"0.0",
-					{
-						"tax_amount": 0.0,
-						"taxable_amount": tax.total,
-						"tax_exemption_reason": tax.tax_exemption_reason,
-						"tax_exemption_law": tax.tax_exemption_law,
-					},
-				)
-
-		else:
-			item_wise_tax_detail = json.loads(tax.item_wise_tax_detail)
-			for rate_item in [
-				tax_item for tax_item in item_wise_tax_detail.items() if tax_item[1][0] == tax.rate
-			]:
-				key = cstr(tax.rate)
-				if not summary_data.get(key):
-					summary_data.setdefault(key, {"tax_amount": 0.0, "taxable_amount": 0.0})
-				summary_data[key]["tax_amount"] += rate_item[1][1]
-				summary_data[key]["taxable_amount"] += sum(
-					[item.net_amount for item in items if item.item_code == rate_item[0]]
-				)
-
-			for item in items:
-				key = cstr(tax.rate)
-				if item.get("charges"):
-					if not summary_data.get(key):
-						summary_data.setdefault(key, {"taxable_amount": 0.0})
-					summary_data[key]["taxable_amount"] += item.taxable_amount
+		if summary_data == {}:
+			# Implies that Zero VAT has not been set on any item.
+			update_summary_details(summary_data, tax, 0.0, 0.0, tax.total)
 
 	return summary_data
+
+
+def update_summary_details(summary_data, tax, rate, amount, taxable_amount):
+	key = cstr(rate)
+	summary_data.setdefault(
+		key,
+		{
+			"tax_amount": 0.0,
+			"taxable_amount": 0.0,
+			"tax_exemption_reason": "",
+			"tax_exemption_law": "",
+		},
+	)
+
+	summary_data[key]["tax_amount"] += amount
+	summary_data[key]["taxable_amount"] += taxable_amount
+
+	if key == "0.0":
+		summary_data[key]["tax_exemption_reason"] = tax.tax_exemption_reason
+		summary_data[key]["tax_exemption_law"] = tax.tax_exemption_law
+
+
+def append_row_as_charges(items, tax, reference_row, summary_data):
+	rate = tax.rate
+	amount = (reference_row.tax_amount * tax.rate) / 100
+	taxable_amount = reference_row.tax_amount
+	items.append(
+		frappe._dict(
+			idx=len(items) + 1,
+			item_code=reference_row.description,
+			item_name=reference_row.description,
+			description=reference_row.description,
+			rate=reference_row.tax_amount,
+			qty=1.0,
+			amount=reference_row.tax_amount,
+			stock_uom=get_default_stock_uom(),
+			tax_rate=rate,
+			tax_amount=amount,
+			net_amount=taxable_amount,
+			taxable_amount=taxable_amount,
+			item_tax_rate={tax.account_head: tax.rate},
+			charges=True,
+		)
+	)
+	update_summary_details(summary_data, tax, rate, amount, taxable_amount)
 
 
 # Preflight for successful e-invoice export.
@@ -261,12 +242,11 @@ def sales_invoice_validate(doc):
 
 	doc.company_tax_id = frappe.get_cached_value("Company", doc.company, "tax_id")
 	doc.company_fiscal_code = frappe.get_cached_value("Company", doc.company, "fiscal_code")
-	if not doc.company_tax_id and not doc.company_fiscal_code:
+	if not doc.company_tax_id or not doc.company_fiscal_code:
 		frappe.throw(
-			_("Please set either the Tax ID or Fiscal Code on Company '%s'" % doc.company),
+			_("Please set both the Tax ID and Fiscal Code on Company {0}").format(doc.company),
 			title=_("E-Invoicing Information Missing"),
 		)
-
 	# Validate customer details
 	customer = frappe.get_doc("Customer", doc.customer)
 
@@ -307,7 +287,9 @@ def sales_invoice_validate(doc):
 		for row in doc.taxes:
 			if row.rate == 0 and row.tax_amount == 0 and not row.tax_exemption_reason:
 				frappe.throw(
-					_("Row {0}: Please set at Tax Exemption Reason in Sales Taxes and Charges").format(row.idx),
+					_("Row {0}: Please set at Tax Exemption Reason in Sales Taxes and Charges").format(
+						row.idx
+					),
 					title=_("E-Invoicing Information Missing"),
 				)
 
@@ -329,24 +311,19 @@ def sales_invoice_on_submit(doc, method):
 	]:
 		return
 
-	if not len(doc.payment_schedule):
-		frappe.throw(_("Please set the Payment Schedule"), title=_("E-Invoicing Information Missing"))
-	else:
-		for schedule in doc.payment_schedule:
-			if not schedule.mode_of_payment:
-				frappe.throw(
-					_("Row {0}: Please set the Mode of Payment in Payment Schedule").format(schedule.idx),
-					title=_("E-Invoicing Information Missing"),
-				)
-			elif not frappe.db.get_value(
-				"Mode of Payment", schedule.mode_of_payment, "mode_of_payment_code"
-			):
-				frappe.throw(
-					_("Row {0}: Please set the correct code on Mode of Payment {1}").format(
-						schedule.idx, schedule.mode_of_payment
-					),
-					title=_("E-Invoicing Information Missing"),
-				)
+	for schedule in doc.payment_schedule:
+		if not schedule.mode_of_payment:
+			frappe.throw(
+				_("Row {0}: Please set the Mode of Payment in Payment Schedule").format(schedule.idx),
+				title=_("E-Invoicing Information Missing"),
+			)
+		elif not frappe.db.get_value("Mode of Payment", schedule.mode_of_payment, "mode_of_payment_code"):
+			frappe.throw(
+				_("Row {0}: Please set the correct code on Mode of Payment {1}").format(
+					schedule.idx, schedule.mode_of_payment
+				),
+				title=_("E-Invoicing Information Missing"),
+			)
 
 	prepare_and_attach_invoice(doc)
 
@@ -473,9 +450,7 @@ def get_progressive_name_and_number(doc, replace=False):
 			filename = attachment.file_name.split(".xml")[0]
 			return filename, filename.split("_")[1]
 
-	company_tax_id = (
-		doc.company_tax_id if doc.company_tax_id.startswith("IT") else "IT" + doc.company_tax_id
-	)
+	company_tax_id = doc.company_tax_id if doc.company_tax_id.startswith("IT") else "IT" + doc.company_tax_id
 	progressive_name = frappe.model.naming.make_autoname(company_tax_id + "_.#####")
 	progressive_number = progressive_name.split("_")[1]
 

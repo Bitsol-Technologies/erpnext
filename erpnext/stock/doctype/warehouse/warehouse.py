@@ -2,10 +2,15 @@
 # License: GNU General Public License v3. See license.txt
 
 
+import json
+
 import frappe
 from frappe import _, throw
 from frappe.contacts.address_and_contact import load_address_and_contact
+from frappe.query_builder import Field
+from frappe.query_builder.functions import IfNull
 from frappe.utils import cint
+from frappe.utils.caching import request_cache
 from frappe.utils.nestedset import NestedSet
 from pypika.terms import ExistsCriterion
 
@@ -13,6 +18,37 @@ from erpnext.stock import get_warehouse_account
 
 
 class Warehouse(NestedSet):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		account: DF.Link | None
+		address_line_1: DF.Data | None
+		address_line_2: DF.Data | None
+		city: DF.Data | None
+		company: DF.Link
+		customer: DF.Link | None
+		default_in_transit_warehouse: DF.Link | None
+		disabled: DF.Check
+		email_id: DF.Data | None
+		is_group: DF.Check
+		is_rejected_warehouse: DF.Check
+		lft: DF.Int
+		mobile_no: DF.Data | None
+		old_parent: DF.Link | None
+		parent_warehouse: DF.Link | None
+		phone_no: DF.Data | None
+		pin: DF.Data | None
+		rgt: DF.Int
+		state: DF.Data | None
+		warehouse_name: DF.Data
+		warehouse_type: DF.Link | None
+	# end: auto-generated types
+
 	nsm_parent_field = "parent_warehouse"
 
 	def autoname(self):
@@ -25,15 +61,13 @@ class Warehouse(NestedSet):
 		self.name = self.warehouse_name
 
 	def onload(self):
-		"""load account name for General Ledger Report"""
-		if self.company and cint(
-			frappe.db.get_value("Company", self.company, "enable_perpetual_inventory")
-		):
+		if self.company and cint(frappe.db.get_value("Company", self.company, "enable_perpetual_inventory")):
 			account = self.account or get_warehouse_account(self)
 
 			if account:
 				self.set_onload("account", account)
 		load_address_and_contact(self)
+		self.set_onload("stock_exists", self.check_if_sle_exists(non_cancelled_only=True))
 
 	def validate(self):
 		self.warn_about_multiple_warehouse_account()
@@ -119,8 +153,11 @@ class Warehouse(NestedSet):
 				indicator="orange",
 			)
 
-	def check_if_sle_exists(self):
-		return frappe.db.exists("Stock Ledger Entry", {"warehouse": self.name})
+	def check_if_sle_exists(self, non_cancelled_only=False):
+		filters = {"warehouse": self.name}
+		if non_cancelled_only:
+			filters["is_cancelled"] = 0
+		return frappe.db.exists("Stock Ledger Entry", filters)
 
 	def check_if_child_exists(self):
 		return frappe.db.exists("Warehouse", {"parent_warehouse": self.name})
@@ -154,15 +191,22 @@ class Warehouse(NestedSet):
 
 
 @frappe.whitelist()
-def get_children(doctype, parent=None, company=None, is_root=False):
+def get_children(doctype, parent=None, company=None, is_root=False, include_disabled=False):
 	if is_root:
 		parent = ""
 
+	if isinstance(include_disabled, str):
+		include_disabled = json.loads(include_disabled)
+
 	fields = ["name as value", "is_group as expandable"]
+
 	filters = [
-		["ifnull(`parent_warehouse`, '')", "=", parent],
+		[IfNull(Field("parent_warehouse"), ""), "=", parent],
 		["company", "in", (company, None, "")],
 	]
+
+	if frappe.db.has_column(doctype, "disabled") and not include_disabled:
+		filters.append(["disabled", "=", False])
 
 	return frappe.get_list(doctype, fields=fields, filters=filters, order_by="name")
 
@@ -186,16 +230,19 @@ def convert_to_group_or_ledger(docname=None):
 	return frappe.get_doc("Warehouse", docname).convert_to_group_or_ledger()
 
 
+@request_cache
 def get_child_warehouses(warehouse):
 	from frappe.utils.nestedset import get_descendants_of
 
 	children = get_descendants_of("Warehouse", warehouse, ignore_permissions=True, order_by="lft")
-	return children + [warehouse]  # append self for backward compatibility
+	return [*children, warehouse]  # append self for backward compatibility
 
 
 def get_warehouses_based_on_account(account, company=None):
 	warehouses = []
-	for d in frappe.get_all("Warehouse", fields=["name", "is_group"], filters={"account": account}):
+	for d in frappe.get_all(
+		"Warehouse", fields=["name", "is_group"], filters={"account": account, "disabled": 0}
+	):
 		if d.is_group:
 			warehouses.extend(get_child_warehouses(d.name))
 		else:
@@ -216,19 +263,57 @@ def get_warehouses_based_on_account(account, company=None):
 
 # Will be use for frappe.qb
 def apply_warehouse_filter(query, sle, filters):
-	if warehouse := filters.get("warehouse"):
-		warehouse_table = frappe.qb.DocType("Warehouse")
+	if not (warehouses := filters.get("warehouse")):
+		return query
 
-		lft, rgt = frappe.db.get_value("Warehouse", warehouse, ["lft", "rgt"])
-		chilren_subquery = (
-			frappe.qb.from_(warehouse_table)
-			.select(warehouse_table.name)
-			.where(
-				(warehouse_table.lft >= lft)
-				& (warehouse_table.rgt <= rgt)
-				& (warehouse_table.name == sle.warehouse)
-			)
-		)
-		query = query.where(ExistsCriterion(chilren_subquery))
+	warehouse_table = frappe.qb.DocType("Warehouse")
+
+	if isinstance(warehouses, str):
+		warehouses = [warehouses]
+
+	warehouse_range = frappe.get_all(
+		"Warehouse",
+		filters={
+			"name": ("in", warehouses),
+		},
+		fields=["lft", "rgt"],
+		as_list=True,
+	)
+
+	child_query = frappe.qb.from_(warehouse_table).select(warehouse_table.name)
+
+	range_conditions = [
+		(warehouse_table.lft >= lft) & (warehouse_table.rgt <= rgt) for lft, rgt in warehouse_range
+	]
+
+	combined_condition = range_conditions[0]
+	for condition in range_conditions[1:]:
+		combined_condition = combined_condition | condition
+
+	child_query = child_query.where(combined_condition).where(warehouse_table.name == sle.warehouse)
+
+	query = query.where(ExistsCriterion(child_query))
 
 	return query
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def get_warehouses_for_reorder(doctype, txt, searchfield, start, page_len, filters):
+	filters = frappe._dict(filters or {})
+
+	if filters.warehouse and not frappe.db.exists("Warehouse", filters.warehouse):
+		frappe.throw(_("Warehouse {0} does not exist").format(filters.warehouse))
+
+	doctype = frappe.qb.DocType("Warehouse")
+
+	warehouses = (
+		frappe.qb.from_(doctype)
+		.select(doctype.name)
+		.where(doctype.disabled == 0)
+		.where((doctype.is_group == 1) | (doctype.name == filters.warehouse))
+		.orderby(doctype.name)
+		.run(as_list=True)
+	)
+
+	return warehouses

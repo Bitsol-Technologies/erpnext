@@ -10,7 +10,7 @@ from erpnext.accounts.report.financial_statements import get_period_list
 from erpnext.accounts.utils import get_fiscal_year
 
 
-class Deferred_Item(object):
+class Deferred_Item:
 	"""
 	Helper class for processing items with deferred revenue/expense
 	"""
@@ -58,9 +58,9 @@ class Deferred_Item(object):
 		For a given GL/Journal posting, get balance based on item type
 		"""
 		if self.type == "Deferred Sale Item":
-			return entry.debit - entry.credit
+			return flt(entry.debit) - flt(entry.credit)
 		elif self.type == "Deferred Purchase Item":
-			return -(entry.credit - entry.debit)
+			return -(flt(entry.credit) - flt(entry.debit))
 		return 0
 
 	def get_item_total(self):
@@ -79,6 +79,14 @@ class Deferred_Item(object):
 		return - estimated amount to post for given period
 		Calculated based on already booked amount and item service period
 		"""
+		if self.filters.book_deferred_entries_based_on == "Months":
+			# if the deferred entries are based on service period, use service start and end date
+			return self.calculate_monthly_amount(start_date, end_date)
+
+		else:
+			return self.calculate_days_amount(start_date, end_date)
+
+	def calculate_monthly_amount(self, start_date, end_date):
 		total_months = (
 			(self.service_end_date.year - self.service_start_date.year) * 12
 			+ (self.service_end_date.month - self.service_start_date.month)
@@ -97,11 +105,24 @@ class Deferred_Item(object):
 		if base_amount + already_booked_amount > self.base_net_amount:
 			base_amount = self.base_net_amount - already_booked_amount
 
-		if not (get_first_day(start_date) == start_date and get_last_day(end_date) == end_date):
+		if get_first_day(start_date) != start_date or get_last_day(end_date) != end_date:
 			partial_month = flt(date_diff(end_date, start_date)) / flt(
 				date_diff(get_last_day(end_date), get_first_day(start_date))
 			)
 			base_amount *= rounded(partial_month, 1)
+
+		return base_amount
+
+	def calculate_days_amount(self, start_date, end_date):
+		base_amount = 0
+		total_days = date_diff(self.service_end_date, self.service_start_date) + 1
+		total_booking_days = date_diff(end_date, start_date) + 1
+		already_booked_amount = self.get_item_total()
+
+		base_amount = flt(self.base_net_amount * total_booking_days / flt(total_days))
+
+		if base_amount + already_booked_amount > self.base_net_amount:
+			base_amount = self.base_net_amount - already_booked_amount
 
 		return base_amount
 
@@ -122,21 +143,24 @@ class Deferred_Item(object):
 		"""
 		simulate future posting by creating dummy gl entries. starts from the last posting date.
 		"""
-		if self.service_start_date != self.service_end_date:
-			if add_days(self.last_entry_date, 1) < self.period_list[-1].to_date:
-				self.estimate_for_period_list = get_period_list(
-					self.filters.from_fiscal_year,
-					self.filters.to_fiscal_year,
-					add_days(self.last_entry_date, 1),
-					self.period_list[-1].to_date,
-					"Date Range",
-					"Monthly",
-					company=self.filters.company,
-				)
-				for period in self.estimate_for_period_list:
-					amount = self.calculate_amount(period.from_date, period.to_date)
-					gle = self.make_dummy_gle(period.key, period.to_date, amount)
-					self.gle_entries.append(gle)
+		if (
+			self.service_start_date != self.service_end_date
+			and add_days(self.last_entry_date, 1) < self.service_end_date
+		):
+			self.estimate_for_period_list = get_period_list(
+				self.filters.from_fiscal_year,
+				self.filters.to_fiscal_year,
+				add_days(self.last_entry_date, 1),
+				self.service_end_date,
+				"Date Range",
+				"Monthly",
+				company=self.filters.company,
+			)
+
+			for period in self.estimate_for_period_list:
+				amount = self.calculate_amount(period.from_date, period.to_date)
+				gle = self.make_dummy_gle(period.key, period.to_date, amount)
+				self.gle_entries.append(gle)
 
 	def calculate_item_revenue_expense_for_period(self):
 		"""
@@ -147,18 +171,16 @@ class Deferred_Item(object):
 			actual = 0
 			for posting in self.gle_entries:
 				# if period.from_date <= posting.posting_date <= period.to_date:
-				if period.from_date <= posting.gle_posting_date <= period.to_date:
+				if period.from_date <= getdate(posting.gle_posting_date) <= period.to_date:
 					period_sum += self.get_amount(posting)
 					if posting.posted == "posted":
 						actual += self.get_amount(posting)
 
-			self.period_total.append(
-				frappe._dict({"key": period.key, "total": period_sum, "actual": actual})
-			)
+			self.period_total.append(frappe._dict({"key": period.key, "total": period_sum, "actual": actual}))
 		return self.period_total
 
 
-class Deferred_Invoice(object):
+class Deferred_Invoice:
 	def __init__(self, invoice, items, filters, period_list):
 		"""
 		Helper class for processing invoices with deferred revenue/expense items
@@ -194,7 +216,7 @@ class Deferred_Invoice(object):
 		for item in self.items:
 			item_total = item.calculate_item_revenue_expense_for_period()
 			# update invoice total
-			for idx, period in enumerate(self.period_list, 0):
+			for idx in range(len(self.period_list)):
 				self.period_total[idx].total += item_total[idx].total
 				self.period_total[idx].actual += item_total[idx].actual
 		return self.period_total
@@ -219,7 +241,7 @@ class Deferred_Invoice(object):
 		return ret_data
 
 
-class Deferred_Revenue_and_Expense_Report(object):
+class Deferred_Revenue_and_Expense_Report:
 	def __init__(self, filters=None):
 		"""
 		Initialize deferred revenue/expense report with user provided filters or system defaults, if none is provided
@@ -243,6 +265,10 @@ class Deferred_Revenue_and_Expense_Report(object):
 			)
 		else:
 			self.filters = frappe._dict(filters)
+
+		self.filters.book_deferred_entries_based_on = frappe.db.get_singles_value(
+			"Accounts Settings", "book_deferred_entries_based_on"
+		)
 
 		self.period_list = None
 		self.deferred_invoices = []
@@ -287,8 +313,12 @@ class Deferred_Revenue_and_Expense_Report(object):
 			qb.from_(inv_item)
 			.join(inv)
 			.on(inv.name == inv_item.parent)
-			.join(gle)
-			.on((inv_item.name == gle.voucher_detail_no) & (deferred_account_field == gle.account))
+			.left_join(gle)
+			.on(
+				(inv_item.name == gle.voucher_detail_no)
+				& (deferred_account_field == gle.account)
+				& (gle.is_cancelled == 0)
+			)
 			.select(
 				inv.name.as_("doc"),
 				inv.posting_date,
@@ -306,6 +336,7 @@ class Deferred_Revenue_and_Expense_Report(object):
 			.where(
 				(inv.docstatus == 1)
 				& (deferred_flag_field == 1)
+				& (inv.company == self.filters.company)
 				& (
 					(
 						(self.period_list[0].from_date >= inv_item.service_start_date)
@@ -348,7 +379,7 @@ class Deferred_Revenue_and_Expense_Report(object):
 		for inv in self.deferred_invoices:
 			inv_total = inv.calculate_invoice_revenue_expense_for_period()
 			# calculate total for whole report
-			for idx, period in enumerate(self.period_list, 0):
+			for idx in range(len(self.period_list)):
 				self.period_total[idx].total += inv_total[idx].total
 				self.period_total[idx].actual += inv_total[idx].actual
 

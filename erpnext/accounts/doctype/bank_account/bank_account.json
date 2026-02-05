@@ -13,6 +13,7 @@
   "account_type",
   "account_subtype",
   "column_break_7",
+  "disabled",
   "is_default",
   "is_company_account",
   "company",
@@ -51,6 +52,7 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Company Account",
+   "mandatory_depends_on": "is_company_account",
    "options": "Account"
   },
   {
@@ -97,6 +99,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Company",
+   "mandatory_depends_on": "is_company_account",
    "options": "Company"
   },
   {
@@ -131,7 +134,8 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "IBAN",
-   "length": 30
+   "length": 34,
+   "options": "IBAN"
   },
   {
    "fieldname": "column_break_12",
@@ -199,10 +203,58 @@
    "fieldtype": "Data",
    "in_global_search": 1,
    "label": "Branch Code"
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "label": "Disabled"
   }
  ],
- "links": [],
- "modified": "2022-05-04 15:49:42.620630",
+ "grid_page_length": 50,
+ "links": [
+  {
+   "group": "Transactions",
+   "link_doctype": "Payment Request",
+   "link_fieldname": "bank_account"
+  },
+  {
+   "group": "Transactions",
+   "link_doctype": "Payment Order",
+   "link_fieldname": "bank_account"
+  },
+  {
+   "group": "Transactions",
+   "link_doctype": "Bank Guarantee",
+   "link_fieldname": "bank_account"
+  },
+  {
+   "group": "Transactions",
+   "link_doctype": "Bank Transaction",
+   "link_fieldname": "bank_account"
+  },
+  {
+   "group": "Accounting",
+   "link_doctype": "Payment Entry",
+   "link_fieldname": "bank_account"
+  },
+  {
+   "group": "Accounting",
+   "link_doctype": "Journal Entry",
+   "link_fieldname": "bank_account"
+  },
+  {
+   "group": "Party",
+   "link_doctype": "Customer",
+   "link_fieldname": "default_bank_account"
+  },
+  {
+   "group": "Party",
+   "link_doctype": "Supplier",
+   "link_fieldname": "default_bank_account"
+  }
+ ],
+ "modified": "2026-01-20 00:46:16.633364",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Bank Account",
@@ -234,8 +286,9 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "search_fields": "bank,account",
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "track_changes": 1

@@ -11,10 +11,32 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, cstr, floor, flt, nowdate
 
+from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
 from erpnext.stock.utils import get_stock_balance
 
 
 class PutawayRule(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		capacity: DF.Float
+		company: DF.Link
+		conversion_factor: DF.Float
+		disable: DF.Check
+		item_code: DF.Link
+		item_name: DF.Data | None
+		priority: DF.Int
+		stock_capacity: DF.Float
+		stock_uom: DF.Link | None
+		uom: DF.Link | None
+		warehouse: DF.Link
+	# end: auto-generated types
+
 	def validate(self):
 		self.validate_duplicate_rule()
 		self.validate_warehouse_and_company()
@@ -98,26 +120,35 @@ def apply_putaway_rule(doctype, items, company, sync=None, purpose=None):
 			item = frappe._dict(item)
 
 		source_warehouse = item.get("s_warehouse")
+		serial_nos = []
+		if item.get("serial_no"):
+			serial_nos = get_serial_nos(item.get("serial_no"))
+
 		item.conversion_factor = flt(item.conversion_factor) or 1.0
 		pending_qty, item_code = flt(item.qty), item.item_code
 		pending_stock_qty = flt(item.transfer_qty) if doctype == "Stock Entry" else flt(item.stock_qty)
 		uom_must_be_whole_number = frappe.db.get_value("UOM", item.uom, "must_be_whole_number")
 
 		if not pending_qty or not item_code:
-			updated_table = add_row(item, pending_qty, source_warehouse or item.warehouse, updated_table)
+			updated_table = add_row(
+				item, pending_qty, source_warehouse or item.warehouse, updated_table, serial_nos=serial_nos
+			)
 			continue
 
-		at_capacity, rules = get_ordered_putaway_rules(
-			item_code, company, source_warehouse=source_warehouse
-		)
+		at_capacity, rules = get_ordered_putaway_rules(item_code, company, source_warehouse=source_warehouse)
 
 		if not rules:
-			warehouse = source_warehouse or item.get("warehouse")
+			warehouse = (
+				(source_warehouse or item.get("warehouse"))
+				if not item.get("t_warehouse")
+				else item.get("t_warehouse")
+			)
+
 			if at_capacity:
 				# rules available, but no free space
 				items_not_accomodated.append([item_code, pending_qty])
 			else:
-				updated_table = add_row(item, pending_qty, warehouse, updated_table)
+				updated_table = add_row(item, pending_qty, warehouse, updated_table, serial_nos=serial_nos)
 			continue
 
 		# maintain item/item-warehouse wise rules, to handle if item is entered twice
@@ -143,13 +174,15 @@ def apply_putaway_rule(doctype, items, company, sync=None, purpose=None):
 				if not qty_to_allocate:
 					break
 
-				updated_table = add_row(item, qty_to_allocate, rule.warehouse, updated_table, rule.name)
+				updated_table = add_row(
+					item, qty_to_allocate, rule.warehouse, updated_table, rule.name, serial_nos=serial_nos
+				)
 
 				pending_stock_qty -= stock_qty_to_allocate
 				pending_qty -= qty_to_allocate
 				rule["free_space"] -= stock_qty_to_allocate
 
-				if not pending_stock_qty > 0:
+				if pending_stock_qty <= 0:
 					break
 
 		# if pending qty after applying all rules, add row without warehouse
@@ -200,7 +233,7 @@ def _items_changed(old, new, doctype: str) -> bool:
 	new_sorted = sorted(new, key=sort_key)
 
 	# Once sorted by all relevant keys both tables should align if they are same.
-	for old_item, new_item in zip(old_sorted, new_sorted):
+	for old_item, new_item in zip(old_sorted, new_sorted, strict=False):
 		for key in compare_keys:
 			if old_item.get(key) != new_item.get(key):
 				return True
@@ -241,7 +274,7 @@ def get_ordered_putaway_rules(item_code, company, source_warehouse=None):
 	return False, vacant_rules
 
 
-def add_row(item, to_allocate, warehouse, updated_table, rule=None):
+def add_row(item, to_allocate, warehouse, updated_table, rule=None, serial_nos=None):
 	new_updated_table_row = copy.deepcopy(item)
 	new_updated_table_row.idx = 1 if not updated_table else cint(updated_table[-1].idx) + 1
 	new_updated_table_row.name = None
@@ -249,9 +282,7 @@ def add_row(item, to_allocate, warehouse, updated_table, rule=None):
 
 	if item.doctype == "Stock Entry Detail":
 		new_updated_table_row.t_warehouse = warehouse
-		new_updated_table_row.transfer_qty = flt(to_allocate) * flt(
-			new_updated_table_row.conversion_factor
-		)
+		new_updated_table_row.transfer_qty = flt(to_allocate) * flt(new_updated_table_row.conversion_factor)
 	else:
 		new_updated_table_row.stock_qty = flt(to_allocate) * flt(new_updated_table_row.conversion_factor)
 		new_updated_table_row.warehouse = warehouse
@@ -260,6 +291,9 @@ def add_row(item, to_allocate, warehouse, updated_table, rule=None):
 
 	if rule:
 		new_updated_table_row.putaway_rule = rule
+
+	if serial_nos:
+		new_updated_table_row.serial_no = get_serial_nos_to_allocate(serial_nos, to_allocate)
 
 	new_updated_table_row.serial_and_batch_bundle = ""
 
@@ -273,23 +307,28 @@ def show_unassigned_items_message(items_not_accomodated):
 
 	for entry in items_not_accomodated:
 		item_link = frappe.utils.get_link_to_form("Item", entry[0])
-		formatted_item_rows += """
-			<td>{0}</td>
-			<td>{1}</td>
-		</tr>""".format(
-			item_link, frappe.bold(entry[1])
-		)
+		formatted_item_rows += f"""
+			<td>{item_link}</td>
+			<td>{frappe.bold(entry[1])}</td>
+		</tr>"""
 
 	msg += """
 		<table class="table">
 			<thead>
-				<td>{0}</td>
-				<td>{1}</td>
+				<td>{}</td>
+				<td>{}</td>
 			</thead>
-			{2}
+			{}
 		</table>
-	""".format(
-		_("Item"), _("Unassigned Qty"), formatted_item_rows
-	)
+	""".format(_("Item"), _("Unassigned Qty"), formatted_item_rows)
 
 	frappe.msgprint(msg, title=_("Insufficient Capacity"), is_minimizable=True, wide=True)
+
+
+def get_serial_nos_to_allocate(serial_nos, to_allocate):
+	if serial_nos:
+		allocated_serial_nos = serial_nos[0 : cint(to_allocate)]
+		serial_nos[:] = serial_nos[cint(to_allocate) :]  # pop out allocated serial nos and modify list
+		return "\n".join(allocated_serial_nos) if allocated_serial_nos else ""
+	else:
+		return ""

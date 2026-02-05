@@ -3,17 +3,117 @@
 
 
 import frappe
-from frappe import _, msgprint
+from frappe import _, msgprint, scrub, unscrub
+from frappe.core.doctype.user_permission.user_permission import get_permitted_documents
 from frappe.model.document import Document
 from frappe.utils import get_link_to_form, now
 
+from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
+	get_checks_for_pl_and_bs_accounts,
+)
+
 
 class POSProfile(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		from erpnext.accounts.doctype.pos_customer_group.pos_customer_group import POSCustomerGroup
+		from erpnext.accounts.doctype.pos_item_group.pos_item_group import POSItemGroup
+		from erpnext.accounts.doctype.pos_payment_method.pos_payment_method import POSPaymentMethod
+		from erpnext.accounts.doctype.pos_profile_user.pos_profile_user import POSProfileUser
+
+		account_for_change_amount: DF.Link | None
+		action_on_new_invoice: DF.Literal[
+			"Always Ask", "Save Changes and Load New Invoice", "Discard Changes and Load New Invoice"
+		]
+		allow_discount_change: DF.Check
+		allow_partial_payment: DF.Check
+		allow_rate_change: DF.Check
+		applicable_for_users: DF.Table[POSProfileUser]
+		apply_discount_on: DF.Literal["Grand Total", "Net Total"]
+		auto_add_item_to_cart: DF.Check
+		company: DF.Link
+		company_address: DF.Link | None
+		cost_center: DF.Link | None
+		country: DF.ReadOnly | None
+		currency: DF.Link
+		customer: DF.Link | None
+		customer_groups: DF.Table[POSCustomerGroup]
+		disable_rounded_total: DF.Check
+		disabled: DF.Check
+		expense_account: DF.Link | None
+		hide_images: DF.Check
+		hide_unavailable_items: DF.Check
+		ignore_pricing_rule: DF.Check
+		income_account: DF.Link | None
+		item_groups: DF.Table[POSItemGroup]
+		letter_head: DF.Link | None
+		payments: DF.Table[POSPaymentMethod]
+		print_format: DF.Link | None
+		print_receipt_on_order_complete: DF.Check
+		project: DF.Link | None
+		select_print_heading: DF.Link | None
+		selling_price_list: DF.Link | None
+		set_grand_total_to_default_mop: DF.Check
+		tax_category: DF.Link | None
+		taxes_and_charges: DF.Link | None
+		tc_name: DF.Link | None
+		update_stock: DF.Check
+		utm_campaign: DF.Link | None
+		utm_medium: DF.Link | None
+		utm_source: DF.Link | None
+		validate_stock_on_save: DF.Check
+		warehouse: DF.Link
+		write_off_account: DF.Link
+		write_off_cost_center: DF.Link
+		write_off_limit: DF.Currency
+	# end: auto-generated types
+
 	def validate(self):
+		self.validate_disabled()
 		self.validate_default_profile()
 		self.validate_all_link_fields()
 		self.validate_duplicate_groups()
 		self.validate_payment_methods()
+		self.validate_accounting_dimensions()
+
+	def validate_accounting_dimensions(self):
+		acc_dims = get_checks_for_pl_and_bs_accounts()
+		for acc_dim in acc_dims:
+			if (
+				self.company == acc_dim.company
+				and not self.get(acc_dim.fieldname)
+				and (acc_dim.mandatory_for_pl or acc_dim.mandatory_for_bs)
+			):
+				frappe.throw(
+					_(
+						"{0} is a mandatory Accounting Dimension. <br>"
+						"Please set a value for {0} in Accounting Dimensions section."
+					).format(
+						frappe.bold(acc_dim.label),
+					),
+					title=_("Mandatory Accounting Dimension"),
+				)
+
+	def validate_disabled(self):
+		old_doc = self.get_doc_before_save()
+
+		if (
+			old_doc
+			and self.disabled
+			and old_doc.disabled != self.disabled
+			and frappe.db.exists("POS Opening Entry", {"pos_profile": self.name, "status": "Open"})
+		):
+			frappe.throw(
+				_("POS Profile {0} cannot be disabled as there are ongoing POS sessions.").format(
+					frappe.bold(self.name)
+				)
+			)
 
 	def validate_default_profile(self):
 		for row in self.applicable_for_users:
@@ -66,7 +166,7 @@ class POSProfile(Document):
 
 		if len(customer_groups) != len(set(customer_groups)):
 			frappe.throw(
-				_("Duplicate customer group found in the cutomer group table"),
+				_("Duplicate customer group found in the customer group table"),
 				title=_("Duplicate Customer Group"),
 			)
 
@@ -114,10 +214,8 @@ class POSProfile(Document):
 			condition = " where pfu.default = 1 "
 
 		pos_view_users = frappe.db.sql_list(
-			"""select pfu.user
-			from `tabPOS Profile User` as pfu {0}""".format(
-				condition
-			)
+			f"""select pfu.user
+			from `tabPOS Profile User` as pfu {condition}"""
 		)
 
 		for user in pos_view_users:
@@ -130,24 +228,46 @@ class POSProfile(Document):
 def get_item_groups(pos_profile):
 	item_groups = []
 	pos_profile = frappe.get_cached_doc("POS Profile", pos_profile)
+	permitted_item_groups = get_permitted_nodes("Item Group")
 
 	if pos_profile.get("item_groups"):
 		# Get items based on the item groups defined in the POS profile
 		for data in pos_profile.get("item_groups"):
 			item_groups.extend(
-				["%s" % frappe.db.escape(d.name) for d in get_child_nodes("Item Group", data.item_group)]
+				[
+					"%s" % frappe.db.escape(d.name)
+					for d in get_child_nodes("Item Group", data.item_group)
+					if not permitted_item_groups or d.name in permitted_item_groups
+				]
 			)
 
+	if not item_groups and permitted_item_groups:
+		item_groups = ["%s" % frappe.db.escape(d) for d in permitted_item_groups]
+
 	return list(set(item_groups))
+
+
+def get_permitted_nodes(group_type):
+	nodes = []
+	permitted_nodes = get_permitted_documents(group_type)
+
+	if not permitted_nodes:
+		return nodes
+
+	for node in permitted_nodes:
+		if frappe.db.get_value(group_type, node, "is_group"):
+			nodes.extend([d.name for d in get_child_nodes(group_type, node)])
+		else:
+			nodes.append(node)
+
+	return nodes
 
 
 def get_child_nodes(group_type, root):
 	lft, rgt = frappe.db.get_value(group_type, root, ["lft", "rgt"])
 	return frappe.db.sql(
-		""" Select name, lft, rgt from `tab{tab}` where
-			lft >= {lft} and rgt <= {rgt} order by lft""".format(
-			tab=group_type, lft=lft, rgt=rgt
-		),
+		f""" Select name, lft, rgt from `tab{group_type}` where
+			lft >= {lft} and rgt <= {rgt} order by lft""",
 		as_dict=1,
 	)
 

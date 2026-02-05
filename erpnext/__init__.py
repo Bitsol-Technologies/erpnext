@@ -1,9 +1,12 @@
 import functools
 import inspect
+from typing import TypeVar
 
 import frappe
+from frappe.model.document import Document
+from frappe.utils.user import is_website_user
 
-__version__ = "15.0.0-dev"
+__version__ = "16.4.1"
 
 
 def get_default_company(user=None):
@@ -13,7 +16,7 @@ def get_default_company(user=None):
 	if not user:
 		user = frappe.session.user
 
-	companies = get_user_default_as_list(user, "company")
+	companies = get_user_default_as_list("company", user)
 	if companies:
 		default_company = companies[0]
 	else:
@@ -36,10 +39,8 @@ def get_default_cost_center(company):
 
 	if not frappe.flags.company_cost_center:
 		frappe.flags.company_cost_center = {}
-	if not company in frappe.flags.company_cost_center:
-		frappe.flags.company_cost_center[company] = frappe.get_cached_value(
-			"Company", company, "cost_center"
-		)
+	if company not in frappe.flags.company_cost_center:
+		frappe.flags.company_cost_center[company] = frappe.get_cached_value("Company", company, "cost_center")
 	return frappe.flags.company_cost_center[company]
 
 
@@ -47,7 +48,7 @@ def get_company_currency(company):
 	"""Returns the default company currency"""
 	if not frappe.flags.company_currency:
 		frappe.flags.company_currency = {}
-	if not company in frappe.flags.company_currency:
+	if company not in frappe.flags.company_currency:
 		frappe.flags.company_currency[company] = frappe.db.get_value(
 			"Company", company, "default_currency", cache=True
 		)
@@ -56,7 +57,7 @@ def get_company_currency(company):
 
 def set_perpetual_inventory(enable=1, company=None):
 	if not company:
-		company = "_Test Company" if frappe.flags.in_test else get_default_company()
+		company = "_Test Company" if frappe.in_test else get_default_company()
 
 	company = frappe.get_doc("Company", company)
 	company.enable_perpetual_inventory = enable
@@ -76,12 +77,12 @@ def encode_company_abbr(name, company=None, abbr=None):
 
 def is_perpetual_inventory_enabled(company):
 	if not company:
-		company = "_Test Company" if frappe.flags.in_test else get_default_company()
+		company = "_Test Company" if frappe.in_test else get_default_company()
 
 	if not hasattr(frappe.local, "enable_perpetual_inventory"):
 		frappe.local.enable_perpetual_inventory = {}
 
-	if not company in frappe.local.enable_perpetual_inventory:
+	if company not in frappe.local.enable_perpetual_inventory:
 		frappe.local.enable_perpetual_inventory[company] = (
 			frappe.get_cached_value("Company", company, "enable_perpetual_inventory") or 0
 		)
@@ -96,7 +97,7 @@ def get_default_finance_book(company=None):
 	if not hasattr(frappe.local, "default_finance_book"):
 		frappe.local.default_finance_book = {}
 
-	if not company in frappe.local.default_finance_book:
+	if company not in frappe.local.default_finance_book:
 		frappe.local.default_finance_book[company] = frappe.get_cached_value(
 			"Company", company, "default_finance_book"
 		)
@@ -108,7 +109,7 @@ def get_party_account_type(party_type):
 	if not hasattr(frappe.local, "party_account_types"):
 		frappe.local.party_account_types = {}
 
-	if not party_type in frappe.local.party_account_types:
+	if party_type not in frappe.local.party_account_types:
 		frappe.local.party_account_types[party_type] = (
 			frappe.db.get_value("Party Type", party_type, "account_type") or ""
 		)
@@ -151,3 +152,44 @@ def allow_regional(fn):
 		return frappe.get_attr(overrides[function_path][-1])(*args, **kwargs)
 
 	return caller
+
+
+def check_app_permission():
+	if frappe.session.user == "Administrator":
+		return True
+
+	if is_website_user():
+		return False
+
+	return True
+
+
+T = TypeVar("T")
+
+
+def normalize_ctx_input(T: type) -> callable:
+	"""
+	Normalizes the first argument (ctx) of the decorated function by:
+	- Converting Document objects to dictionaries
+	- Parsing JSON strings
+	- Casting the result to the specified type T
+	"""
+
+	def decorator(func: callable):
+		# conserve annotations for frappe.utils.typing_validations
+		@functools.wraps(func, assigned=(a for a in functools.WRAPPER_ASSIGNMENTS if a != "__annotations__"))
+		def wrapper(ctx: T | Document | dict | str, *args, **kwargs):
+			if isinstance(ctx, Document):
+				ctx = T(**ctx.as_dict())
+			elif isinstance(ctx, dict):
+				ctx = T(**ctx)
+			else:
+				ctx = T(**frappe.parse_json(ctx))
+
+			return func(ctx, *args, **kwargs)
+
+		# set annotations from function
+		wrapper.__annotations__.update({k: v for k, v in func.__annotations__.items() if k != "ctx"})
+		return wrapper
+
+	return decorator

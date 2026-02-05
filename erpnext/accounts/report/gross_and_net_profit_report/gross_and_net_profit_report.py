@@ -49,9 +49,7 @@ def execute(filters=None):
 		total=False,
 	)
 
-	columns = get_columns(
-		filters.periodicity, period_list, filters.accumulated_values, filters.company
-	)
+	columns = get_columns(filters.periodicity, period_list, filters.accumulated_values, filters.company)
 
 	gross_income = get_revenue(income, period_list)
 	gross_expense = get_revenue(expense, period_list)
@@ -119,9 +117,7 @@ def execute(filters=None):
 
 
 def get_revenue(data, period_list, include_in_gross=1):
-	revenue = [
-		item for item in data if item["include_in_gross"] == include_in_gross or item["is_group"] == 1
-	]
+	revenue = [item for item in data if item["include_in_gross"] == include_in_gross or item["is_group"] == 1]
 
 	data_to_be_removed = True
 	while data_to_be_removed:
@@ -134,7 +130,7 @@ def get_revenue(data, period_list, include_in_gross=1):
 
 def remove_parent_with_no_child(data):
 	data_to_be_removed = False
-	for parent in data:
+	for parent in list(data):
 		if "is_group" in parent and parent.get("is_group") == 1:
 			have_child = False
 			for child in data:
@@ -170,7 +166,7 @@ def set_total(node, value, complete_list, totals):
 	totals[node["account"]] += value
 
 	parent = node["parent_account"]
-	if not parent == "":
+	if parent != "":
 		return set_total(
 			next(item for item in complete_list if item["account"] == parent), value, complete_list, totals
 		)
@@ -223,13 +219,18 @@ def get_net_profit(
 
 	has_value = False
 
+	gross_income_roots = [row for row in (gross_income or []) if not flt(row.get("indent"))]
+	non_gross_income_roots = [row for row in (non_gross_income or []) if not flt(row.get("indent"))]
+	gross_expense_roots = [row for row in (gross_expense or []) if not flt(row.get("indent"))]
+	non_gross_expense_roots = [row for row in (non_gross_expense or []) if not flt(row.get("indent"))]
+
 	for period in period_list:
 		key = period if consolidated else period.key
-		gross_income_for_period = flt(gross_income[0].get(key, 0)) if gross_income else 0
-		non_gross_income_for_period = flt(non_gross_income[0].get(key, 0)) if non_gross_income else 0
 
-		gross_expense_for_period = flt(gross_expense[0].get(key, 0)) if gross_expense else 0
-		non_gross_expense_for_period = flt(non_gross_expense[0].get(key, 0)) if non_gross_expense else 0
+		gross_income_for_period = sum(flt(row.get(key, 0)) for row in gross_income_roots)
+		non_gross_income_for_period = sum(flt(row.get(key, 0)) for row in non_gross_income_roots)
+		gross_expense_for_period = sum(flt(row.get(key, 0)) for row in gross_expense_roots)
+		non_gross_expense_for_period = sum(flt(row.get(key, 0)) for row in non_gross_expense_roots)
 
 		total_income = gross_income_for_period + non_gross_income_for_period
 		total_expense = gross_expense_for_period + non_gross_expense_for_period

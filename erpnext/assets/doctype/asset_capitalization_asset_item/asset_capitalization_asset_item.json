@@ -18,6 +18,7 @@
   "accounting_dimensions_section",
   "cost_center",
   "dimension_col_break",
+  "project",
   "fixed_asset_account"
  ],
  "fields": [
@@ -99,6 +100,13 @@
    "fieldtype": "Column Break"
   },
   {
+    "allow_on_submit": 1,
+    "fieldname": "project",
+    "fieldtype": "Link",
+    "label": "Project",
+    "options": "Project"
+  },
+  {
    "fieldname": "finance_book",
    "fieldtype": "Link",
    "label": "Finance Book",
@@ -116,13 +124,14 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2021-09-12 14:30:02.915132",
+ "modified": "2024-03-27 13:06:33.350191",
  "modified_by": "Administrator",
  "module": "Assets",
  "name": "Asset Capitalization Asset Item",
  "owner": "Administrator",
  "permissions": [],
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
+ "states": [],
  "track_changes": 1
 }

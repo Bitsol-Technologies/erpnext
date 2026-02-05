@@ -4,6 +4,7 @@
 
 import frappe
 from frappe import _
+from frappe.query_builder.functions import Concat_ws, Date
 
 
 def execute(filters=None):
@@ -36,7 +37,7 @@ def get_columns():
 			"options": "Territory",
 			"width": 100,
 		},
-		{"label": _("Source"), "fieldname": "source", "fieldtype": "Data", "width": 120},
+		{"label": _("Source"), "fieldname": "utm_source", "fieldtype": "Data", "width": 120},
 		{"label": _("Email"), "fieldname": "email_id", "fieldtype": "Data", "width": 120},
 		{"label": _("Mobile"), "fieldname": "mobile_no", "fieldtype": "Data", "width": 120},
 		{"label": _("Phone"), "fieldname": "phone", "fieldtype": "Data", "width": 120},
@@ -54,12 +55,13 @@ def get_columns():
 			"options": "Company",
 			"width": 120,
 		},
-		{"fieldname": "address", "label": _("Address"), "fieldtype": "Data", "width": 130},
-		{"fieldname": "state", "label": _("State"), "fieldtype": "Data", "width": 100},
-		{"fieldname": "pincode", "label": _("Postal Code"), "fieldtype": "Data", "width": 90},
+		{"label": _("Address"), "fieldname": "address", "fieldtype": "Data", "width": 130},
+		{"label": _("Postal Code"), "fieldname": "pincode", "fieldtype": "Data", "width": 90},
+		{"label": _("City"), "fieldname": "city", "fieldtype": "Data", "width": 100},
+		{"label": _("State/Province"), "fieldname": "state", "fieldtype": "Data", "width": 100},
 		{
-			"fieldname": "country",
 			"label": _("Country"),
+			"fieldname": "country",
 			"fieldtype": "Link",
 			"options": "Country",
 			"width": 100,
@@ -69,53 +71,42 @@ def get_columns():
 
 
 def get_data(filters):
-	return frappe.db.sql(
-		"""
-		SELECT
-			`tabLead`.name,
-			`tabLead`.lead_name,
-			`tabLead`.status,
-			`tabLead`.lead_owner,
-			`tabLead`.territory,
-			`tabLead`.source,
-			`tabLead`.email_id,
-			`tabLead`.mobile_no,
-			`tabLead`.phone,
-			`tabLead`.owner,
-			`tabLead`.company,
-			concat_ws(', ',
-				trim(',' from `tabAddress`.address_line1),
-				trim(',' from tabAddress.address_line2)
-			) AS address,
-			`tabAddress`.state,
-			`tabAddress`.pincode,
-			`tabAddress`.country
-		FROM
-			`tabLead` left join `tabDynamic Link` on (
-			`tabLead`.name = `tabDynamic Link`.link_name and
-			`tabDynamic Link`.parenttype = 'Address')
-			left join `tabAddress` on (
-			`tabAddress`.name=`tabDynamic Link`.parent)
-		WHERE
-			company = %(company)s
-			AND DATE(`tabLead`.creation) BETWEEN %(from_date)s AND %(to_date)s
-			{conditions}
-		ORDER BY
-			`tabLead`.creation asc """.format(
-			conditions=get_conditions(filters)
-		),
-		filters,
-		as_dict=1,
+	lead = frappe.qb.DocType("Lead")
+	address = frappe.qb.DocType("Address")
+	dynamic_link = frappe.qb.DocType("Dynamic Link")
+
+	query = (
+		frappe.qb.from_(lead)
+		.left_join(dynamic_link)
+		.on((lead.name == dynamic_link.link_name) & (dynamic_link.parenttype == "Address"))
+		.left_join(address)
+		.on(address.name == dynamic_link.parent)
+		.select(
+			lead.name,
+			lead.lead_name,
+			lead.status,
+			lead.lead_owner,
+			lead.territory,
+			lead.utm_source,
+			lead.email_id,
+			lead.mobile_no,
+			lead.phone,
+			lead.owner,
+			lead.company,
+			(Concat_ws(", ", address.address_line1, address.address_line2)).as_("address"),
+			address.pincode,
+			address.city,
+			address.state,
+			address.country,
+		)
+		.where(lead.company == filters.company)
+		.where(Date(lead.creation).between(filters.from_date, filters.to_date))
 	)
 
-
-def get_conditions(filters):
-	conditions = []
-
 	if filters.get("territory"):
-		conditions.append(" and `tabLead`.territory=%(territory)s")
+		query = query.where(lead.territory == filters.get("territory"))
 
 	if filters.get("status"):
-		conditions.append(" and `tabLead`.status=%(status)s")
+		query = query.where(lead.status == filters.get("status"))
 
-	return " ".join(conditions) if conditions else ""
+	return query.run(as_dict=1)

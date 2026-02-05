@@ -10,12 +10,12 @@ import erpnext
 from erpnext.accounts.report.item_wise_sales_register.item_wise_sales_register import (
 	add_sub_total_row,
 	add_total_row,
+	apply_order_by_conditions,
 	get_grand_total,
 	get_group_by_and_display_fields,
-	get_group_by_conditions,
 	get_tax_accounts,
 )
-from erpnext.accounts.report.utils import get_query_columns, get_values_for_columns
+from erpnext.accounts.report.utils import get_values_for_columns
 
 
 def execute(filters=None):
@@ -29,7 +29,7 @@ def _execute(filters=None, additional_table_columns=None):
 
 	company_currency = erpnext.get_company_currency(filters.company)
 
-	item_list = get_items(filters, get_query_columns(additional_table_columns))
+	item_list = get_items(filters, additional_table_columns)
 	aii_account_map = get_aii_accounts()
 	if item_list:
 		itemised_tax, tax_columns = get_tax_accounts(
@@ -39,16 +39,6 @@ def _execute(filters=None, additional_table_columns=None):
 			doctype="Purchase Invoice",
 			tax_doctype="Purchase Taxes and Charges",
 		)
-
-		scrubbed_tax_fields = {}
-
-		for tax in tax_columns:
-			scrubbed_tax_fields.update(
-				{
-					tax + " Rate": frappe.scrub(tax + " Rate"),
-					tax + " Amount": frappe.scrub(tax + " Amount"),
-				}
-			)
 
 	po_pr_map = get_purchase_receipts_against_purchase_order(item_list)
 
@@ -95,15 +85,18 @@ def _execute(filters=None, additional_table_columns=None):
 		}
 
 		total_tax = 0
-		for tax in tax_columns:
-			item_tax = itemised_tax.get(d.name, {}).get(tax, {})
+		total_other_charges = 0
+		for tax, details in itemised_tax.get(d.name, {}).items():
 			row.update(
 				{
-					scrubbed_tax_fields[tax + " Rate"]: item_tax.get("tax_rate", 0),
-					scrubbed_tax_fields[tax + " Amount"]: item_tax.get("tax_amount", 0),
+					f"{tax}_rate": details.get("tax_rate", 0),
+					f"{tax}_amount": details.get("tax_amount", 0),
 				}
 			)
-			total_tax += flt(item_tax.get("tax_amount"))
+			if details.get("is_other_charges"):
+				total_other_charges += flt(details.get("tax_amount"))
+			else:
+				total_tax += flt(details.get("tax_amount"))
 
 		row.update(
 			{"total_tax": total_tax, "total": d.base_net_amount + total_tax, "currency": company_currency}
@@ -140,7 +133,6 @@ def _execute(filters=None, additional_table_columns=None):
 
 
 def get_columns(additional_table_columns, filters):
-
 	columns = []
 
 	if filters.get("group_by") != ("Item"):
@@ -178,7 +170,7 @@ def get_columns(additional_table_columns, filters):
 				"fieldname": "invoice",
 				"fieldtype": "Link",
 				"options": "Purchase Invoice",
-				"width": 120,
+				"width": 150,
 			},
 			{"label": _("Posting Date"), "fieldname": "posting_date", "fieldtype": "Date", "width": 120},
 		]
@@ -194,7 +186,12 @@ def get_columns(additional_table_columns, filters):
 					"options": "Supplier",
 					"width": 120,
 				},
-				{"label": _("Supplier Name"), "fieldname": "supplier_name", "fieldtype": "Data", "width": 120},
+				{
+					"label": _("Supplier Name"),
+					"fieldname": "supplier_name",
+					"fieldtype": "Data",
+					"width": 120,
+				},
 			]
 		)
 
@@ -283,59 +280,96 @@ def get_columns(additional_table_columns, filters):
 	return columns
 
 
-def get_conditions(filters):
-	conditions = ""
+def apply_conditions(query, pi, pii, filters):
+	for opts in ("company", "supplier", "mode_of_payment"):
+		if filters.get(opts):
+			query = query.where(pi[opts] == filters[opts])
 
-	for opts in (
-		("company", " and company=%(company)s"),
-		("supplier", " and `tabPurchase Invoice`.supplier = %(supplier)s"),
-		("item_code", " and `tabPurchase Invoice Item`.item_code = %(item_code)s"),
-		("from_date", " and `tabPurchase Invoice`.posting_date>=%(from_date)s"),
-		("to_date", " and `tabPurchase Invoice`.posting_date<=%(to_date)s"),
-		("mode_of_payment", " and ifnull(mode_of_payment, '') = %(mode_of_payment)s"),
-	):
-		if filters.get(opts[0]):
-			conditions += opts[1]
+	if filters.get("from_date"):
+		query = query.where(pi.posting_date >= filters.get("from_date"))
 
-	if not filters.get("group_by"):
-		conditions += (
-			"ORDER BY `tabPurchase Invoice`.posting_date desc, `tabPurchase Invoice Item`.item_code desc"
+	if filters.get("to_date"):
+		query = query.where(pi.posting_date <= filters.get("to_date"))
+
+	if filters.get("item_code"):
+		query = query.where(pii.item_code == filters.get("item_code"))
+
+	if filters.get("item_group"):
+		query = query.where(pii.item_group == filters.get("item_group"))
+
+	return query
+
+
+def get_items(filters, additional_table_columns):
+	doctype = "Purchase Invoice"
+	pi = frappe.qb.DocType("Purchase Invoice")
+	pii = frappe.qb.DocType("Purchase Invoice Item")
+	Item = frappe.qb.DocType("Item")
+	query = (
+		frappe.qb.from_(pi)
+		.join(pii)
+		.on(pi.name == pii.parent)
+		.left_join(Item)
+		.on(pii.item_code == Item.name)
+		.select(
+			pii.name,
+			pii.parent,
+			pi.posting_date,
+			pi.credit_to,
+			pi.company,
+			pi.supplier,
+			pi.remarks,
+			pi.base_net_total,
+			pi.unrealized_profit_loss_account,
+			pii.item_code,
+			pii.description,
+			pii.item_name,
+			pii.item_group,
+			pii.item_name.as_("pi_item_name"),
+			pii.item_group.as_("pi_item_group"),
+			Item.item_name.as_("i_item_name"),
+			Item.item_group.as_("i_item_group"),
+			pii.project,
+			pii.purchase_order,
+			pii.purchase_receipt,
+			pii.po_detail,
+			pii.expense_account,
+			pii.stock_qty,
+			pii.stock_uom,
+			pii.base_net_amount,
+			pi.supplier_name,
+			pi.mode_of_payment,
 		)
-	else:
-		conditions += get_group_by_conditions(filters, "Purchase Invoice")
-
-	return conditions
-
-
-def get_items(filters, additional_query_columns):
-	conditions = get_conditions(filters)
-	if additional_query_columns:
-		additional_query_columns = "," + ",".join(additional_query_columns)
-	return frappe.db.sql(
-		"""
-		select
-			`tabPurchase Invoice Item`.`name`, `tabPurchase Invoice Item`.`parent`,
-			`tabPurchase Invoice`.posting_date, `tabPurchase Invoice`.credit_to, `tabPurchase Invoice`.company,
-			`tabPurchase Invoice`.supplier, `tabPurchase Invoice`.remarks, `tabPurchase Invoice`.base_net_total,
-			`tabPurchase Invoice`.unrealized_profit_loss_account,
-			`tabPurchase Invoice Item`.`item_code`, `tabPurchase Invoice Item`.description,
-			`tabPurchase Invoice Item`.`item_name` as pi_item_name, `tabPurchase Invoice Item`.`item_group` as pi_item_group,
-			`tabItem`.`item_name` as i_item_name, `tabItem`.`item_group` as i_item_group,
-			`tabPurchase Invoice Item`.`project`, `tabPurchase Invoice Item`.`purchase_order`,
-			`tabPurchase Invoice Item`.`purchase_receipt`, `tabPurchase Invoice Item`.`po_detail`,
-			`tabPurchase Invoice Item`.`expense_account`, `tabPurchase Invoice Item`.`stock_qty`,
-			`tabPurchase Invoice Item`.`stock_uom`, `tabPurchase Invoice Item`.`base_net_amount`,
-			`tabPurchase Invoice`.`supplier_name`, `tabPurchase Invoice`.`mode_of_payment` {0}
-		from `tabPurchase Invoice`, `tabPurchase Invoice Item`, `tabItem`
-		where `tabPurchase Invoice`.name = `tabPurchase Invoice Item`.`parent` and
-			`tabItem`.name = `tabPurchase Invoice Item`.`item_code` and
-			`tabPurchase Invoice`.docstatus = 1 {1}
-	""".format(
-			additional_query_columns, conditions
-		),
-		filters,
-		as_dict=1,
+		.where(pi.docstatus == 1)
+		.where(pii.parenttype == doctype)
 	)
+
+	if filters.get("supplier"):
+		query = query.where(pi.supplier == filters["supplier"])
+	if filters.get("company"):
+		query = query.where(pi.company == filters["company"])
+
+	if additional_table_columns:
+		for column in additional_table_columns:
+			if column.get("_doctype"):
+				table = frappe.qb.DocType(column.get("_doctype"))
+				query = query.select(table[column.get("fieldname")])
+			else:
+				query = query.select(pi[column.get("fieldname")])
+
+	query = apply_conditions(query, pi, pii, filters)
+
+	from frappe.desk.reportview import build_match_conditions
+
+	query, params = query.walk()
+	match_conditions = build_match_conditions(doctype)
+
+	if match_conditions:
+		query += " and " + match_conditions
+
+	query = apply_order_by_conditions(doctype, query, filters)
+
+	return frappe.db.sql(query, params, as_dict=True)
 
 
 def get_aii_accounts():

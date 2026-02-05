@@ -4,13 +4,14 @@
 
 import frappe
 from frappe import _
+from frappe.core.doctype.installed_applications.installed_applications import get_setup_wizard_completed_apps
 
 import erpnext
 
 
-def get_level():
-	activation_level = 0
-	sales_data = []
+def get_level(site_info):
+	activation_level = site_info.get("activation", {}).get("activation_level", 0)
+	sales_data = site_info.get("activation", {}).get("sales_data", [])
 	min_count = 0
 	doctypes = {
 		"Asset": 5,
@@ -45,7 +46,7 @@ def get_level():
 			activation_level += 1
 		sales_data.append({doctype: count})
 
-	if frappe.db.get_single_value("System Settings", "setup_complete"):
+	if "erpnext" in get_setup_wizard_completed_apps():
 		activation_level += 1
 
 	communication_number = frappe.db.count("Communication", dict(communication_medium="Email"))
@@ -54,9 +55,7 @@ def get_level():
 	sales_data.append({"Communication": communication_number})
 
 	# recent login
-	if frappe.db.sql(
-		"select name from tabUser where last_login > date_sub(now(), interval 2 day) limit 1"
-	):
+	if frappe.db.sql("select name from tabUser where last_login > date_sub(now(), interval 2 day) limit 1"):
 		activation_level += 1
 
 	level = {"activation_level": activation_level, "sales_data": sales_data}
@@ -124,7 +123,7 @@ def get_help_messages():
 			doctype="Timesheet",
 			title=_("Add Timesheets"),
 			description=_(
-				"Timesheets help keep track of time, cost and billing for activites done by your team"
+				"Timesheets help keep track of time, cost and billing for activities done by your team"
 			),
 			action=_("Create Timesheet"),
 			route="List/Timesheet",

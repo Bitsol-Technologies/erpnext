@@ -17,6 +17,8 @@
   "target_fieldname",
   "applicable_for_documents_tab",
   "apply_to_all_doctypes",
+  "column_break_niy2u",
+  "validate_negative_stock",
   "column_break_13",
   "document_type",
   "type_of_transaction",
@@ -141,7 +143,6 @@
    "fieldtype": "Column Break"
   },
   {
-   "depends_on": "eval:!doc.apply_to_all_doctypes",
    "description": "Set fieldname from which you want to fetch the data from the parent form.",
    "fieldname": "fetch_from_parent",
    "fieldtype": "Select",
@@ -173,11 +174,21 @@
    "fieldname": "reqd",
    "fieldtype": "Check",
    "label": "Mandatory"
+  },
+  {
+   "fieldname": "column_break_niy2u",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "validate_negative_stock",
+   "fieldtype": "Check",
+   "label": "Validate Negative Stock"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2023-01-31 13:44:38.507698",
+ "modified": "2025-07-07 15:51:29.329064",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Inventory Dimension",
@@ -209,19 +220,12 @@
    "write": 1
   },
   {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
    "read": 1,
-   "report": 1,
-   "role": "Stock User",
-   "share": 1,
-   "write": 1
+   "role": "Stock User"
   }
  ],
- "sort_field": "modified",
+ "row_format": "Dynamic",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": []
 }

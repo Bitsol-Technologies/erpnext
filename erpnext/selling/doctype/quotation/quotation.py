@@ -2,6 +2,8 @@
 # License: GNU General Public License v3. See license.txt
 
 
+import json
+
 import frappe
 from frappe import _
 from frappe.model.mapper import get_mapped_doc
@@ -13,6 +15,115 @@ form_grid_templates = {"items": "templates/form_grid/item_grid.html"}
 
 
 class Quotation(SellingController):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		from erpnext.accounts.doctype.item_wise_tax_detail.item_wise_tax_detail import ItemWiseTaxDetail
+		from erpnext.accounts.doctype.payment_schedule.payment_schedule import PaymentSchedule
+		from erpnext.accounts.doctype.pricing_rule_detail.pricing_rule_detail import PricingRuleDetail
+		from erpnext.accounts.doctype.sales_taxes_and_charges.sales_taxes_and_charges import (
+			SalesTaxesandCharges,
+		)
+		from erpnext.crm.doctype.competitor_detail.competitor_detail import CompetitorDetail
+		from erpnext.selling.doctype.quotation_item.quotation_item import QuotationItem
+		from erpnext.setup.doctype.quotation_lost_reason_detail.quotation_lost_reason_detail import (
+			QuotationLostReasonDetail,
+		)
+		from erpnext.stock.doctype.packed_item.packed_item import PackedItem
+
+		additional_discount_percentage: DF.Float
+		address_display: DF.TextEditor | None
+		amended_from: DF.Link | None
+		apply_discount_on: DF.Literal["", "Grand Total", "Net Total"]
+		auto_repeat: DF.Link | None
+		base_discount_amount: DF.Currency
+		base_grand_total: DF.Currency
+		base_in_words: DF.Data | None
+		base_net_total: DF.Currency
+		base_rounded_total: DF.Currency
+		base_rounding_adjustment: DF.Currency
+		base_total: DF.Currency
+		base_total_taxes_and_charges: DF.Currency
+		company: DF.Link
+		company_address: DF.Link | None
+		company_address_display: DF.TextEditor | None
+		company_contact_person: DF.Link | None
+		competitors: DF.TableMultiSelect[CompetitorDetail]
+		contact_display: DF.SmallText | None
+		contact_email: DF.Data | None
+		contact_mobile: DF.SmallText | None
+		contact_person: DF.Link | None
+		conversion_rate: DF.Float
+		coupon_code: DF.Link | None
+		currency: DF.Link
+		customer_address: DF.Link | None
+		customer_group: DF.Link | None
+		customer_name: DF.Data | None
+		disable_rounded_total: DF.Check
+		discount_amount: DF.Currency
+		enq_det: DF.Text | None
+		grand_total: DF.Currency
+		group_same_items: DF.Check
+		has_unit_price_items: DF.Check
+		ignore_pricing_rule: DF.Check
+		in_words: DF.Data | None
+		incoterm: DF.Link | None
+		item_wise_tax_details: DF.Table[ItemWiseTaxDetail]
+		items: DF.Table[QuotationItem]
+		language: DF.Link | None
+		letter_head: DF.Link | None
+		lost_reasons: DF.TableMultiSelect[QuotationLostReasonDetail]
+		named_place: DF.Data | None
+		naming_series: DF.Literal["SAL-QTN-.YYYY.-"]
+		net_total: DF.Currency
+		opportunity: DF.Link | None
+		order_lost_reason: DF.SmallText | None
+		order_type: DF.Literal["", "Sales", "Maintenance", "Shopping Cart"]
+		other_charges_calculation: DF.TextEditor | None
+		packed_items: DF.Table[PackedItem]
+		party_name: DF.DynamicLink | None
+		payment_schedule: DF.Table[PaymentSchedule]
+		payment_terms_template: DF.Link | None
+		plc_conversion_rate: DF.Float
+		price_list_currency: DF.Link
+		pricing_rules: DF.Table[PricingRuleDetail]
+		quotation_to: DF.Link
+		referral_sales_partner: DF.Link | None
+		rounded_total: DF.Currency
+		rounding_adjustment: DF.Currency
+		scan_barcode: DF.Data | None
+		select_print_heading: DF.Link | None
+		selling_price_list: DF.Link
+		shipping_address: DF.TextEditor | None
+		shipping_address_name: DF.Link | None
+		shipping_rule: DF.Link | None
+		status: DF.Literal[
+			"Draft", "Open", "Replied", "Partially Ordered", "Ordered", "Lost", "Cancelled", "Expired"
+		]
+		supplier_quotation: DF.Link | None
+		tax_category: DF.Link | None
+		taxes: DF.Table[SalesTaxesandCharges]
+		taxes_and_charges: DF.Link | None
+		tc_name: DF.Link | None
+		terms: DF.TextEditor | None
+		territory: DF.Link | None
+		total: DF.Currency
+		total_net_weight: DF.Float
+		total_qty: DF.Float
+		total_taxes_and_charges: DF.Currency
+		transaction_date: DF.Date
+		utm_campaign: DF.Link | None
+		utm_content: DF.Data | None
+		utm_medium: DF.Link | None
+		utm_source: DF.Link | None
+		valid_till: DF.Date | None
+	# end: auto-generated types
+
 	def set_indicator(self):
 		if self.docstatus == 1:
 			self.indicator_color = "blue"
@@ -21,12 +132,16 @@ class Quotation(SellingController):
 			self.indicator_color = "gray"
 			self.indicator_title = "Expired"
 
+	def before_validate(self):
+		self.set_has_unit_price_items()
+		self.flags.allow_zero_qty = self.has_unit_price_items
+
 	def validate(self):
-		super(Quotation, self).validate()
+		super().validate()
 		self.set_status()
-		self.validate_uom_is_integer("stock_uom", "qty")
+		self.validate_uom_is_integer("stock_uom", "stock_qty")
+		self.validate_uom_is_integer("uom", "qty")
 		self.validate_valid_till()
-		self.validate_shopping_cart_items()
 		self.set_customer_name()
 		if self.items:
 			self.with_items = 1
@@ -42,26 +157,6 @@ class Quotation(SellingController):
 		if self.valid_till and getdate(self.valid_till) < getdate(self.transaction_date):
 			frappe.throw(_("Valid till date cannot be before transaction date"))
 
-	def validate_shopping_cart_items(self):
-		if self.order_type != "Shopping Cart":
-			return
-
-		for item in self.items:
-			has_web_item = frappe.db.exists("Website Item", {"item_code": item.item_code})
-
-			# If variant is unpublished but template is published: valid
-			template = frappe.get_cached_value("Item", item.item_code, "variant_of")
-			if template and not has_web_item:
-				has_web_item = frappe.db.exists("Website Item", {"item_code": template})
-
-			if not has_web_item:
-				frappe.throw(
-					_("Row #{0}: Item {1} must have a Website Item for Shopping Cart Quotations").format(
-						item.idx, frappe.bold(item.item_code)
-					),
-					title=_("Unpublished Item"),
-				)
-
 	def set_has_alternative_item(self):
 		"""Mark 'Has Alternative Item' for rows."""
 		if not any(row.is_alternative for row in self.get("items")):
@@ -72,30 +167,34 @@ class Quotation(SellingController):
 			if not row.is_alternative and row.name in items_with_alternatives:
 				row.has_alternative_item = 1
 
-	def get_ordered_status(self):
-		status = "Open"
-		ordered_items = frappe._dict(
-			frappe.db.get_all(
-				"Sales Order Item",
-				{"prevdoc_docname": self.name, "docstatus": 1},
-				["item_code", "sum(qty)"],
-				group_by="item_code",
-				as_list=1,
-			)
+	def set_has_unit_price_items(self):
+		"""
+		If permitted in settings and any item has 0 qty, the SO has unit price items.
+		"""
+		if not frappe.get_single_value("Selling Settings", "allow_zero_qty_in_quotation"):
+			return
+
+		self.has_unit_price_items = any(
+			not row.qty for row in self.get("items") if (row.item_code and not row.qty)
 		)
 
+	def get_ordered_status(self):
+		ordered_items = get_ordered_items(self.name)
+
 		if not ordered_items:
-			return status
+			return "Open"
 
-		has_alternatives = any(row.is_alternative for row in self.get("items"))
-		self._items = self.get_valid_items() if has_alternatives else self.get("items")
+		self._items = (
+			self.get_valid_items()
+			if any(row.is_alternative for row in self.get("items"))
+			else self.get("items")
+		)
 
-		if any(row.qty > ordered_items.get(row.item_code, 0.0) for row in self._items):
-			status = "Partially Ordered"
-		else:
-			status = "Ordered"
+		for row in self._items:
+			if row.name not in ordered_items or row.qty > ordered_items[row.name]:
+				return "Partially Ordered"
 
-		return status
+		return "Ordered"
 
 	def get_valid_items(self):
 		"""
@@ -105,7 +204,8 @@ class Quotation(SellingController):
 		def is_in_sales_order(row):
 			in_sales_order = bool(
 				frappe.db.exists(
-					"Sales Order Item", {"quotation_item": row.name, "item_code": row.item_code, "docstatus": 1}
+					"Sales Order Item",
+					{"quotation_item": row.name, "item_code": row.item_code, "docstatus": 1},
 				)
 			)
 			return in_sales_order
@@ -136,6 +236,10 @@ class Quotation(SellingController):
 				"Lead", self.party_name, ["lead_name", "company_name"]
 			)
 			self.customer_name = company_name or lead_name
+		elif self.party_name and self.quotation_to == "Prospect":
+			self.customer_name = self.party_name
+		elif self.party_name and self.quotation_to == "CRM Deal":
+			self.customer_name = frappe.db.get_value("CRM Deal", self.party_name, "organization")
 
 	def update_opportunity(self, status):
 		for opportunity in set(d.prevdoc_docname for d in self.get("items")):
@@ -184,7 +288,7 @@ class Quotation(SellingController):
 
 	def on_submit(self):
 		# Check for Approving Authority
-		frappe.get_doc("Authorization Control").validate_approving_authority(
+		frappe.get_cached_doc("Authorization Control").validate_approving_authority(
 			self.doctype, self.company, self.base_grand_total, self
 		)
 
@@ -195,7 +299,7 @@ class Quotation(SellingController):
 	def on_cancel(self):
 		if self.lost_reasons:
 			self.lost_reasons = []
-		super(Quotation, self).on_cancel()
+		super().on_cancel()
 
 		# update enquiry status
 		self.set_status(update=True)
@@ -241,6 +345,7 @@ def get_list_context(context=None):
 			"show_search": True,
 			"no_breadcrumbs": True,
 			"title": _("Quotations"),
+			"list_template": "templates/includes/list/list.html",
 		}
 	)
 
@@ -248,7 +353,7 @@ def get_list_context(context=None):
 
 
 @frappe.whitelist()
-def make_sales_order(source_name: str, target_doc=None):
+def make_sales_order(source_name: str, target_doc=None, args=None):
 	if not frappe.db.get_singles_value(
 		"Selling Settings", "allow_sales_order_creation_for_expired_quotation"
 	):
@@ -260,54 +365,57 @@ def make_sales_order(source_name: str, target_doc=None):
 		):
 			frappe.throw(_("Validity period of this quotation has ended."))
 
-	return _make_sales_order(source_name, target_doc)
+	return _make_sales_order(source_name, target_doc, args=args)
 
 
-def _make_sales_order(source_name, target_doc=None, ignore_permissions=False):
+def _make_sales_order(source_name, target_doc=None, ignore_permissions=False, args=None):
+	if args is None:
+		args = {}
+	if isinstance(args, str):
+		args = json.loads(args)
+
 	customer = _make_customer(source_name, ignore_permissions)
-	ordered_items = frappe._dict(
-		frappe.db.get_all(
-			"Sales Order Item",
-			{"prevdoc_docname": source_name, "docstatus": 1},
-			["item_code", "sum(qty)"],
-			group_by="item_code",
-			as_list=1,
-		)
-	)
+	ordered_items = get_ordered_items(source_name)
 
 	selected_rows = [x.get("name") for x in frappe.flags.get("args", {}).get("selected_items", [])]
+
+	# 0 qty is accepted, as the qty uncertain for some items
+	has_unit_price_items = frappe.db.get_value("Quotation", source_name, "has_unit_price_items")
+
+	def is_unit_price_row(source) -> bool:
+		return has_unit_price_items and source.qty == 0
 
 	def set_missing_values(source, target):
 		if customer:
 			target.customer = customer.name
 			target.customer_name = customer.customer_name
+
+			# sales team
+			if not target.get("sales_team"):
+				for d in customer.get("sales_team") or []:
+					target.append(
+						"sales_team",
+						{
+							"sales_person": d.sales_person,
+							"allocated_percentage": d.allocated_percentage or None,
+							"commission_rate": d.commission_rate,
+						},
+					)
+
 		if source.referral_sales_partner:
 			target.sales_partner = source.referral_sales_partner
 			target.commission_rate = frappe.get_value(
 				"Sales Partner", source.referral_sales_partner, "commission_rate"
 			)
 
-		# sales team
-		for d in customer.get("sales_team") or []:
-			target.append(
-				"sales_team",
-				{
-					"sales_person": d.sales_person,
-					"allocated_percentage": d.allocated_percentage or None,
-					"commission_rate": d.commission_rate,
-				},
-			)
-
 		target.flags.ignore_permissions = ignore_permissions
-		target.delivery_date = nowdate()
 		target.run_method("set_missing_values")
 		target.run_method("calculate_taxes_and_totals")
 
 	def update_item(obj, target, source_parent):
-		balance_qty = obj.qty - ordered_items.get(obj.item_code, 0.0)
+		balance_qty = obj.qty if is_unit_price_row(obj) else obj.qty - ordered_items.get(obj.name, 0.0)
 		target.qty = balance_qty if balance_qty > 0 else 0
 		target.stock_qty = flt(target.qty) * flt(obj.conversion_factor)
-		target.delivery_date = nowdate()
 
 		if obj.against_blanket_order:
 			target.against_blanket_order = obj.against_blanket_order
@@ -319,31 +427,40 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False):
 		Row mapping from Quotation to Sales order:
 		1. If no selections, map all non-alternative rows (that sum up to the grand total)
 		2. If selections: Is Alternative Item/Has Alternative Item: Map if selected and adequate qty
-		3. If selections: Simple row: Map if adequate qty
+		3. If no selections: Simple row: Map if adequate qty
 		"""
-		has_qty = item.qty > 0
+		if not ((item.qty > ordered_items.get(item.name, 0.0)) or is_unit_price_row(item)):
+			return False
 
 		if not selected_rows:
 			return not item.is_alternative
 
 		if selected_rows and (item.is_alternative or item.has_alternative_item):
-			return (item.name in selected_rows) and has_qty
+			return item.name in selected_rows
 
 		# Simple row
-		return has_qty
+		return True
+
+	def select_item(d):
+		filtered_items = args.get("filtered_children", [])
+		child_filter = d.name in filtered_items if filtered_items else True
+		return child_filter
 
 	doclist = get_mapped_doc(
 		"Quotation",
 		source_name,
 		{
-			"Quotation": {"doctype": "Sales Order", "validation": {"docstatus": ["=", 1]}},
+			"Quotation": {
+				"doctype": "Sales Order",
+				"validation": {"docstatus": ["=", 1]},
+			},
 			"Quotation Item": {
 				"doctype": "Sales Order Item",
 				"field_map": {"parent": "prevdoc_docname", "name": "quotation_item"},
 				"postprocess": update_item,
-				"condition": can_map_row,
+				"condition": lambda d: can_map_row(d) and select_item(d),
 			},
-			"Sales Taxes and Charges": {"doctype": "Sales Taxes and Charges", "add_if_empty": True},
+			"Sales Taxes and Charges": {"doctype": "Sales Taxes and Charges", "reset_value": True},
 			"Sales Team": {"doctype": "Sales Team", "add_if_empty": True},
 			"Payment Schedule": {"doctype": "Payment Schedule", "add_if_empty": True},
 		},
@@ -351,9 +468,6 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False):
 		set_missing_values,
 		ignore_permissions=ignore_permissions,
 	)
-
-	# postprocess: fetch shipping address, set missing values
-	doclist.set_onload("ignore_price_list", True)
 
 	return doclist
 
@@ -373,23 +487,24 @@ def set_expired_status():
 	# if not exists any SO, set status as Expired
 	frappe.db.multisql(
 		{
-			"mariadb": """UPDATE `tabQuotation`  SET `tabQuotation`.status = 'Expired' WHERE {cond} and not exists({so_against_quo})""".format(
-				cond=cond, so_against_quo=so_against_quo
-			),
-			"postgres": """UPDATE `tabQuotation` SET status = 'Expired' FROM `tabSales Order`, `tabSales Order Item` WHERE {cond} and not exists({so_against_quo})""".format(
-				cond=cond, so_against_quo=so_against_quo
-			),
+			"mariadb": f"""UPDATE `tabQuotation`  SET `tabQuotation`.status = 'Expired' WHERE {cond} and not exists({so_against_quo})""",
+			"postgres": f"""UPDATE `tabQuotation` SET status = 'Expired' FROM `tabSales Order`, `tabSales Order Item` WHERE {cond} and not exists({so_against_quo})""",
 		},
 		(nowdate()),
 	)
 
 
 @frappe.whitelist()
-def make_sales_invoice(source_name, target_doc=None):
-	return _make_sales_invoice(source_name, target_doc)
+def make_sales_invoice(source_name, target_doc=None, args=None):
+	return _make_sales_invoice(source_name, target_doc, args=args)
 
 
-def _make_sales_invoice(source_name, target_doc=None, ignore_permissions=False):
+def _make_sales_invoice(source_name, target_doc=None, ignore_permissions=False, args=None):
+	if args is None:
+		args = {}
+	if isinstance(args, str):
+		args = json.loads(args)
+
 	customer = _make_customer(source_name, ignore_permissions)
 
 	def set_missing_values(source, target):
@@ -405,6 +520,11 @@ def _make_sales_invoice(source_name, target_doc=None, ignore_permissions=False):
 		target.cost_center = None
 		target.stock_qty = flt(obj.qty) * flt(obj.conversion_factor)
 
+	def select_item(d):
+		filtered_items = args.get("filtered_children", [])
+		child_filter = d.name in filtered_items if filtered_items else True
+		return child_filter
+
 	doclist = get_mapped_doc(
 		"Quotation",
 		source_name,
@@ -413,9 +533,9 @@ def _make_sales_invoice(source_name, target_doc=None, ignore_permissions=False):
 			"Quotation Item": {
 				"doctype": "Sales Invoice Item",
 				"postprocess": update_item,
-				"condition": lambda row: not row.is_alternative,
+				"condition": lambda row: not row.is_alternative and select_item(row),
 			},
-			"Sales Taxes and Charges": {"doctype": "Sales Taxes and Charges", "add_if_empty": True},
+			"Sales Taxes and Charges": {"doctype": "Sales Taxes and Charges", "reset_value": True},
 			"Sales Team": {"doctype": "Sales Team", "add_if_empty": True},
 		},
 		target_doc,
@@ -423,58 +543,84 @@ def _make_sales_invoice(source_name, target_doc=None, ignore_permissions=False):
 		ignore_permissions=ignore_permissions,
 	)
 
-	doclist.set_onload("ignore_price_list", True)
-
 	return doclist
 
 
 def _make_customer(source_name, ignore_permissions=False):
 	quotation = frappe.db.get_value(
-		"Quotation", source_name, ["order_type", "party_name", "customer_name"], as_dict=1
+		"Quotation",
+		source_name,
+		["order_type", "quotation_to", "party_name", "customer_name"],
+		as_dict=1,
 	)
 
-	if quotation and quotation.get("party_name"):
-		if not frappe.db.exists("Customer", quotation.get("party_name")):
-			lead_name = quotation.get("party_name")
-			customer_name = frappe.db.get_value(
-				"Customer", {"lead_name": lead_name}, ["name", "customer_name"], as_dict=True
-			)
-			if not customer_name:
-				from erpnext.crm.doctype.lead.lead import _make_customer
+	if quotation.quotation_to == "Customer":
+		return frappe.get_doc("Customer", quotation.party_name)
+	elif quotation.quotation_to == "CRM Deal":
+		return frappe.get_doc("Customer", {"crm_deal": quotation.party_name})
 
-				customer_doclist = _make_customer(lead_name, ignore_permissions=ignore_permissions)
-				customer = frappe.get_doc(customer_doclist)
-				customer.flags.ignore_permissions = ignore_permissions
-				if quotation.get("party_name") == "Shopping Cart":
-					customer.customer_group = frappe.db.get_value(
-						"E Commerce Settings", None, "default_customer_group"
-					)
+	# Check if a Customer already exists for the Lead or Prospect.
+	existing_customer = None
+	if quotation.quotation_to == "Lead":
+		existing_customer = frappe.db.get_value("Customer", {"lead_name": quotation.party_name})
+	elif quotation.quotation_to == "Prospect":
+		existing_customer = frappe.db.get_value("Customer", {"prospect_name": quotation.party_name})
 
-				try:
-					customer.insert()
-					return customer
-				except frappe.NameError:
-					if frappe.defaults.get_global_default("cust_master_name") == "Customer Name":
-						customer.run_method("autoname")
-						customer.name += "-" + lead_name
-						customer.insert()
-						return customer
-					else:
-						raise
-				except frappe.MandatoryError as e:
-					mandatory_fields = e.args[0].split(":")[1].split(",")
-					mandatory_fields = [customer.meta.get_label(field.strip()) for field in mandatory_fields]
+	if existing_customer:
+		return frappe.get_doc("Customer", existing_customer)
 
-					frappe.local.message_log = []
-					lead_link = frappe.utils.get_link_to_form("Lead", lead_name)
-					message = (
-						_("Could not auto create Customer due to the following missing mandatory field(s):") + "<br>"
-					)
-					message += "<br><ul><li>" + "</li><li>".join(mandatory_fields) + "</li></ul>"
-					message += _("Please create Customer from Lead {0}.").format(lead_link)
+	# If no Customer exists, create a new Customer or Prospect.
+	if quotation.quotation_to == "Lead":
+		return create_customer_from_lead(quotation.party_name, ignore_permissions=ignore_permissions)
+	elif quotation.quotation_to == "Prospect":
+		return create_customer_from_prospect(quotation.party_name, ignore_permissions=ignore_permissions)
 
-					frappe.throw(message, title=_("Mandatory Missing"))
-			else:
-				return customer_name
-		else:
-			return frappe.get_doc("Customer", quotation.get("party_name"))
+	return None
+
+
+def create_customer_from_lead(lead_name, ignore_permissions=False):
+	from erpnext.crm.doctype.lead.lead import _make_customer
+
+	customer = _make_customer(lead_name, ignore_permissions=ignore_permissions)
+	customer.flags.ignore_permissions = ignore_permissions
+
+	try:
+		customer.insert()
+		return customer
+	except frappe.MandatoryError as e:
+		handle_mandatory_error(e, customer, lead_name)
+
+
+def create_customer_from_prospect(prospect_name, ignore_permissions=False):
+	from erpnext.crm.doctype.prospect.prospect import make_customer as make_customer_from_prospect
+
+	customer = make_customer_from_prospect(prospect_name)
+	customer.flags.ignore_permissions = ignore_permissions
+
+	try:
+		customer.insert()
+		return customer
+	except frappe.MandatoryError as e:
+		handle_mandatory_error(e, customer, prospect_name)
+
+
+def handle_mandatory_error(e, customer, lead_name):
+	from frappe.utils import get_link_to_form
+
+	mandatory_fields = e.args[0].split(":")[1].split(",")
+	mandatory_fields = [_(customer.meta.get_label(field.strip())) for field in mandatory_fields]
+
+	frappe.local.message_log = []
+	message = _("Could not auto create Customer due to the following missing mandatory field(s):") + "<br>"
+	message += "<br><ul><li>" + "</li><li>".join(mandatory_fields) + "</li></ul>"
+	message += _("Please create Customer from Lead {0}.").format(get_link_to_form("Lead", lead_name))
+
+	frappe.throw(message, title=_("Mandatory Missing"))
+
+
+def get_ordered_items(quotation: str):
+	return frappe._dict(
+		frappe.get_all(
+			"Quotation Item", {"docstatus": 1, "parent": quotation}, ["name", "ordered_qty"], as_list=True
+		)
+	)

@@ -2,15 +2,18 @@
 # See license.txt
 
 import json
-import unittest
 
 import frappe
 from frappe import utils
-from frappe.tests.utils import FrappeTestCase
+from frappe.model.docstatus import DocStatus
+from frappe.tests import IntegrationTestCase
 
 from erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool import (
 	get_linked_payments,
 	reconcile_vouchers,
+)
+from erpnext.accounts.doctype.mode_of_payment.test_mode_of_payment import (
+	set_default_account_for_mode_of_payment,
 )
 from erpnext.accounts.doctype.payment_entry.test_payment_entry import get_payment_entry
 from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profile
@@ -18,22 +21,22 @@ from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from erpnext.tests.utils import if_lending_app_installed
 
-test_dependencies = ["Item", "Cost Center"]
+EXTRA_TEST_RECORD_DEPENDENCIES = ["Item", "Cost Center"]
 
 
-class TestBankTransaction(FrappeTestCase):
+class TestBankTransaction(IntegrationTestCase):
 	def setUp(self):
-		for dt in [
-			"Bank Transaction",
-			"Payment Entry",
-			"Payment Entry Reference",
-			"POS Profile",
-		]:
-			frappe.db.delete(dt)
-		clear_loan_transactions()
 		make_pos_profile()
-		add_transactions()
-		add_vouchers()
+
+		# generate and use a uniq hash identifier for 'Bank Account' and it's linked GL 'Account' to avoid validation error
+		uniq_identifier = frappe.generate_hash(length=10)
+		gl_account = create_gl_account("_Test Bank " + uniq_identifier)
+		bank_account = create_bank_account(
+			gl_account=gl_account, bank_account_name="Checking Account " + uniq_identifier
+		)
+
+		add_transactions(bank_account=bank_account)
+		add_vouchers(gl_account=gl_account)
 
 	# This test checks if ERPNext is able to provide a linked payment for a bank transaction based on the amount of the bank transaction.
 	def test_linked_payments(self):
@@ -47,7 +50,7 @@ class TestBankTransaction(FrappeTestCase):
 			from_date=bank_transaction.date,
 			to_date=utils.today(),
 		)
-		self.assertTrue(linked_payments[0][6] == "Conrad Electronic")
+		self.assertTrue(linked_payments[0]["party"] == "Conrad Electronic")
 
 	# This test validates a simple reconciliation leading to the clearance of the bank transaction and the payment
 	def test_reconcile(self):
@@ -81,6 +84,29 @@ class TestBankTransaction(FrappeTestCase):
 		clearance_date = frappe.db.get_value("Payment Entry", payment.name, "clearance_date")
 		self.assertFalse(clearance_date)
 
+	def test_cancel_voucher(self):
+		bank_transaction = frappe.get_doc(
+			"Bank Transaction",
+			dict(description="1512567 BG/000003025 OPSKATTUZWXXX AT776000000098709849 Herr G"),
+		)
+		payment = frappe.get_doc("Payment Entry", dict(party="Mr G", paid_amount=1700))
+		vouchers = json.dumps(
+			[
+				{
+					"payment_doctype": "Payment Entry",
+					"payment_name": payment.name,
+					"amount": bank_transaction.unallocated_amount,
+				}
+			]
+		)
+		reconcile_vouchers(bank_transaction.name, vouchers)
+		payment.reload()
+		payment.cancel()
+		bank_transaction.reload()
+		self.assertEqual(bank_transaction.docstatus, DocStatus.submitted())
+		self.assertEqual(bank_transaction.unallocated_amount, 1700)
+		self.assertEqual(bank_transaction.payment_entries, [])
+
 	# Check if ERPNext can correctly filter a linked payments based on the debit/credit amount
 	def test_debit_credit_output(self):
 		bank_transaction = frappe.get_doc(
@@ -93,7 +119,7 @@ class TestBankTransaction(FrappeTestCase):
 			from_date=bank_transaction.date,
 			to_date=utils.today(),
 		)
-		self.assertTrue(linked_payments[0][3])
+		self.assertTrue(linked_payments[0]["paid_amount"])
 
 	# Check error if already reconciled
 	def test_already_reconciled(self):
@@ -188,15 +214,12 @@ class TestBankTransaction(FrappeTestCase):
 		repayment_entry = create_loan_and_repayment()
 
 		linked_payments = get_linked_payments(bank_transaction.name, ["loan_repayment", "exact_match"])
-		self.assertEqual(linked_payments[0][2], repayment_entry.name)
+		self.assertEqual(linked_payments[0]["name"], repayment_entry.name)
 
 
-@if_lending_app_installed
-def clear_loan_transactions():
-	frappe.db.delete("Loan Repayment")
-
-
-def create_bank_account(bank_name="Citi Bank", account_name="_Test Bank - _TC"):
+def create_bank_account(
+	bank_name="Citi Bank", gl_account="_Test Bank - _TC", bank_account_name="Checking Account"
+):
 	try:
 		frappe.get_doc(
 			{
@@ -208,21 +231,35 @@ def create_bank_account(bank_name="Citi Bank", account_name="_Test Bank - _TC"):
 		pass
 
 	try:
-		frappe.get_doc(
+		bank_account = frappe.get_doc(
 			{
 				"doctype": "Bank Account",
-				"account_name": "Checking Account",
+				"account_name": bank_account_name,
 				"bank": bank_name,
-				"account": account_name,
+				"account": gl_account,
 			}
 		).insert(ignore_if_duplicate=True)
 	except frappe.DuplicateEntryError:
 		pass
 
+	return bank_account.name
 
-def add_transactions():
-	create_bank_account()
 
+def create_gl_account(gl_account_name="_Test Bank - _TC"):
+	gl_account = frappe.get_doc(
+		{
+			"doctype": "Account",
+			"company": "_Test Company",
+			"parent_account": "Current Assets - _TC",
+			"account_type": "Bank",
+			"is_group": 0,
+			"account_name": gl_account_name,
+		}
+	).insert()
+	return gl_account.name
+
+
+def add_transactions(bank_account="_Test Bank - _TC"):
 	doc = frappe.get_doc(
 		{
 			"doctype": "Bank Transaction",
@@ -230,7 +267,7 @@ def add_transactions():
 			"date": "2018-10-23",
 			"deposit": 1200,
 			"currency": "INR",
-			"bank_account": "Checking Account - Citi Bank",
+			"bank_account": bank_account,
 		}
 	).insert()
 	doc.submit()
@@ -242,7 +279,7 @@ def add_transactions():
 			"date": "2018-10-23",
 			"deposit": 1700,
 			"currency": "INR",
-			"bank_account": "Checking Account - Citi Bank",
+			"bank_account": bank_account,
 		}
 	).insert()
 	doc.submit()
@@ -254,7 +291,7 @@ def add_transactions():
 			"date": "2018-10-26",
 			"withdrawal": 690,
 			"currency": "INR",
-			"bank_account": "Checking Account - Citi Bank",
+			"bank_account": bank_account,
 		}
 	).insert()
 	doc.submit()
@@ -266,7 +303,7 @@ def add_transactions():
 			"date": "2018-10-27",
 			"deposit": 3900,
 			"currency": "INR",
-			"bank_account": "Checking Account - Citi Bank",
+			"bank_account": bank_account,
 		}
 	).insert()
 	doc.submit()
@@ -278,13 +315,13 @@ def add_transactions():
 			"date": "2018-10-27",
 			"withdrawal": 109080,
 			"currency": "INR",
-			"bank_account": "Checking Account - Citi Bank",
+			"bank_account": bank_account,
 		}
 	).insert()
 	doc.submit()
 
 
-def add_vouchers():
+def add_vouchers(gl_account="_Test Bank - _TC"):
 	try:
 		frappe.get_doc(
 			{
@@ -300,7 +337,7 @@ def add_vouchers():
 
 	pi = make_purchase_invoice(supplier="Conrad Electronic", qty=1, rate=690)
 
-	pe = get_payment_entry("Purchase Invoice", pi.name, bank_account="_Test Bank - _TC")
+	pe = get_payment_entry("Purchase Invoice", pi.name, bank_account=gl_account)
 	pe.reference_no = "Conrad Oct 18"
 	pe.reference_date = "2018-10-24"
 	pe.insert()
@@ -319,14 +356,14 @@ def add_vouchers():
 		pass
 
 	pi = make_purchase_invoice(supplier="Mr G", qty=1, rate=1200)
-	pe = get_payment_entry("Purchase Invoice", pi.name, bank_account="_Test Bank - _TC")
+	pe = get_payment_entry("Purchase Invoice", pi.name, bank_account=gl_account)
 	pe.reference_no = "Herr G Oct 18"
 	pe.reference_date = "2018-10-24"
 	pe.insert()
 	pe.submit()
 
 	pi = make_purchase_invoice(supplier="Mr G", qty=1, rate=1700)
-	pe = get_payment_entry("Purchase Invoice", pi.name, bank_account="_Test Bank - _TC")
+	pe = get_payment_entry("Purchase Invoice", pi.name, bank_account=gl_account)
 	pe.reference_no = "Herr G Nov 18"
 	pe.reference_date = "2018-11-01"
 	pe.insert()
@@ -357,10 +394,10 @@ def add_vouchers():
 		pass
 
 	pi = make_purchase_invoice(supplier="Poore Simon's", qty=1, rate=3900, is_paid=1, do_not_save=1)
-	pi.cash_bank_account = "_Test Bank - _TC"
+	pi.cash_bank_account = gl_account
 	pi.insert()
 	pi.submit()
-	pe = get_payment_entry("Purchase Invoice", pi.name, bank_account="_Test Bank - _TC")
+	pe = get_payment_entry("Purchase Invoice", pi.name, bank_account=gl_account)
 	pe.reference_no = "Poore Simon's Oct 18"
 	pe.reference_date = "2018-10-28"
 	pe.paid_amount = 690
@@ -369,7 +406,7 @@ def add_vouchers():
 	pe.submit()
 
 	si = create_sales_invoice(customer="Poore Simon's", qty=1, rate=3900)
-	pe = get_payment_entry("Sales Invoice", si.name, bank_account="_Test Bank - _TC")
+	pe = get_payment_entry("Sales Invoice", si.name, bank_account=gl_account)
 	pe.reference_no = "Poore Simon's Oct 18"
 	pe.reference_date = "2018-10-28"
 	pe.insert()
@@ -387,21 +424,13 @@ def add_vouchers():
 	except frappe.DuplicateEntryError:
 		pass
 
-	mode_of_payment = frappe.get_doc({"doctype": "Mode of Payment", "name": "Cash"})
+	mode_of_payment = frappe.get_doc({"doctype": "Mode of Payment", "name": "Wire Transfer"})
 
-	if not frappe.db.get_value(
-		"Mode of Payment Account", {"company": "_Test Company", "parent": "Cash"}
-	):
-		mode_of_payment.append(
-			"accounts", {"company": "_Test Company", "default_account": "_Test Bank - _TC"}
-		)
-		mode_of_payment.save()
+	set_default_account_for_mode_of_payment(mode_of_payment, "_Test Company", gl_account)
 
 	si = create_sales_invoice(customer="Fayva", qty=1, rate=109080, do_not_save=1)
 	si.is_pos = 1
-	si.append(
-		"payments", {"mode_of_payment": "Cash", "account": "_Test Bank - _TC", "amount": 109080}
-	)
+	si.append("payments", {"mode_of_payment": "Wire Transfer", "amount": 109080})
 	si.insert()
 	si.submit()
 
@@ -410,7 +439,7 @@ def add_vouchers():
 def create_loan_and_repayment():
 	from lending.loan_management.doctype.loan.test_loan import (
 		create_loan,
-		create_loan_type,
+		create_loan_product,
 		create_repayment_entry,
 		make_loan_disbursement_entry,
 	)
@@ -420,7 +449,8 @@ def create_loan_and_repayment():
 
 	from erpnext.setup.doctype.employee.test_employee import make_employee
 
-	create_loan_type(
+	create_loan_product(
+		"Personal Loan",
 		"Personal Loan",
 		500000,
 		8.4,
@@ -441,7 +471,7 @@ def create_loan_and_repayment():
 			"applicant_type": "Employee",
 			"company": "_Test Company",
 			"applicant": applicant,
-			"loan_type": "Personal Loan",
+			"loan_product": "Personal Loan",
 			"loan_amount": 5000,
 			"repayment_method": "Repay Fixed Amount per Period",
 			"monthly_repayment_amount": 500,

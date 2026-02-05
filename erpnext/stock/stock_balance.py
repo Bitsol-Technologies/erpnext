@@ -3,6 +3,7 @@
 
 
 import frappe
+from frappe.query_builder.functions import Coalesce, Sum
 from frappe.utils import cstr, flt, now, nowdate, nowtime
 
 from erpnext.controllers.stock_controller import create_repost_item_valuation_entry
@@ -15,9 +16,7 @@ def repost(only_actual=False, allow_negative_stock=False, allow_zero_rate=False,
 	frappe.db.auto_commit_on_many_writes = 1
 
 	if allow_negative_stock:
-		existing_allow_negative_stock = frappe.db.get_value(
-			"Stock Settings", None, "allow_negative_stock"
-		)
+		existing_allow_negative_stock = frappe.get_single_value("Stock Settings", "allow_negative_stock")
 		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1)
 
 	item_warehouses = frappe.db.sql(
@@ -37,9 +36,7 @@ def repost(only_actual=False, allow_negative_stock=False, allow_zero_rate=False,
 			frappe.db.rollback()
 
 	if allow_negative_stock:
-		frappe.db.set_single_value(
-			"Stock Settings", "allow_negative_stock", existing_allow_negative_stock
-		)
+		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", existing_allow_negative_stock)
 	frappe.db.auto_commit_on_many_writes = 0
 
 
@@ -51,7 +48,6 @@ def repost_stock(
 	only_bin=False,
 	allow_negative_stock=False,
 ):
-
 	if not only_bin:
 		repost_actual_qty(item_code, warehouse, allow_zero_rate, allow_negative_stock)
 
@@ -85,7 +81,7 @@ def get_balance_qty_from_sle(item_code, warehouse):
 	balance_qty = frappe.db.sql(
 		"""select qty_after_transaction from `tabStock Ledger Entry`
 		where item_code=%s and warehouse=%s and is_cancelled=0
-		order by posting_date desc, posting_time desc, creation desc
+		order by posting_datetime desc, creation desc
 		limit 1""",
 		(item_code, warehouse),
 	)
@@ -187,18 +183,67 @@ def get_indented_qty(item_code, warehouse):
 
 
 def get_ordered_qty(item_code, warehouse):
-	ordered_qty = frappe.db.sql(
-		"""
-		select sum((po_item.qty - po_item.received_qty)*po_item.conversion_factor)
-		from `tabPurchase Order Item` po_item, `tabPurchase Order` po
-		where po_item.item_code=%s and po_item.warehouse=%s
-		and po_item.qty > po_item.received_qty and po_item.parent=po.name
-		and po.status not in ('Closed', 'Delivered') and po.docstatus=1
-		and po_item.delivered_by_supplier = 0""",
-		(item_code, warehouse),
+	"""Return total pending ordered quantity for an item in a warehouse.
+	Includes outstanding quantities from Purchase Orders and Subcontracting Orders"""
+
+	purchase_order_qty = get_purchase_order_qty(item_code, warehouse)
+	subcontracting_order_qty = get_subcontracting_order_qty(item_code, warehouse)
+
+	return flt(purchase_order_qty) + flt(subcontracting_order_qty)
+
+
+def get_purchase_order_qty(item_code, warehouse):
+	PurchaseOrder = frappe.qb.DocType("Purchase Order")
+	PurchaseOrderItem = frappe.qb.DocType("Purchase Order Item")
+
+	purchase_order_qty = (
+		frappe.qb.from_(PurchaseOrderItem)
+		.join(PurchaseOrder)
+		.on(PurchaseOrderItem.parent == PurchaseOrder.name)
+		.select(
+			Sum(
+				(PurchaseOrderItem.qty - PurchaseOrderItem.received_qty) * PurchaseOrderItem.conversion_factor
+			)
+		)
+		.where(
+			(PurchaseOrderItem.item_code == item_code)
+			& (PurchaseOrderItem.warehouse == warehouse)
+			& (PurchaseOrderItem.qty > PurchaseOrderItem.received_qty)
+			& (PurchaseOrder.status.notin(["Closed", "Delivered"]))
+			& (PurchaseOrder.docstatus == 1)
+			& (Coalesce(PurchaseOrderItem.delivered_by_supplier, 0) == 0)
+		)
+		.run()
 	)
 
-	return flt(ordered_qty[0][0]) if ordered_qty else 0
+	return purchase_order_qty[0][0] if purchase_order_qty else 0
+
+
+def get_subcontracting_order_qty(item_code, warehouse):
+	SubcontractingOrder = frappe.qb.DocType("Subcontracting Order")
+	SubcontractingOrderItem = frappe.qb.DocType("Subcontracting Order Item")
+
+	subcontracting_order_qty = (
+		frappe.qb.from_(SubcontractingOrderItem)
+		.join(SubcontractingOrder)
+		.on(SubcontractingOrderItem.parent == SubcontractingOrder.name)
+		.select(
+			Sum(
+				(SubcontractingOrderItem.qty - SubcontractingOrderItem.received_qty)
+				* SubcontractingOrderItem.conversion_factor
+			)
+		)
+		.where(
+			(SubcontractingOrderItem.item_code == item_code)
+			& (SubcontractingOrderItem.warehouse == warehouse)
+			& (SubcontractingOrderItem.qty > SubcontractingOrderItem.received_qty)
+			& (SubcontractingOrder.status.notin(["Closed", "Completed"]))
+			& (SubcontractingOrder.docstatus == 1)
+		)
+		.run()
+	)
+
+	return subcontracting_order_qty[0][0] if subcontracting_order_qty else 0
 
 
 def get_planned_qty(item_code, warehouse):

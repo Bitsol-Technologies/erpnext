@@ -33,24 +33,27 @@
   "column_break_30",
   "website",
   "language",
+  "customer_numbers",
   "dashboard_tab",
   "tax_tab",
   "tax_id",
-  "column_break_27",
   "tax_category",
+  "column_break_27",
   "tax_withholding_category",
+  "tax_withholding_group",
   "contact_and_address_tab",
   "address_contacts",
   "address_html",
   "column_break1",
   "contact_html",
   "primary_address_and_contact_detail_section",
-  "supplier_primary_contact",
-  "mobile_no",
-  "email_id",
   "column_break_44",
   "supplier_primary_address",
   "primary_address",
+  "column_break_mglr",
+  "supplier_primary_contact",
+  "mobile_no",
+  "email_id",
   "accounting_tab",
   "payment_terms",
   "default_accounts_section",
@@ -166,15 +169,14 @@
    "label": "Supplier Group",
    "oldfieldname": "supplier_type",
    "oldfieldtype": "Link",
-   "options": "Supplier Group",
-   "reqd": 1
+   "options": "Supplier Group"
   },
   {
    "default": "Company",
    "fieldname": "supplier_type",
    "fieldtype": "Select",
    "label": "Supplier Type",
-   "options": "Company\nIndividual",
+   "options": "Company\nIndividual\nPartnership",
    "reqd": 1
   },
   {
@@ -381,7 +383,7 @@
   },
   {
    "fieldname": "primary_address",
-   "fieldtype": "Text",
+   "fieldtype": "Text Editor",
    "label": "Primary Address",
    "read_only": 1
   },
@@ -406,7 +408,7 @@
   {
    "fieldname": "contact_and_address_tab",
    "fieldtype": "Tab Break",
-   "label": "Contact & Address"
+   "label": "Address & Contact"
   },
   {
    "fieldname": "accounting_tab",
@@ -469,8 +471,25 @@
   {
    "fieldname": "column_break_1mqv",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_mglr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "customer_numbers",
+   "fieldtype": "Table",
+   "label": "Customer Numbers",
+   "options": "Customer Number At Supplier"
+  },
+  {
+   "fieldname": "tax_withholding_group",
+   "fieldtype": "Link",
+   "label": "Tax Withholding Group",
+   "options": "Tax Withholding Group"
   }
  ],
+ "grid_page_length": 50,
  "icon": "fa fa-user",
  "idx": 370,
  "image_field": "image",
@@ -481,7 +500,7 @@
    "link_fieldname": "party"
   }
  ],
- "modified": "2023-06-26 14:20:00.961554",
+ "modified": "2026-01-16 15:56:31.139206",
  "modified_by": "Administrator",
  "module": "Buying",
  "name": "Supplier",
@@ -540,9 +559,10 @@
   }
  ],
  "quick_entry": 1,
- "search_fields": "supplier_name, supplier_group",
+ "row_format": "Dynamic",
+ "search_fields": "supplier_group",
  "show_name_in_global_search": 1,
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "ASC",
  "states": [],
  "title_field": "supplier_name",

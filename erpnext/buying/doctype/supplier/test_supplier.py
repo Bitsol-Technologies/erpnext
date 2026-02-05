@@ -3,20 +3,18 @@
 
 
 import frappe
-from frappe.custom.doctype.property_setter.property_setter import make_property_setter
-from frappe.test_runner import make_test_records
 
 from erpnext.accounts.party import get_due_date
 from erpnext.controllers.website_list_for_contact import get_customers_suppliers
 from erpnext.exceptions import PartyDisabled
 
-test_dependencies = ["Payment Term", "Payment Terms Template"]
-test_records = frappe.get_test_records("Supplier")
-
-from frappe.tests.utils import FrappeTestCase
+EXTRA_TEST_RECORD_DEPENDENCIES = ["Payment Term", "Payment Terms Template"]
 
 
-class TestSupplier(FrappeTestCase):
+from frappe.tests import IntegrationTestCase
+
+
+class TestSupplier(IntegrationTestCase):
 	def test_get_supplier_group_details(self):
 		doc = frappe.new_doc("Supplier Group")
 		doc.supplier_group_name = "_Testing Supplier Group"
@@ -97,8 +95,6 @@ class TestSupplier(FrappeTestCase):
 		self.assertEqual(due_date, "2017-01-22")
 
 	def test_supplier_disabled(self):
-		make_test_records("Item")
-
 		frappe.db.set_value("Supplier", "_Test Supplier", "disabled", 1)
 
 		from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
@@ -135,16 +131,14 @@ class TestSupplier(FrappeTestCase):
 		self.assertEqual(details.tax_category, "_Test Tax Category 1")
 
 		address = frappe.get_doc(
-			dict(
-				doctype="Address",
-				address_title="_Test Address With Tax Category",
-				tax_category="_Test Tax Category 2",
-				address_type="Billing",
-				address_line1="Station Road",
-				city="_Test City",
-				country="India",
-				links=[dict(link_doctype="Supplier", link_name="_Test Supplier With Tax Category")],
-			)
+			doctype="Address",
+			address_title="_Test Address With Tax Category",
+			tax_category="_Test Tax Category 2",
+			address_type="Billing",
+			address_line1="Station Road",
+			city="_Test City",
+			country="India",
+			links=[dict(link_doctype="Supplier", link_name="_Test Supplier With Tax Category")],
 		).insert()
 
 		# Tax Category with Address
@@ -153,44 +147,6 @@ class TestSupplier(FrappeTestCase):
 
 		# Rollback
 		address.delete()
-
-	def test_serach_fields_for_supplier(self):
-		from erpnext.controllers.queries import supplier_query
-
-		frappe.db.set_single_value("Buying Settings", "supp_master_name", "Naming Series")
-
-		supplier_name = create_supplier(supplier_name="Test Supplier 1").name
-
-		make_property_setter(
-			"Supplier", None, "search_fields", "supplier_group", "Data", for_doctype="Doctype"
-		)
-
-		data = supplier_query(
-			"Supplier", supplier_name, "name", 0, 20, filters={"name": supplier_name}, as_dict=True
-		)
-
-		self.assertEqual(data[0].name, supplier_name)
-		self.assertEqual(data[0].supplier_group, "Services")
-		self.assertTrue("supplier_type" not in data[0])
-
-		make_property_setter(
-			"Supplier",
-			None,
-			"search_fields",
-			"supplier_group, supplier_type",
-			"Data",
-			for_doctype="Doctype",
-		)
-		data = supplier_query(
-			"Supplier", supplier_name, "name", 0, 20, filters={"name": supplier_name}, as_dict=True
-		)
-
-		self.assertEqual(data[0].name, supplier_name)
-		self.assertEqual(data[0].supplier_group, "Services")
-		self.assertEqual(data[0].supplier_type, "Company")
-		self.assertTrue("supplier_type" in data[0])
-
-		frappe.db.set_single_value("Buying Settings", "supp_master_name", "Supplier Name")
 
 
 def create_supplier(**args):
@@ -206,18 +162,21 @@ def create_supplier(**args):
 		{
 			"doctype": "Supplier",
 			"supplier_name": args.supplier_name,
-			"supplier_group": args.supplier_group or "Services",
+			"default_currency": args.default_currency,
 			"supplier_type": args.supplier_type or "Company",
 			"tax_withholding_category": args.tax_withholding_category,
 		}
-	).insert()
+	)
+	if not args.without_supplier_group:
+		doc.supplier_group = args.supplier_group or "Services"
+
+	doc.insert()
 
 	return doc
 
 
-class TestSupplierPortal(FrappeTestCase):
+class TestSupplierPortal(IntegrationTestCase):
 	def test_portal_user_can_access_supplier_data(self):
-
 		supplier = create_supplier()
 
 		user = frappe.generate_hash() + "@example.com"
@@ -231,7 +190,7 @@ class TestSupplierPortal(FrappeTestCase):
 		supplier.append("portal_users", {"user": user})
 		supplier.save()
 
-		frappe.set_user(user)
-		_, suppliers = get_customers_suppliers("Purchase Order", user)
+		with self.set_user(user):
+			_, suppliers = get_customers_suppliers("Purchase Order", user)
 
-		self.assertIn(supplier.name, suppliers)
+			self.assertIn(supplier.name, suppliers)

@@ -19,7 +19,7 @@ def get_data(filters):
 		"Serial and Batch Bundle",
 		fields=[
 			"`tabSerial and Batch Bundle`.`voucher_type`",
-			"`tabSerial and Batch Bundle`.`posting_date`",
+			"`tabSerial and Batch Bundle`.`posting_datetime` as posting_date",
 			"`tabSerial and Batch Bundle`.`name`",
 			"`tabSerial and Batch Bundle`.`company`",
 			"`tabSerial and Batch Bundle`.`voucher_no`",
@@ -33,7 +33,7 @@ def get_data(filters):
 			"`tabSerial and Batch Entry`.`qty`",
 		],
 		filters=filter_conditions,
-		order_by="posting_date",
+		order_by="posting_datetime",
 	)
 
 
@@ -54,7 +54,7 @@ def get_filter_conditions(filters):
 		filter_conditions.append(
 			[
 				"Serial and Batch Bundle",
-				"posting_date",
+				"posting_datetime",
 				"between",
 				[filters.get("from_date"), filters.get("to_date")],
 			]
@@ -106,8 +106,6 @@ def get_columns(filters, data):
 				{
 					"label": _("Voucher Type"),
 					"fieldname": "voucher_type",
-					"fieldtype": "Link",
-					"options": "DocType",
 					"width": 120,
 				},
 				{
@@ -147,7 +145,13 @@ def get_columns(filters, data):
 
 	if not item_details or item_details.get("has_serial_no"):
 		columns.append(
-			{"label": _("Serial No"), "fieldname": "serial_no", "fieldtype": "Data", "width": 120}
+			{
+				"label": _("Serial No"),
+				"fieldname": "serial_no",
+				"fieldtype": "Link",
+				"width": 120,
+				"options": "Serial No",
+			}
 		)
 
 	if not item_details or item_details.get("has_batch_no"):
@@ -179,14 +183,15 @@ def get_voucher_type(doctype, txt, searchfield, start, page_len, filters):
 	child_doctypes = frappe.get_all(
 		"DocField",
 		filters={"fieldname": "serial_and_batch_bundle"},
-		fields=["distinct parent as parent"],
+		fields=["parent"],
+		distinct=True,
 	)
 
 	query_filters = {"options": ["in", [d.parent for d in child_doctypes]]}
 	if txt:
-		query_filters["parent"] = ["like", "%{}%".format(txt)]
+		query_filters["parent"] = ["like", f"%{txt}%"]
 
-	return frappe.get_all("DocField", filters=query_filters, fields=["distinct parent"], as_list=True)
+	return frappe.get_all("DocField", filters=query_filters, fields=["parent"], as_list=True, distinct=True)
 
 
 @frappe.whitelist()
@@ -222,7 +227,7 @@ def get_serial_nos(doctype, txt, searchfield, start, page_len, filters):
 def get_batch_nos(doctype, txt, searchfield, start, page_len, filters):
 	query_filters = {}
 
-	if txt:
+	if filters.get("voucher_no") and txt:
 		query_filters["batch_no"] = ["like", f"%{txt}%"]
 
 	if filters.get("voucher_no"):
@@ -241,5 +246,8 @@ def get_batch_nos(doctype, txt, searchfield, start, page_len, filters):
 		)
 
 	else:
+		if txt:
+			query_filters["name"] = ["like", f"%{txt}%"]
+
 		query_filters["item"] = filters.get("item_code")
 		return frappe.get_all("Batch", filters=query_filters, as_list=True)

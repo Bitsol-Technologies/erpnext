@@ -7,6 +7,20 @@ from frappe.model.document import Document
 
 
 class PartyLink(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		primary_party: DF.DynamicLink | None
+		primary_role: DF.Link
+		secondary_party: DF.DynamicLink | None
+		secondary_role: DF.Link | None
+	# end: auto-generated types
+
 	def validate(self):
 		if self.primary_role not in ["Customer", "Supplier"]:
 			frappe.throw(
@@ -24,7 +38,10 @@ class PartyLink(Document):
 		if existing_party_link:
 			frappe.throw(
 				_("{} {} is already linked with {} {}").format(
-					self.primary_role, bold(self.primary_party), self.secondary_role, bold(self.secondary_party)
+					self.primary_role,
+					bold(self.primary_party),
+					self.secondary_role,
+					bold(self.secondary_party),
 				)
 			)
 
@@ -57,6 +74,6 @@ def create_party_link(primary_role, primary_party, secondary_party):
 	party_link.secondary_role = "Customer" if primary_role == "Supplier" else "Supplier"
 	party_link.secondary_party = secondary_party
 
-	party_link.save(ignore_permissions=True)
+	party_link.save()
 
 	return party_link

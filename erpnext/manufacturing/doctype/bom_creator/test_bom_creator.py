@@ -4,18 +4,16 @@
 import random
 
 import frappe
-from frappe.tests.utils import FrappeTestCase
+from frappe.tests import IntegrationTestCase
 
 from erpnext.manufacturing.doctype.bom_creator.bom_creator import (
 	add_item,
 	add_sub_assembly,
-	delete_node,
-	edit_qty,
 )
 from erpnext.stock.doctype.item.test_item import make_item
 
 
-class TestBOMCreator(FrappeTestCase):
+class TestBOMCreator(IntegrationTestCase):
 	def setUp(self) -> None:
 		create_items()
 
@@ -65,8 +63,10 @@ class TestBOMCreator(FrappeTestCase):
 
 		fg_valuation_rate = 0
 		for row in doc.items:
-			if not row.is_expandable:
+			if row.fg_item == final_product:
 				fg_valuation_rate += row.amount
+
+			if not row.is_expandable:
 				self.assertEqual(row.fg_item, "Frame Assembly")
 				self.assertEqual(row.fg_reference_id, doc.items[0].name)
 
@@ -107,8 +107,10 @@ class TestBOMCreator(FrappeTestCase):
 
 		fg_valuation_rate = 0
 		for row in doc.items:
-			if not row.is_expandable:
+			if row.fg_item == final_product:
 				fg_valuation_rate += row.amount
+
+			if not row.is_expandable:
 				self.assertEqual(row.fg_item, "Bicycle")
 				self.assertEqual(row.fg_reference_id, doc.name)
 
@@ -172,13 +174,82 @@ class TestBOMCreator(FrappeTestCase):
 
 		fg_valuation_rate = 0
 		for row in doc.items:
-			if not row.is_expandable:
+			if row.fg_item == final_product:
 				fg_valuation_rate += row.amount
+
+			if not row.is_expandable:
 				self.assertEqual(row.fg_item, "Pedal Assembly")
 				self.assertEqual(row.qty, 2.0)
 				self.assertEqual(row.fg_reference_id, doc.items[0].name)
 
 		self.assertEqual(doc.raw_material_cost, fg_valuation_rate)
+
+	def test_make_boms_from_bom_creator(self):
+		final_product = "Bicycle Test"
+		make_item(
+			final_product,
+			{
+				"item_group": "Raw Material",
+				"stock_uom": "Nos",
+			},
+		)
+
+		doc = make_bom_creator(
+			name="Bicycle BOM Test",
+			company="_Test Company",
+			item_code=final_product,
+			qty=1,
+			rm_cosy_as_per="Valuation Rate",
+			currency="INR",
+			plc_conversion_rate=1,
+			conversion_rate=1,
+		)
+
+		add_item(
+			parent=doc.name,
+			fg_item=final_product,
+			fg_reference_id=doc.name,
+			item_code="Pedal Assembly",
+			qty=2,
+		)
+
+		doc.reload()
+		self.assertEqual(doc.items[0].is_expandable, 0)
+
+		add_sub_assembly(
+			convert_to_sub_assembly=1,
+			parent=doc.name,
+			fg_item=final_product,
+			fg_reference_id=doc.items[0].name,
+			bom_item={
+				"item_code": "Pedal Assembly",
+				"qty": 2,
+				"items": [
+					{
+						"item_code": "Pedal Body",
+						"qty": 2,
+					},
+					{
+						"item_code": "Pedal Axle",
+						"qty": 2,
+					},
+				],
+			},
+		)
+
+		doc.reload()
+		self.assertEqual(doc.items[0].is_expandable, 1)
+
+		doc.submit()
+		doc.create_boms()
+		doc.reload()
+
+		data = frappe.get_all("BOM", filters={"bom_creator": doc.name, "docstatus": 1})
+		self.assertEqual(len(data), 2)
+
+		doc.create_boms()
+		data = frappe.get_all("BOM", filters={"bom_creator": doc.name, "docstatus": 1})
+		self.assertEqual(len(data), 2)
 
 
 def create_items():

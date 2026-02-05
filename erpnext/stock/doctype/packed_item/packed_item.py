@@ -7,25 +7,75 @@
 import json
 
 import frappe
+import frappe.defaults
 from frappe.model.document import Document
 from frappe.utils import flt
 
-from erpnext.stock.get_item_details import get_item_details, get_price_list_rate
+from erpnext.stock.get_item_details import ItemDetailsCtx, get_item_details, get_price_list_rate
 
 
 class PackedItem(Document):
-	pass
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		actual_batch_qty: DF.Float
+		actual_qty: DF.Float
+		batch_no: DF.Link | None
+		conversion_factor: DF.Float
+		delivered_by_supplier: DF.Check
+		description: DF.TextEditor | None
+		incoming_rate: DF.Currency
+		item_code: DF.Link | None
+		item_name: DF.Data | None
+		ordered_qty: DF.Float
+		packed_qty: DF.Float
+		page_break: DF.Check
+		parent: DF.Data
+		parent_detail_docname: DF.Data | None
+		parent_item: DF.Link | None
+		parentfield: DF.Data
+		parenttype: DF.Data
+		picked_qty: DF.Float
+		prevdoc_doctype: DF.Data | None
+		projected_qty: DF.Float
+		qty: DF.Float
+		rate: DF.Currency
+		serial_and_batch_bundle: DF.Link | None
+		serial_no: DF.Text | None
+		target_warehouse: DF.Link | None
+		uom: DF.Link | None
+		use_serial_batch_fields: DF.Check
+		warehouse: DF.Link | None
+	# end: auto-generated types
+
+	def set_actual_and_projected_qty(self):
+		"Set actual and projected qty based on warehouse and item_code"
+		_bin = frappe.db.get_value(
+			"Bin",
+			{"item_code": self.item_code, "warehouse": self.warehouse},
+			["actual_qty", "projected_qty"],
+			as_dict=True,
+		)
+		self.actual_qty = _bin.actual_qty if _bin else 0
+		self.projected_qty = _bin.projected_qty if _bin else 0
 
 
 def make_packing_list(doc):
 	"Make/Update packing list for Product Bundle Item."
+
+	if doc.get("is_subcontracted"):
+		return
+
 	if doc.get("_action") and doc._action == "update_after_submit":
 		return
 
 	parent_items_price, reset = {}, False
-	set_price_from_children = frappe.db.get_single_value(
-		"Selling Settings", "editable_bundle_item_rates"
-	)
+	set_price_from_children = frappe.get_single_value("Selling Settings", "editable_bundle_item_rates")
 
 	stale_packed_items_table = get_indexed_packed_items_table(doc)
 
@@ -45,6 +95,10 @@ def make_packing_list(doc):
 				update_packed_item_basic_data(item_row, pi_row, bundle_item, item_data)
 				update_packed_item_stock_data(item_row, pi_row, bundle_item, item_data, doc)
 				update_packed_item_price_data(pi_row, item_data, doc)
+
+				if item_row.get("against_pick_list"):
+					update_packed_item_with_pick_list_info(item_row, pi_row)
+
 				update_packed_item_from_cancelled_doc(item_row, bundle_item, pi_row, doc)
 
 				if set_price_from_children:  # create/update bundle item wise price dict
@@ -55,7 +109,7 @@ def make_packing_list(doc):
 
 
 def is_product_bundle(item_code: str) -> bool:
-	return bool(frappe.db.exists("Product Bundle", {"new_item_code": item_code}))
+	return bool(frappe.db.exists("Product Bundle", {"new_item_code": item_code, "disabled": 0}))
 
 
 def get_indexed_packed_items_table(doc):
@@ -67,7 +121,12 @@ def get_indexed_packed_items_table(doc):
 	"""
 	indexed_table = {}
 	for packed_item in doc.get("packed_items"):
-		key = (packed_item.parent_item, packed_item.item_code, packed_item.parent_detail_docname)
+		key = (
+			packed_item.parent_item,
+			packed_item.item_code,
+			packed_item.idx if doc.is_new() else packed_item.parent_detail_docname,
+		)
+
 		indexed_table[key] = packed_item
 
 	return indexed_table
@@ -111,7 +170,7 @@ def get_product_bundle_items(item_code):
 			product_bundle_item.uom,
 			product_bundle_item.description,
 		)
-		.where(product_bundle.new_item_code == item_code)
+		.where((product_bundle.new_item_code == item_code) & (product_bundle.disabled == 0))
 		.orderby(product_bundle_item.idx)
 	)
 	return query.run(as_dict=True)
@@ -128,7 +187,11 @@ def add_packed_item_row(doc, packing_item, main_item_row, packed_items_table, re
 	exists, pi_row = False, {}
 
 	# check if row already exists in packed items table
-	key = (main_item_row.item_code, packing_item.item_code, main_item_row.name)
+	key = (
+		main_item_row.item_code,
+		packing_item.item_code,
+		main_item_row.idx if doc.is_new() else main_item_row.name,
+	)
 	if packed_items_table.get(key):
 		pi_row, exists = packed_items_table.get(key), True
 
@@ -169,6 +232,7 @@ def update_packed_item_basic_data(main_item_row, pi_row, packing_item, item_data
 	pi_row.uom = item_data.stock_uom
 	pi_row.qty = flt(packing_item.qty) * flt(main_item_row.stock_qty)
 	pi_row.conversion_factor = main_item_row.conversion_factor
+	pi_row.delivered_by_supplier = main_item_row.get("delivered_by_supplier")
 
 	if not pi_row.description:
 		pi_row.description = packing_item.get("description")
@@ -190,6 +254,29 @@ def update_packed_item_stock_data(main_item_row, pi_row, packing_item, item_data
 	bin = get_packed_item_bin_qty(packing_item.item_code, pi_row.warehouse)
 	pi_row.actual_qty = flt(bin.get("actual_qty"))
 	pi_row.projected_qty = flt(bin.get("projected_qty"))
+	pi_row.use_serial_batch_fields = frappe.get_single_value("Stock Settings", "use_serial_batch_fields")
+
+
+def update_packed_item_with_pick_list_info(main_item_row, pi_row):
+	pl_row = frappe.db.get_value(
+		"Pick List Item",
+		{
+			"item_code": pi_row.item_code,
+			"sales_order": main_item_row.get("against_sales_order"),
+			"sales_order_item": main_item_row.get("so_detail"),
+			"parent": main_item_row.against_pick_list,
+		},
+		["warehouse", "batch_no", "serial_no"],
+		as_dict=True,
+		order_by="qty desc",
+	)
+
+	if not pl_row:
+		return
+
+	pi_row.warehouse = pl_row.warehouse
+	pi_row.batch_no = pl_row.batch_no
+	pi_row.serial_no = pl_row.serial_no
 
 
 def update_packed_item_price_data(pi_row, item_data, doc):
@@ -198,8 +285,8 @@ def update_packed_item_price_data(pi_row, item_data, doc):
 		return
 
 	item_doc = frappe.get_cached_doc("Item", pi_row.item_code)
-	row_data = pi_row.as_dict().copy()
-	row_data.update(
+	ctx = ItemDetailsCtx(pi_row.as_dict().copy())
+	ctx.update(
 		{
 			"company": doc.get("company"),
 			"price_list": doc.get("selling_price_list"),
@@ -207,7 +294,10 @@ def update_packed_item_price_data(pi_row, item_data, doc):
 			"conversion_rate": doc.get("conversion_rate"),
 		}
 	)
-	rate = get_price_list_rate(row_data, item_doc).get("price_list_rate")
+	if not ctx.transaction_date:
+		ctx.update({"transaction_date": doc.get("transaction_date")})
+
+	rate = get_price_list_rate(ctx, item_doc).get("price_list_rate")
 
 	pi_row.rate = rate or item_data.get("valuation_rate") or 0.0
 
@@ -219,9 +309,9 @@ def update_packed_item_from_cancelled_doc(main_item_row, packing_item, pi_row, d
 		prev_doc_packed_items_map = get_cancelled_doc_packed_item_details(doc.packed_items)
 
 	if prev_doc_packed_items_map and prev_doc_packed_items_map.get(
-		(packing_item.item_code, main_item_row.item_code)
+		(packing_item.item_code, main_item_row.name)
 	):
-		prev_doc_row = prev_doc_packed_items_map.get((packing_item.item_code, main_item_row.item_code))
+		prev_doc_row = prev_doc_packed_items_map.get((packing_item.item_code, main_item_row.name))
 		pi_row.batch_no = prev_doc_row[0].batch_no
 		pi_row.serial_no = prev_doc_row[0].serial_no
 		pi_row.warehouse = prev_doc_row[0].warehouse
@@ -241,7 +331,7 @@ def get_packed_item_bin_qty(item, warehouse):
 def get_cancelled_doc_packed_item_details(old_packed_items):
 	prev_doc_packed_items_map = {}
 	for items in old_packed_items:
-		prev_doc_packed_items_map.setdefault((items.item_code, items.parent_item), []).append(
+		prev_doc_packed_items_map.setdefault((items.item_code, items.parent_detail_docname), []).append(
 			items.as_dict()
 		)
 	return prev_doc_packed_items_map
@@ -251,7 +341,7 @@ def update_product_bundle_rate(parent_items_price, pi_row, item_row):
 	"""
 	Update the price dict of Product Bundles based on the rates of the Items in the bundle.
 
-	Stucture:
+	Structure:
 	{(Bundle Item 1, ae56fgji): 150.0, (Bundle Item 2, bc78fkjo): 200.0}
 	"""
 	key = (pi_row.parent_item, pi_row.parent_detail_docname)
@@ -277,11 +367,18 @@ def on_doctype_update():
 
 @frappe.whitelist()
 def get_items_from_product_bundle(row):
-	row, items = json.loads(row), []
+	row, items = ItemDetailsCtx(json.loads(row)), []
 
 	bundled_items = get_product_bundle_items(row["item_code"])
 	for item in bundled_items:
-		row.update({"item_code": item.item_code, "qty": flt(row["quantity"]) * flt(item.qty)})
+		row.update(
+			{
+				"item_code": item.item_code,
+				"qty": flt(row["quantity"]) * flt(item.qty),
+				"conversion_rate": 1,
+				"currency": frappe.defaults.get_defaults().currency,
+			}
+		)
 		items.append(get_item_details(row))
 
 	return items

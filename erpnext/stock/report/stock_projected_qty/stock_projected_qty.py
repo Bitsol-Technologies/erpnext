@@ -5,6 +5,7 @@
 import frappe
 from frappe import _
 from frappe.utils import flt, today
+from frappe.utils.nestedset import get_descendants_of
 from pypika.terms import ExistsCriterion
 
 from erpnext.accounts.doctype.pos_invoice.pos_invoice import get_pos_reserved_qty
@@ -21,6 +22,10 @@ def execute(filters=None):
 	columns = get_columns()
 	bin_list = get_bin_list(filters)
 	item_map = get_item_map(filters.get("item_code"), include_uom)
+	item_groups = []
+	if filters.get("item_group"):
+		item_groups.append(filters.item_group)
+		item_groups.extend(get_descendants_of("Item Group", filters.item_group))
 
 	warehouse_company = {}
 	data = []
@@ -40,7 +45,7 @@ def execute(filters=None):
 		if filters.brand and filters.brand != item.brand:
 			continue
 
-		elif filters.item_group and filters.item_group != item.item_group:
+		elif item_groups and item.item_group not in item_groups:
 			continue
 
 		elif filters.company and filters.company != company:
@@ -250,9 +255,7 @@ def get_bin_list(filters):
 		query = query.where(bin.item_code == filters.item_code)
 
 	if filters.warehouse:
-		warehouse_details = frappe.db.get_value(
-			"Warehouse", filters.warehouse, ["lft", "rgt"], as_dict=1
-		)
+		warehouse_details = frappe.db.get_value("Warehouse", filters.warehouse, ["lft", "rgt"], as_dict=1)
 
 		if warehouse_details:
 			wh = frappe.qb.DocType("Warehouse")
@@ -286,7 +289,9 @@ def get_item_map(item_code, include_uom):
 			(item.is_stock_item == 1)
 			& (item.disabled == 0)
 			& (
-				(item.end_of_life > today()) | (item.end_of_life.isnull()) | (item.end_of_life == "0000-00-00")
+				(item.end_of_life > today())
+				| (item.end_of_life.isnull())
+				| (item.end_of_life == "0000-00-00")
 			)
 			& (ExistsCriterion(frappe.qb.from_(bin).select(bin.name).where(bin.item_code == item.name)))
 		)
@@ -297,6 +302,7 @@ def get_item_map(item_code, include_uom):
 
 	if include_uom:
 		ucd = frappe.qb.DocType("UOM Conversion Detail")
+		query = query.select(ucd.conversion_factor)
 		query = query.left_join(ucd).on((ucd.parent == item.name) & (ucd.uom == include_uom))
 
 	items = query.run(as_dict=True)

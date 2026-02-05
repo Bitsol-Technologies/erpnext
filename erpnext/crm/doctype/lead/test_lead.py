@@ -1,27 +1,30 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
-
-
 import unittest
 
 import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.utils import random_string, today
 
 from erpnext.crm.doctype.lead.lead import make_opportunity
 from erpnext.crm.utils import get_linked_prospect
+from erpnext.tests.utils import ERPNextTestSuite
 
-test_records = frappe.get_test_records("Lead")
 
+class TestLead(ERPNextTestSuite):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.make_leads()
 
-class TestLead(unittest.TestCase):
 	def test_make_customer(self):
 		from erpnext.crm.doctype.lead.lead import make_customer
 
 		frappe.delete_doc_if_exists("Customer", "_Test Lead")
 
-		customer = make_customer("_T-Lead-00001")
+		customer = make_customer(self.leads[0].name)
 		self.assertEqual(customer.doctype, "Customer")
-		self.assertEqual(customer.lead_name, "_T-Lead-00001")
+		self.assertEqual(customer.lead_name, self.leads[0].name)
 
 		customer.company = "_Test Company"
 		customer.customer_group = "_Test Customer Group"
@@ -45,9 +48,9 @@ class TestLead(unittest.TestCase):
 	def test_make_customer_from_organization(self):
 		from erpnext.crm.doctype.lead.lead import make_customer
 
-		customer = make_customer("_T-Lead-00002")
+		customer = make_customer(self.leads[1].name)
 		self.assertEqual(customer.doctype, "Customer")
-		self.assertEqual(customer.lead_name, "_T-Lead-00002")
+		self.assertEqual(customer.lead_name, self.leads[1].name)
 
 		customer.company = "_Test Company"
 		customer.customer_group = "_Test Customer Group"
@@ -134,9 +137,7 @@ class TestLead(unittest.TestCase):
 		self.assertEqual(event.event_participants[1].reference_docname, opportunity.name)
 
 		self.assertTrue(
-			frappe.db.get_value(
-				"ToDo", {"reference_type": "Opportunity", "reference_name": opportunity.name}
-			)
+			frappe.db.get_value("ToDo", {"reference_type": "Opportunity", "reference_name": opportunity.name})
 		)
 
 	def test_copy_events_from_lead_to_prospect(self):
@@ -194,7 +195,7 @@ def make_lead(**args):
 			"doctype": "Lead",
 			"first_name": args.first_name or "_Test",
 			"last_name": args.last_name or "Lead",
-			"email_id": args.email_id or "new_lead_{}@example.com".format(random_string(5)),
+			"email_id": args.email_id or f"new_lead_{random_string(5)}@example.com",
 			"company_name": args.company_name or "_Test Company",
 		}
 	).insert()

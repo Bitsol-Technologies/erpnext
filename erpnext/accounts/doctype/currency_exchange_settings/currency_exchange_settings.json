@@ -9,6 +9,8 @@
   "disabled",
   "service_provider",
   "api_endpoint",
+  "use_http",
+  "access_key",
   "url",
   "column_break_3",
   "help",
@@ -76,7 +78,7 @@
    "fieldname": "service_provider",
    "fieldtype": "Select",
    "label": "Service Provider",
-   "options": "frankfurter.app\nexchangerate.host\nCustom",
+   "options": "frankfurter.dev\nexchangerate.host\nCustom",
    "reqd": 1
   },
   {
@@ -84,12 +86,26 @@
    "fieldname": "disabled",
    "fieldtype": "Check",
    "label": "Disabled"
+  },
+  {
+   "depends_on": "eval:doc.service_provider == 'exchangerate.host';",
+   "fieldname": "access_key",
+   "fieldtype": "Data",
+   "label": "Access Key"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval: doc.service_provider != \"Custom\"",
+   "fieldname": "use_http",
+   "fieldtype": "Check",
+   "label": "Use HTTP Protocol"
   }
  ],
+ "hide_toolbar": 1,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2023-01-09 12:19:03.955906",
+ "modified": "2026-01-02 18:19:02.873815",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Currency Exchange Settings",
@@ -126,7 +142,8 @@
    "write": 1
   }
  ],
- "sort_field": "modified",
+ "row_format": "Dynamic",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "track_changes": 1

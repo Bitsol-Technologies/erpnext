@@ -1,15 +1,46 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
 
-import unittest
-
 import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, getdate, nowdate
 
-from erpnext.projects.doctype.task.task import CircularReferenceError
+from erpnext.projects.doctype.task.task import CircularReferenceError, ParentIsGroupError
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestTask(unittest.TestCase):
+class TestTask(ERPNextTestSuite):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.make_projects()
+
+	def test_task_total_costing_and_billing_amount(self):
+		from erpnext.projects.doctype.project.test_project import make_project
+		from erpnext.projects.doctype.timesheet.test_timesheet import make_timesheet
+		from erpnext.setup.doctype.employee.test_employee import make_employee
+
+		project_name = "Test Project Costing"
+		employee = make_employee("employee@frappe.io")
+		project = make_project({"project_name": project_name})
+		task = create_task("_Test Task 1")
+		task.project = project.name
+		task.save()
+		timesheet = make_timesheet(
+			employee=employee,
+			is_billable=1,
+			currency="USD",
+			project=project.name,
+			simulate=True,
+			exchange_rate=80,
+			task=task.name,
+		)
+		timesheet.reload()
+		project.reload()
+		task.reload()
+		self.assertEqual(task.total_costing_amount, 3200)
+		self.assertEqual(task.total_billing_amount, 8000)
+
 	def test_circular_reference(self):
 		task1 = create_task("_Test Task 1", add_days(nowdate(), -15), add_days(nowdate(), -10))
 		task2 = create_task("_Test Task 2", add_days(nowdate(), 11), add_days(nowdate(), 15), task1.name)
@@ -44,17 +75,21 @@ class TestTask(unittest.TestCase):
 		task1.save()
 
 		self.assertEqual(
-			frappe.db.get_value("Task", task2.name, "exp_start_date"), getdate(add_days(nowdate(), 21))
-		)
-		self.assertEqual(
-			frappe.db.get_value("Task", task2.name, "exp_end_date"), getdate(add_days(nowdate(), 25))
+			getdate(frappe.db.get_value("Task", task2.name, "exp_start_date")),
+			getdate(add_days(nowdate(), 21)),
 		)
 
 		self.assertEqual(
-			frappe.db.get_value("Task", task3.name, "exp_start_date"), getdate(add_days(nowdate(), 26))
+			getdate(frappe.db.get_value("Task", task2.name, "exp_end_date")), getdate(add_days(nowdate(), 25))
 		)
+
 		self.assertEqual(
-			frappe.db.get_value("Task", task3.name, "exp_end_date"), getdate(add_days(nowdate(), 30))
+			getdate(frappe.db.get_value("Task", task3.name, "exp_start_date")),
+			getdate(add_days(nowdate(), 26)),
+		)
+
+		self.assertEqual(
+			getdate(frappe.db.get_value("Task", task3.name, "exp_end_date")), getdate(add_days(nowdate(), 30))
 		)
 
 	def test_close_assignment(self):
@@ -109,6 +144,26 @@ class TestTask(unittest.TestCase):
 
 		self.assertEqual(frappe.db.get_value("Task", task.name, "status"), "Overdue")
 
+	def test_parent_task_must_be_group(self):
+		parent_task = create_task(
+			subject="_Test Parent Task Non Group",
+			is_group=0,
+		)
+
+		child_task = create_task(
+			subject="_Test Child Task",
+			parent_task=parent_task.name,
+			save=False,
+		)
+
+		self.assertRaises(ParentIsGroupError, child_task.save)
+
+	def test_expected_end_date(self):
+		task = create_task("Testing End Date", add_days(nowdate(), 1), add_days(nowdate(), 5))
+		task.expected_time = 72
+		task.save()
+		self.assertEqual(getdate(task.exp_end_date), getdate(add_days(nowdate(), 5)))
+
 
 def create_task(
 	subject,
@@ -122,6 +177,7 @@ def create_task(
 	begin=0,
 	duration=0,
 	save=True,
+	priority=None,
 ):
 	if not frappe.db.exists("Task", subject):
 		task = frappe.new_doc("Task")
@@ -130,15 +186,14 @@ def create_task(
 		task.exp_start_date = start or nowdate()
 		task.exp_end_date = end or nowdate()
 		task.project = (
-			project or None
-			if is_template
-			else frappe.get_value("Project", {"project_name": "_Test Project"})
+			project or None if is_template else frappe.get_value("Project", {"project_name": "_Test Project"})
 		)
 		task.is_template = is_template
 		task.start = begin
 		task.duration = duration
 		task.is_group = is_group
 		task.parent_task = parent_task
+		task.priority = priority
 		if save:
 			task.save()
 	else:

@@ -8,7 +8,7 @@ from frappe import _, qb
 from frappe.query_builder import Criterion
 
 
-class PaymentLedger(object):
+class PaymentLedger:
 	def __init__(self, filters=None):
 		self.filters = filters
 		self.columns, self.data = [], []
@@ -46,6 +46,7 @@ class PaymentLedger(object):
 						against_voucher_no=ple.against_voucher_no,
 						amount=ple.amount,
 						currency=ple.account_currency,
+						company=ple.company,
 					)
 
 					if self.filters.include_account_currency:
@@ -77,6 +78,7 @@ class PaymentLedger(object):
 					against_voucher_no="Outstanding:",
 					amount=total,
 					currency=voucher_data[0].currency,
+					company=voucher_data[0].company,
 				)
 
 				if self.filters.include_account_currency:
@@ -85,7 +87,12 @@ class PaymentLedger(object):
 				voucher_data.append(entry)
 
 				# empty row
-				voucher_data.append(frappe._dict())
+				voucher_data.append(
+					frappe._dict(
+						currency=voucher_data[0].currency,
+						company=voucher_data[0].company,
+					)
+				)
 				self.data.extend(voucher_data)
 
 	def build_conditions(self):
@@ -210,7 +217,7 @@ class PaymentLedger(object):
 				)
 			)
 		self.columns.append(
-			dict(label=_("Currency"), fieldname="currency", fieldtype="Currency", hidden=True)
+			dict(label=_("Currency"), fieldname="currency", fieldtype="Link", options="Currency", hidden=True)
 		)
 
 	def run(self):

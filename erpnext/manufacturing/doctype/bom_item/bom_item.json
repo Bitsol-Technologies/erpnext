@@ -9,11 +9,13 @@
   "item_code",
   "item_name",
   "operation",
+  "operation_row_id",
   "column_break_3",
   "do_not_explode",
   "bom_no",
   "source_warehouse",
   "allow_alternative_item",
+  "is_stock_item",
   "section_break_5",
   "description",
   "col_break1",
@@ -39,7 +41,9 @@
   "include_item_in_manufacturing",
   "original_item",
   "column_break_33",
-  "sourced_by_supplier"
+  "sourced_by_supplier",
+  "is_sub_assembly_item",
+  "is_phantom_item"
  ],
  "fields": [
   {
@@ -78,6 +82,7 @@
    "fieldtype": "Link",
    "in_filter": 1,
    "label": "BOM No",
+   "mandatory_depends_on": "eval:doc.is_phantom_item",
    "oldfieldname": "bom_no",
    "oldfieldtype": "Link",
    "options": "BOM",
@@ -111,6 +116,7 @@
    "fieldtype": "Column Break"
   },
   {
+   "fetch_from": "item_code.image",
    "fieldname": "image",
    "fieldtype": "Attach",
    "hidden": 1,
@@ -184,7 +190,7 @@
    "in_list_view": 1,
    "label": "Rate",
    "options": "currency",
-   "read_only": 1,
+   "read_only_depends_on": "eval:doc.is_stock_item == 1",
    "reqd": 1
   },
   {
@@ -274,6 +280,7 @@
   },
   {
    "default": "0",
+   "depends_on": "eval:!doc.is_phantom_item",
    "fieldname": "sourced_by_supplier",
    "fieldtype": "Check",
    "label": "Sourced by Supplier"
@@ -282,20 +289,52 @@
    "default": "0",
    "fieldname": "do_not_explode",
    "fieldtype": "Check",
-   "label": "Do Not Explode"
+   "label": "Do Not Explode",
+   "read_only_depends_on": "eval:doc.is_phantom_item"
+  },
+  {
+   "default": "0",
+   "fetch_from": "item_code.is_stock_item",
+   "fieldname": "is_stock_item",
+   "fieldtype": "Check",
+   "label": "Is Stock Item",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:parent.track_semi_finished_goods ==1",
+   "fieldname": "operation_row_id",
+   "fieldtype": "Int",
+   "label": "Operation ID"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:!doc.is_phantom_item",
+   "fieldname": "is_sub_assembly_item",
+   "fieldtype": "Check",
+   "label": "Is Sub Assembly Item",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_phantom_item",
+   "fieldtype": "Check",
+   "label": "Is Phantom Item",
+   "read_only": 1
   }
  ],
  "idx": 1,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2022-07-28 10:20:51.559010",
+ "modified": "2025-11-05 19:00:38.646539",
  "modified_by": "Administrator",
  "module": "Manufacturing",
  "name": "BOM Item",
  "owner": "Administrator",
  "permissions": [],
- "sort_field": "modified",
+ "row_format": "Dynamic",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": []
 }

@@ -12,10 +12,10 @@ from erpnext.accounts.report.financial_statements import (
 	filter_out_zero_value_rows,
 )
 from erpnext.accounts.report.trial_balance.trial_balance import validate_filters
+from erpnext.accounts.utils import get_zero_cutoff
 
 
 def execute(filters=None):
-
 	validate_filters(filters)
 	dimension_list = get_dimensions(filters)
 
@@ -87,12 +87,10 @@ def set_gl_entries_by_account(dimension_list, filters, account, gl_entries_by_ac
 		"finance_book": cstr(filters.get("finance_book")),
 	}
 
-	gl_filters["dimensions"] = set(dimension_list)
+	gl_filters["dimensions"] = tuple(set(dimension_list))
 
 	if filters.get("include_default_book_entries"):
-		gl_filters["company_fb"] = frappe.get_cached_value(
-			"Company", filters.company, "default_finance_book"
-		)
+		gl_filters["company_fb"] = frappe.get_cached_value("Company", filters.company, "default_finance_book")
 
 	gl_entries = frappe.db.sql(
 		"""
@@ -119,7 +117,6 @@ def set_gl_entries_by_account(dimension_list, filters, account, gl_entries_by_ac
 
 
 def format_gl_entries(gl_entries_by_account, accounts_by_name, dimension_list, dimension_type):
-
 	for entries in gl_entries_by_account.values():
 		for entry in entries:
 			d = accounts_by_name.get(entry.account)
@@ -151,14 +148,14 @@ def prepare_data(accounts, filters, company_currency, dimension_list):
 			"to_date": filters.to_date,
 			"currency": company_currency,
 			"account_name": (
-				"{} - {}".format(d.account_number, d.account_name) if d.account_number else d.account_name
+				f"{d.account_number} - {d.account_name}" if d.account_number else d.account_name
 			),
 		}
 
 		for dimension in dimension_list:
 			row[frappe.scrub(dimension)] = flt(d.get(frappe.scrub(dimension), 0.0), 3)
 
-			if abs(row[frappe.scrub(dimension)]) >= 0.005:
+			if abs(row[frappe.scrub(dimension)]) >= get_zero_cutoff(company_currency):
 				# ignore zero values
 				has_value = True
 				total += flt(d.get(frappe.scrub(dimension), 0.0), 3)
@@ -183,7 +180,7 @@ def accumulate_values_into_parents(accounts, accounts_by_name, dimension_list):
 def get_condition(dimension):
 	conditions = []
 
-	conditions.append("{0} in %(dimensions)s".format(frappe.scrub(dimension)))
+	conditions.append(f"{frappe.scrub(dimension)} in %(dimensions)s")
 
 	return " and {}".format(" and ".join(conditions)) if conditions else ""
 

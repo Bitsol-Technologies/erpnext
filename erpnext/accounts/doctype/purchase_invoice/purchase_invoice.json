@@ -5,6 +5,7 @@
  "creation": "2013-05-21 16:16:39",
  "doctype": "DocType",
  "document_type": "Document",
+ "email_append_to": 1,
  "engine": "InnoDB",
  "field_order": [
   "title",
@@ -22,8 +23,10 @@
   "is_paid",
   "is_return",
   "return_against",
+  "update_outstanding_for_self",
+  "update_billed_amount_in_purchase_order",
+  "update_billed_amount_in_purchase_receipt",
   "apply_tds",
-  "tax_withholding_category",
   "amended_from",
   "supplier_invoice_details",
   "bill_no",
@@ -36,6 +39,7 @@
   "currency_and_price_list",
   "currency",
   "conversion_rate",
+  "use_transaction_date_exchange_rate",
   "column_break2",
   "buying_price_list",
   "price_list_currency",
@@ -43,6 +47,7 @@
   "ignore_pricing_rule",
   "sec_warehouse",
   "scan_barcode",
+  "last_scanned_warehouse",
   "col_break_warehouse",
   "update_stock",
   "set_warehouse",
@@ -58,11 +63,10 @@
   "column_break_50",
   "base_total",
   "base_net_total",
+  "claimed_landed_cost_amount",
   "column_break_28",
   "total",
   "net_total",
-  "tax_withholding_net_total",
-  "base_tax_withholding_net_total",
   "taxes_section",
   "tax_category",
   "taxes_and_charges",
@@ -95,16 +99,20 @@
   "total_advance",
   "outstanding_amount",
   "disable_rounded_total",
+  "section_tax_withholding_entry",
+  "tax_withholding_group",
+  "ignore_tax_withholding_threshold",
+  "override_tax_withholding_entries",
+  "tax_withholding_entries",
   "section_break_44",
   "apply_discount_on",
   "base_discount_amount",
   "column_break_46",
   "additional_discount_percentage",
   "discount_amount",
-  "tax_withheld_vouchers_section",
-  "tax_withheld_vouchers",
   "sec_tax_breakup",
   "other_charges_calculation",
+  "item_wise_tax_details",
   "pricing_rule_details",
   "pricing_rules",
   "raw_materials_supplied",
@@ -122,7 +130,6 @@
   "only_include_allocated_payments",
   "get_advances",
   "advances",
-  "advance_tax",
   "write_off",
   "write_off_amount",
   "base_write_off_amount",
@@ -139,8 +146,10 @@
   "contact_mobile",
   "contact_email",
   "company_shipping_address_section",
-  "shipping_address",
+  "dispatch_address",
+  "dispatch_address_display",
   "column_break_126",
+  "shipping_address",
   "shipping_address_display",
   "company_billing_address_section",
   "billing_address",
@@ -187,12 +196,13 @@
   "additional_info_section",
   "is_internal_supplier",
   "represents_company",
+  "supplier_group",
+  "sender",
   "column_break_147",
   "inter_company_invoice_reference",
   "is_old_subcontracting_flow",
   "remarks",
-  "connections_tab",
-  "column_break_38"
+  "connections_tab"
  ],
  "fields": [
   {
@@ -275,7 +285,7 @@
    "default": "0",
    "fieldname": "apply_tds",
    "fieldtype": "Check",
-   "label": "Apply Tax Withholding Amount",
+   "label": "Consider for Tax Withholding",
    "print_hide": 1
   },
   {
@@ -294,6 +304,7 @@
    "remember_last_selected_value": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "cost_center",
    "fieldtype": "Link",
    "label": "Cost Center",
@@ -312,6 +323,7 @@
    "search_index": 1
   },
   {
+   "default": "Now",
    "fieldname": "posting_time",
    "fieldtype": "Time",
    "label": "Posting Time",
@@ -358,7 +370,8 @@
    "description": "Once set, this invoice will be on hold till the set date",
    "fieldname": "release_date",
    "fieldtype": "Date",
-   "label": "Release Date"
+   "label": "Release Date",
+   "search_index": 1
   },
   {
    "fieldname": "cb_17",
@@ -383,7 +396,8 @@
    "label": "Supplier Invoice No",
    "oldfieldname": "bill_no",
    "oldfieldtype": "Data",
-   "print_hide": 1
+   "print_hide": 1,
+   "search_index": 1
   },
   {
    "fieldname": "column_break_15",
@@ -406,7 +420,22 @@
    "no_copy": 1,
    "options": "Purchase Invoice",
    "print_hide": 1,
-   "read_only": 1
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "depends_on": "eval: doc.is_return",
+   "fieldname": "update_billed_amount_in_purchase_order",
+   "fieldtype": "Check",
+   "label": "Update Billed Amount in Purchase Order"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval: doc.is_return",
+   "fieldname": "update_billed_amount_in_purchase_receipt",
+   "fieldtype": "Check",
+   "label": "Update Billed Amount in Purchase Receipt"
   },
   {
    "fieldname": "section_addresses",
@@ -422,7 +451,7 @@
   },
   {
    "fieldname": "address_display",
-   "fieldtype": "Small Text",
+   "fieldtype": "Text Editor",
    "label": "Address",
    "read_only": 1
   },
@@ -468,7 +497,7 @@
   },
   {
    "fieldname": "shipping_address_display",
-   "fieldtype": "Small Text",
+   "fieldtype": "Text Editor",
    "label": "Shipping Address",
    "print_hide": 1,
    "read_only": 1
@@ -739,7 +768,7 @@
   },
   {
    "fieldname": "other_charges_calculation",
-   "fieldtype": "Long Text",
+   "fieldtype": "Text Editor",
    "label": "Taxes and Charges Calculation",
    "no_copy": 1,
    "oldfieldtype": "HTML",
@@ -990,6 +1019,7 @@
    "print_hide": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "cash_bank_account",
    "fieldtype": "Link",
    "label": "Cash/Bank Account",
@@ -1053,6 +1083,7 @@
    "fieldtype": "Column Break"
   },
   {
+   "allow_on_submit": 1,
    "depends_on": "eval:flt(doc.write_off_amount)!=0",
    "fieldname": "write_off_account",
    "fieldtype": "Link",
@@ -1110,12 +1141,14 @@
    "label": "Payment Terms"
   },
   {
+   "depends_on": "eval:(!doc.is_paid && !doc.is_return)",
    "fieldname": "payment_terms_template",
    "fieldtype": "Link",
    "label": "Payment Terms Template",
    "options": "Payment Terms Template"
   },
   {
+   "depends_on": "eval:(!doc.is_paid && !doc.is_return)",
    "fieldname": "payment_schedule",
    "fieldtype": "Table",
    "label": "Payment Schedule",
@@ -1217,6 +1250,7 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "default": "No",
    "fieldname": "is_opening",
    "fieldtype": "Select",
@@ -1246,6 +1280,7 @@
    "fieldtype": "Select",
    "in_standard_filter": 1,
    "label": "Status",
+   "no_copy": 1,
    "options": "\nDraft\nReturn\nDebit Note Issued\nSubmitted\nPaid\nPartly Paid\nUnpaid\nOverdue\nCancelled\nInternal Transfer",
    "print_hide": 1
   },
@@ -1323,14 +1358,6 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "tax_withholding_category",
-   "fieldtype": "Link",
-   "hidden": 1,
-   "label": "Tax Withholding Category",
-   "options": "Tax Withholding Category",
-   "print_hide": 1
-  },
-  {
    "fieldname": "billing_address",
    "fieldtype": "Link",
    "label": "Select Billing Address",
@@ -1338,17 +1365,19 @@
   },
   {
    "fieldname": "billing_address_display",
-   "fieldtype": "Small Text",
+   "fieldtype": "Text Editor",
    "label": "Billing Address",
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "project",
    "fieldtype": "Link",
    "label": "Project",
    "options": "Project"
   },
   {
+   "allow_on_submit": 1,
    "depends_on": "eval:doc.is_internal_supplier",
    "description": "Unrealized Profit/Loss account for intra-company transfers",
    "fieldname": "unrealized_profit_loss_account",
@@ -1381,6 +1410,7 @@
    "depends_on": "eval:doc.is_subcontracted",
    "fieldname": "supplier_warehouse",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Supplier Warehouse",
    "no_copy": 1,
    "options": "Warehouse",
@@ -1417,14 +1447,6 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "advance_tax",
-   "fieldtype": "Table",
-   "hidden": 1,
-   "label": "Advance Tax",
-   "options": "Advance Tax",
-   "read_only": 1
-  },
-  {
    "fieldname": "subscription",
    "fieldtype": "Link",
    "label": "Subscription",
@@ -1436,42 +1458,6 @@
    "fieldtype": "Check",
    "hidden": 1,
    "label": "Is Old Subcontracting Flow",
-   "read_only": 1
-  },
-  {
-   "default": "0",
-   "depends_on": "apply_tds",
-   "fieldname": "tax_withholding_net_total",
-   "fieldtype": "Currency",
-   "hidden": 1,
-   "label": "Tax Withholding Net Total",
-   "no_copy": 1,
-   "options": "currency",
-   "read_only": 1
-  },
-  {
-   "depends_on": "apply_tds",
-   "fieldname": "base_tax_withholding_net_total",
-   "fieldtype": "Currency",
-   "hidden": 1,
-   "label": "Base Tax Withholding Net Total",
-   "no_copy": 1,
-   "options": "Company:company:default_currency",
-   "print_hide": 1,
-   "read_only": 1
-  },
-  {
-   "collapsible_depends_on": "tax_withheld_vouchers",
-   "fieldname": "tax_withheld_vouchers_section",
-   "fieldtype": "Section Break",
-   "label": "Tax Withheld Vouchers"
-  },
-  {
-   "fieldname": "tax_withheld_vouchers",
-   "fieldtype": "Table",
-   "label": "Tax Withheld Vouchers",
-   "no_copy": 1,
-   "options": "Tax Withheld Vouchers",
    "read_only": 1
   },
   {
@@ -1505,10 +1491,6 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "column_break_38",
-   "fieldtype": "Column Break"
-  },
-  {
    "fieldname": "column_break_50",
    "fieldtype": "Column Break"
   },
@@ -1519,7 +1501,7 @@
   {
    "fieldname": "company_shipping_address_section",
    "fieldtype": "Section Break",
-   "label": "Company Shipping Address"
+   "label": "Shipping Address"
   },
   {
    "fieldname": "column_break_126",
@@ -1578,13 +1560,115 @@
    "fieldname": "use_company_roundoff_cost_center",
    "fieldtype": "Check",
    "label": "Use Company Default Round Off Cost Center"
+  },
+  {
+   "default": "0",
+   "fieldname": "use_transaction_date_exchange_rate",
+   "fieldtype": "Check",
+   "label": "Use Transaction Date Exchange Rate",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "supplier.supplier_group",
+   "fieldname": "supplier_group",
+   "fieldtype": "Link",
+   "label": "Supplier Group",
+   "options": "Supplier Group"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval: doc.is_return && doc.return_against",
+   "description": "Debit Note will update it's own outstanding amount, even if 'Return Against' is specified.",
+   "fieldname": "update_outstanding_for_self",
+   "fieldtype": "Check",
+   "label": "Update Outstanding for Self"
+  },
+  {
+   "fieldname": "sender",
+   "fieldtype": "Data",
+   "label": "Sender",
+   "options": "Email"
+  },
+  {
+   "fieldname": "dispatch_address_display",
+   "fieldtype": "Text Editor",
+   "label": "Dispatch Address",
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "dispatch_address",
+   "fieldtype": "Link",
+   "label": "Select Dispatch Address ",
+   "options": "Address",
+   "print_hide": 1
+  },
+  {
+   "depends_on": "eval: doc.last_scanned_warehouse",
+   "fieldname": "last_scanned_warehouse",
+   "fieldtype": "Data",
+   "is_virtual": 1,
+   "label": "Last Scanned Warehouse"
+  },
+  {
+   "fieldname": "claimed_landed_cost_amount",
+   "fieldtype": "Currency",
+   "label": "Claimed Landed Cost Amount (Company Currency)",
+   "no_copy": 1,
+   "options": "Company:company:default_currency",
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "item_wise_tax_details",
+   "fieldtype": "Table",
+   "hidden": 1,
+   "label": "Item Wise Tax Details",
+   "no_copy": 1,
+   "options": "Item Wise Tax Detail",
+   "print_hide": 1
+  },
+  {
+   "collapsible": 1,
+   "collapsible_depends_on": "eval: doc.apply_tds && doc.docstatus == 0",
+   "depends_on": "eval: doc.apply_tds",
+   "fieldname": "section_tax_withholding_entry",
+   "fieldtype": "Section Break",
+   "label": "Tax Withholding Entry"
+  },
+  {
+   "fieldname": "tax_withholding_group",
+   "fieldtype": "Link",
+   "label": "Tax Withholding Group",
+   "options": "Tax Withholding Group",
+   "print_hide": 1
+  },
+  {
+   "fieldname": "tax_withholding_entries",
+   "fieldtype": "Table",
+   "label": "Tax Withholding Entries",
+   "options": "Tax Withholding Entry",
+   "read_only_depends_on": "eval: !doc.override_tax_withholding_entries"
+  },
+  {
+   "default": "0",
+   "fieldname": "ignore_tax_withholding_threshold",
+   "fieldtype": "Check",
+   "label": "Ignore Tax Withholding Threshold"
+  },
+  {
+   "default": "0",
+   "fieldname": "override_tax_withholding_entries",
+   "fieldtype": "Check",
+   "label": "Edit Tax Withholding Entries"
   }
  ],
+ "grid_page_length": 50,
  "icon": "fa fa-file-text",
  "idx": 204,
  "is_submittable": 1,
  "links": [],
- "modified": "2023-07-25 17:22:59.145031",
+ "modified": "2026-01-29 21:21:53.051193",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Purchase Invoice",
@@ -1639,9 +1723,11 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "search_fields": "posting_date, supplier, bill_no, base_grand_total, outstanding_amount",
+ "sender_field": "sender",
  "show_name_in_global_search": 1,
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "timeline_field": "supplier",

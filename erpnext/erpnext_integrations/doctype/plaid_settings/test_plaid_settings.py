@@ -1,13 +1,12 @@
 # Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
-
 import json
 import unittest
 
 import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.utils.response import json_handler
 
-from erpnext.accounts.doctype.journal_entry.journal_entry import get_default_bank_cash_account
 from erpnext.erpnext_integrations.doctype.plaid_settings.plaid_settings import (
 	add_account_subtype,
 	add_account_type,
@@ -17,7 +16,7 @@ from erpnext.erpnext_integrations.doctype.plaid_settings.plaid_settings import (
 )
 
 
-class TestPlaidSettings(unittest.TestCase):
+class TestPlaidSettings(IntegrationTestCase):
 	def setUp(self):
 		pass
 
@@ -42,40 +41,6 @@ class TestPlaidSettings(unittest.TestCase):
 	def test_add_account_subtype(self):
 		add_account_subtype("loan")
 		self.assertEqual(frappe.get_doc("Bank Account Subtype", "loan").name, "loan")
-
-	def test_default_bank_account(self):
-		if not frappe.db.exists("Bank", "Citi"):
-			frappe.get_doc({"doctype": "Bank", "bank_name": "Citi"}).insert()
-
-		bank_accounts = {
-			"account": {
-				"subtype": "checking",
-				"mask": "0000",
-				"type": "depository",
-				"id": "6GbM6RRQgdfy3lAqGz4JUnpmR948WZFg8DjQK",
-				"name": "Plaid Checking",
-			},
-			"account_id": "6GbM6RRQgdfy3lAqGz4JUnpmR948WZFg8DjQK",
-			"link_session_id": "db673d75-61aa-442a-864f-9b3f174f3725",
-			"accounts": [
-				{
-					"type": "depository",
-					"subtype": "checking",
-					"mask": "0000",
-					"id": "6GbM6RRQgdfy3lAqGz4JUnpmR948WZFg8DjQK",
-					"name": "Plaid Checking",
-				}
-			],
-			"institution": {"institution_id": "ins_6", "name": "Citi"},
-		}
-
-		bank = json.dumps(frappe.get_doc("Bank", "Citi").as_dict(), default=json_handler)
-		company = frappe.db.get_single_value("Global Defaults", "default_company")
-		frappe.db.set_value("Company", company, "default_bank_account", None)
-
-		self.assertRaises(
-			frappe.ValidationError, add_bank_accounts, response=bank_accounts, bank=bank, company=company
-		)
 
 	def test_new_transaction(self):
 		if not frappe.db.exists("Bank", "Citi"):
@@ -105,14 +70,6 @@ class TestPlaidSettings(unittest.TestCase):
 
 		bank = json.dumps(frappe.get_doc("Bank", "Citi").as_dict(), default=json_handler)
 		company = frappe.db.get_single_value("Global Defaults", "default_company")
-
-		if frappe.db.get_value("Company", company, "default_bank_account") is None:
-			frappe.db.set_value(
-				"Company",
-				company,
-				"default_bank_account",
-				get_default_bank_cash_account(company, "Cash").get("account"),
-			)
 
 		add_bank_accounts(bank_accounts, bank, company)
 

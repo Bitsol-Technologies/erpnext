@@ -14,7 +14,7 @@ def execute(filters=None):
 	return OpportunitySummaryBySalesStage(filters).run()
 
 
-class OpportunitySummaryBySalesStage(object):
+class OpportunitySummaryBySalesStage:
 	def __init__(self, filters=None):
 		self.filters = frappe._dict(filters or {})
 
@@ -36,9 +36,9 @@ class OpportunitySummaryBySalesStage(object):
 			self.columns.append(
 				{
 					"label": _("Source"),
-					"fieldname": "source",
+					"fieldname": "utm_source",
 					"fieldtype": "Link",
-					"options": "Lead Source",
+					"options": "UTM Source",
 					"width": 200,
 				}
 			)
@@ -69,12 +69,12 @@ class OpportunitySummaryBySalesStage(object):
 
 		based_on = {
 			"Opportunity Owner": "_assign",
-			"Source": "source",
+			"Source": "utm_source",
 			"Opportunity Type": "opportunity_type",
 		}[self.filters.get("based_on")]
 
 		data_based_on = {
-			"Number": "count(name) as count",
+			"Number": {"COUNT": "*", "as": "count"},
 			"Amount": "opportunity_amount as amount",
 		}[self.filters.get("data_based_on")]
 
@@ -108,7 +108,9 @@ class OpportunitySummaryBySalesStage(object):
 			self.grouped_data = []
 
 			grouping_key = lambda o: (o["sales_stage"], o[based_on])  # noqa
-			for (sales_stage, _based_on), rows in groupby(self.query_result, grouping_key):
+			for (sales_stage, _based_on), rows in groupby(
+				sorted(self.query_result, key=grouping_key), key=grouping_key
+			):
 				self.grouped_data.append(
 					{
 						"sales_stage": sales_stage,
@@ -126,7 +128,7 @@ class OpportunitySummaryBySalesStage(object):
 		for based_on, data in self.formatted_data.items():
 			row_based_on = {
 				"Opportunity Owner": "opportunity_owner",
-				"Source": "source",
+				"Source": "utm_source",
 				"Opportunity Type": "opportunity_type",
 			}[self.filters.get("based_on")]
 
@@ -146,15 +148,19 @@ class OpportunitySummaryBySalesStage(object):
 
 			based_on = {
 				"Opportunity Owner": "_assign",
-				"Source": "source",
+				"Source": "utm_source",
 				"Opportunity Type": "opportunity_type",
 			}[self.filters.get("based_on")]
 
 			if self.filters.get("based_on") == "Opportunity Owner":
-				if d.get(based_on) == "[]" or d.get(based_on) is None or d.get(based_on) == "Not Assigned":
+				value = d.get(based_on)
+				if not value or value in ["[]", "null", "Not Assigned"]:
 					assignments = ["Not Assigned"]
 				else:
-					assignments = json.loads(d.get(based_on))
+					try:
+						assignments = json.loads(value)
+					except json.JSONDecodeError:
+						assignments = ["Not Assigned"]
 
 				sales_stage = d.get("sales_stage")
 				count = d.get(data_based_on)
@@ -186,7 +192,7 @@ class OpportunitySummaryBySalesStage(object):
 			filters.append({"opportunity_type": self.filters.get("opportunity_type")})
 
 		if self.filters.get("opportunity_source"):
-			filters.append({"source": self.filters.get("opportunity_source")})
+			filters.append({"utm_source": self.filters.get("opportunity_source")})
 
 		if self.filters.get("status"):
 			filters.append({"status": ("in", self.filters.get("status"))})
@@ -199,7 +205,6 @@ class OpportunitySummaryBySalesStage(object):
 		return filters
 
 	def get_chart_data(self):
-		labels = []
 		datasets = []
 		values = [0] * len(self.sales_stage_list)
 

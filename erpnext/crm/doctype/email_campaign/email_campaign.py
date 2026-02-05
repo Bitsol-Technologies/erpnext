@@ -10,6 +10,23 @@ from frappe.utils import add_days, getdate, today
 
 
 class EmailCampaign(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		campaign_name: DF.Link
+		email_campaign_for: DF.Literal["", "Lead", "Contact", "Email Group"]
+		end_date: DF.Date | None
+		recipient: DF.DynamicLink
+		sender: DF.Link | None
+		start_date: DF.Date
+		status: DF.Literal["", "Scheduled", "In Progress", "Completed", "Unsubscribed"]
+	# end: auto-generated types
+
 	def validate(self):
 		self.set_date()
 		# checking if email is set for lead. Not checking for contact as email is a mandatory field for contact.
@@ -61,11 +78,11 @@ class EmailCampaign(Document):
 		end_date = getdate(self.end_date)
 		today_date = getdate(today())
 		if start_date > today_date:
-			self.status = "Scheduled"
+			self.db_set("status", "Scheduled", update_modified=False)
 		elif end_date >= today_date:
-			self.status = "In Progress"
+			self.db_set("status", "In Progress", update_modified=False)
 		elif end_date < today_date:
-			self.status = "Completed"
+			self.db_set("status", "Completed", update_modified=False)
 
 
 # called through hooks to send campaign mails to leads
@@ -104,9 +121,9 @@ def send_mail(entry, email_campaign):
 		doctype="Email Campaign",
 		name=email_campaign.name,
 		subject=frappe.render_template(email_template.get("subject"), context),
-		content=frappe.render_template(email_template.get("response"), context),
+		content=frappe.render_template(email_template.response_, context),
 		sender=sender,
-		recipients=recipient_list,
+		bcc=recipient_list,
 		communication_medium="Email",
 		sent_or_received="Sent",
 		send_email=True,

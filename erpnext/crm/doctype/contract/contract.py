@@ -9,26 +9,60 @@ from frappe.utils import getdate, nowdate
 
 
 class Contract(Document):
-	def autoname(self):
-		name = self.party_name
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
 
-		if self.contract_template:
-			name += " - {} Agreement".format(self.contract_template)
+	from typing import TYPE_CHECKING
 
-		# If identical, append contract name with the next number in the iteration
-		if frappe.db.exists("Contract", name):
-			count = len(frappe.get_all("Contract", filters={"name": ["like", "%{}%".format(name)]}))
-			name = "{} - {}".format(name, count)
+	if TYPE_CHECKING:
+		from frappe.types import DF
 
-		self.name = _(name)
+		from erpnext.crm.doctype.contract_fulfilment_checklist.contract_fulfilment_checklist import (
+			ContractFulfilmentChecklist,
+		)
+
+		amended_from: DF.Link | None
+		contract_template: DF.Link | None
+		contract_terms: DF.TextEditor
+		document_name: DF.DynamicLink | None
+		document_type: DF.Literal[
+			"", "Quotation", "Project", "Sales Order", "Purchase Order", "Sales Invoice", "Purchase Invoice"
+		]
+		end_date: DF.Date | None
+		fulfilment_deadline: DF.Date | None
+		fulfilment_status: DF.Literal["N/A", "Unfulfilled", "Partially Fulfilled", "Fulfilled", "Lapsed"]
+		fulfilment_terms: DF.Table[ContractFulfilmentChecklist]
+		ip_address: DF.Data | None
+		is_signed: DF.Check
+		party_full_name: DF.Data | None
+		party_name: DF.DynamicLink
+		party_type: DF.Literal["Customer", "Supplier", "Employee"]
+		party_user: DF.Link | None
+		requires_fulfilment: DF.Check
+		signed_by_company: DF.Link | None
+		signed_on: DF.Datetime | None
+		signee: DF.Data | None
+		start_date: DF.Date | None
+		status: DF.Literal["Unsigned", "Active", "Inactive", "Cancelled"]
+	# end: auto-generated types
 
 	def validate(self):
+		self.set_missing_values()
 		self.validate_dates()
 		self.update_contract_status()
 		self.update_fulfilment_status()
 
+	def set_missing_values(self):
+		if not self.party_full_name:
+			field = self.party_type.lower() + "_name"
+			if res := frappe.db.get_value(self.party_type, self.party_name, field):
+				self.party_full_name = res
+
 	def before_submit(self):
 		self.signed_by_company = frappe.session.user
+
+	def on_discard(self):
+		self.db_set("status", "Cancelled")
 
 	def before_update_after_submit(self):
 		self.update_contract_status()

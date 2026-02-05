@@ -7,10 +7,11 @@ import frappe
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.permissions import add_permission, update_permission_property
+
 from erpnext.regional.italy import (
 	fiscal_regimes,
-	tax_exemption_reasons,
 	mode_of_payment_codes,
+	tax_exemption_reasons,
 	vat_collectability_options,
 )
 
@@ -377,6 +378,7 @@ def make_custom_fields(update=True):
 			),
 		],
 		"Purchase Invoice Item": invoice_item_fields,
+		"POS Invoice Item": invoice_item_fields,
 		"Sales Order Item": invoice_item_fields,
 		"Delivery Note Item": invoice_item_fields,
 		"Sales Invoice Item": invoice_item_fields + customer_po_fields,
@@ -468,11 +470,9 @@ def setup_report():
 
 	if not frappe.db.get_value("Custom Role", dict(report=report_name)):
 		frappe.get_doc(
-			dict(
-				doctype="Custom Role",
-				report=report_name,
-				roles=[dict(role="Accounts User"), dict(role="Accounts Manager")],
-			)
+			doctype="Custom Role",
+			report=report_name,
+			roles=[dict(role="Accounts User"), dict(role="Accounts Manager")],
 		).insert()
 
 

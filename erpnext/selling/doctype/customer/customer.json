@@ -21,6 +21,7 @@
   "gender",
   "lead_name",
   "opportunity_name",
+  "prospect_name",
   "account_manager",
   "image",
   "defaults_tab",
@@ -41,6 +42,7 @@
   "language",
   "column_break_45",
   "customer_details",
+  "supplier_numbers",
   "dashboard_tab",
   "contact_and_address_tab",
   "address_contacts",
@@ -48,18 +50,22 @@
   "column_break1",
   "contact_html",
   "primary_address_and_contact_detail",
-  "customer_primary_contact",
-  "mobile_no",
-  "email_id",
   "column_break_26",
   "customer_primary_address",
   "primary_address",
+  "column_break_nwor",
+  "customer_primary_contact",
+  "mobile_no",
+  "email_id",
+  "first_name",
+  "last_name",
   "tax_tab",
   "taxation_section",
   "tax_id",
-  "column_break_21",
   "tax_category",
+  "column_break_21",
   "tax_withholding_category",
+  "tax_withholding_group",
   "accounting_tab",
   "credit_limit_section",
   "payment_terms",
@@ -133,7 +139,7 @@
    "label": "Customer Type",
    "oldfieldname": "customer_type",
    "oldfieldtype": "Select",
-   "options": "Company\nIndividual",
+   "options": "Company\nIndividual\nPartnership",
    "reqd": 1
   },
   {
@@ -177,10 +183,10 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Customer Group",
+   "link_filters": "[[\"Customer Group\", \"is_group\", \"=\", 0]]",
    "oldfieldname": "customer_group",
    "oldfieldtype": "Link",
    "options": "Customer Group",
-   "reqd": 1,
    "search_index": 1
   },
   {
@@ -192,8 +198,7 @@
    "oldfieldname": "territory",
    "oldfieldtype": "Link",
    "options": "Territory",
-   "print_hide": 1,
-   "reqd": 1
+   "print_hide": 1
   },
   {
    "fieldname": "tax_id",
@@ -308,13 +313,15 @@
    "fetch_from": "customer_primary_contact.mobile_no",
    "fieldname": "mobile_no",
    "fieldtype": "Read Only",
-   "label": "Mobile No"
+   "label": "Mobile No",
+   "options": "Mobile"
   },
   {
    "fetch_from": "customer_primary_contact.email_id",
    "fieldname": "email_id",
    "fieldtype": "Read Only",
-   "label": "Email Id"
+   "label": "Email Id",
+   "options": "Email"
   },
   {
    "fieldname": "column_break_26",
@@ -329,7 +336,7 @@
   },
   {
    "fieldname": "primary_address",
-   "fieldtype": "Text",
+   "fieldtype": "Text Editor",
    "label": "Primary Address",
    "read_only": 1
   },
@@ -339,12 +346,12 @@
    "label": "Default Accounts"
   },
   {
-    "description": "Mention if non-standard Receivable account",
-    "fieldname": "accounts",
-    "fieldtype": "Table",
-    "label": "Accounts",
-    "options": "Party Account"
-   },
+   "description": "Mention if non-standard Receivable account",
+   "fieldname": "accounts",
+   "fieldtype": "Table",
+   "label": "Accounts",
+   "options": "Party Account"
+  },
   {
    "fieldname": "credit_limit_section",
    "fieldtype": "Section Break",
@@ -449,7 +456,6 @@
    "report_hide": 1
   },
   {
-   "default": "0",
    "fieldname": "credit_limits",
    "fieldtype": "Table",
    "label": "Credit Limit",
@@ -484,7 +490,7 @@
   {
    "fieldname": "contact_and_address_tab",
    "fieldtype": "Tab Break",
-   "label": "Contact & Address"
+   "label": "Address & Contact"
   },
   {
    "fieldname": "defaults_tab",
@@ -568,6 +574,45 @@
    "fieldtype": "Table",
    "label": "Customer Portal Users",
    "options": "Portal User"
+  },
+  {
+   "fieldname": "column_break_nwor",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "prospect_name",
+   "fieldtype": "Link",
+   "label": "From Prospect",
+   "no_copy": 1,
+   "options": "Prospect",
+   "print_hide": 1
+  },
+  {
+   "fetch_from": "customer_primary_contact.first_name",
+   "fieldname": "first_name",
+   "fieldtype": "Read Only",
+   "hidden": 1,
+   "label": "First Name"
+  },
+  {
+   "fetch_from": "customer_primary_contact.last_name",
+   "fieldname": "last_name",
+   "fieldtype": "Read Only",
+   "hidden": 1,
+   "label": "Last Name"
+  },
+  {
+   "description": "Supplier numbers assigned by the customer",
+   "fieldname": "supplier_numbers",
+   "fieldtype": "Table",
+   "label": "Supplier Numbers",
+   "options": "Supplier Number At Customer"
+  },
+  {
+   "fieldname": "tax_withholding_group",
+   "fieldtype": "Link",
+   "label": "Tax Withholding Group",
+   "options": "Tax Withholding Group"
   }
  ],
  "icon": "fa fa-user",
@@ -581,7 +626,7 @@
    "link_fieldname": "party"
   }
  ],
- "modified": "2023-06-22 13:21:10.678382",
+ "modified": "2026-01-21 17:23:42.151114",
  "modified_by": "Administrator",
  "module": "Selling",
  "name": "Customer",
@@ -659,10 +704,11 @@
   }
  ],
  "quick_entry": 1,
- "search_fields": "customer_name,customer_group,territory, mobile_no,primary_address",
+ "row_format": "Dynamic",
+ "search_fields": "customer_group,territory, mobile_no,primary_address",
  "show_name_in_global_search": 1,
- "sort_field": "modified",
- "sort_order": "ASC",
+ "sort_field": "creation",
+ "sort_order": "DESC",
  "states": [],
  "title_field": "customer_name",
  "track_changes": 1
