@@ -176,7 +176,6 @@ def validate_fiscal_year(date, fiscal_year, company, label="Date", doc=None):
 			throw(_("{0} '{1}' not in Fiscal Year {2}").format(_(label), formatdate(date), fiscal_year))
 
 
-@frappe.whitelist()
 def get_balance_on(
 	account=None,
 	date=None,
@@ -278,6 +277,7 @@ def get_balance_on(
 		)
 
 	if party_type and party:
+		frappe.has_permission(party_type, "read", party, throw=True)
 		cond.append(
 			f"""gle.party_type = {frappe.db.escape(party_type)} and gle.party = {frappe.db.escape(party)} """
 		)
@@ -397,15 +397,13 @@ def add_ac(args=None):
 	if not args:
 		args = frappe.local.form_dict
 
+	args.pop("ignore_permissions", None)
+	frappe.has_permission("Account", "create", throw=True)
+
 	args.doctype = "Account"
 	args = make_tree_args(**args)
 
 	ac = frappe.new_doc("Account")
-
-	if args.get("ignore_permissions"):
-		ac.flags.ignore_permissions = True
-		args.pop("ignore_permissions")
-
 	ac.update(args)
 
 	if not ac.parent_account:
@@ -454,7 +452,8 @@ def _build_dimensions_dict_for_exc_gain_loss(
 	dimensions_dict = frappe._dict()
 	if entry and active_dimensions:
 		for dim in active_dimensions:
-			dimensions_dict[dim.fieldname] = entry.get(dim.fieldname)
+			if entry_dimension := entry.get(dim.fieldname):
+				dimensions_dict[dim.fieldname] = entry_dimension
 	return dimensions_dict
 
 
@@ -499,7 +498,7 @@ def reconcile_against_document(
 					skip_ref_details_update_for_pe=skip_ref_details_update_for_pe,
 					dimensions_dict=dimensions_dict,
 				)
-				if referenced_row.get("outstanding_amount"):
+				if referenced_row.get("outstanding_amount") and entry.get("outstanding_amount") is None:
 					referenced_row.outstanding_amount -= flt(entry.allocated_amount)
 
 				reposting_rows.append(referenced_row)
@@ -1041,10 +1040,13 @@ def remove_ref_doc_link_from_pe(
 
 	linked_pe = set()
 	row_names = set()
+	advance_vouchers = set()
 
 	for row in reference_rows:
 		linked_pe.add(row.parent)
 		row_names.add(row.name)
+		if row.advance_voucher_type and row.advance_voucher_no:
+			advance_vouchers.add((row.advance_voucher_type, row.advance_voucher_no))
 
 	from erpnext.accounts.doctype.payment_request.payment_request import (
 		update_payment_requests_as_per_pe_references,
@@ -1081,6 +1083,9 @@ def remove_ref_doc_link_from_pe(
 			msg += _("Please cancel payment entry manually first")
 			frappe.throw(msg, exc=PaymentEntryUnlinkError, title=_("Payment Unlink Error"))
 
+		if pe_doc.docstatus == 1 and not pe_doc.book_advance_payments_in_separate_party_account:
+			repost_advance_payment_ledger(pe_doc)
+
 		(
 			qb.update(pay)
 			.set(pay.total_allocated_amount, pe_doc.total_allocated_amount)
@@ -1091,7 +1096,20 @@ def remove_ref_doc_link_from_pe(
 			.where(pay.name == pe)
 			.run()
 		)
+
+	for voucher_type, voucher_no in advance_vouchers:
+		update_voucher_outstanding(voucher_type, voucher_no, None, None, None)
+
 	frappe.msgprint(_("Payment Entries {0} are un-linked").format("\n".join(linked_pe)))
+
+
+def repost_advance_payment_ledger(doc):
+	_delete_adv_pl_entries(doc.doctype, doc.name)
+	for entry in get_payment_ledger_entries(doc.build_gl_map()):
+		if entry.doctype == "Advance Payment Ledger Entry":
+			adv = frappe.get_doc(entry)
+			adv.flags.ignore_permissions = 1
+			adv.submit()
 
 
 @frappe.whitelist()
@@ -1132,12 +1150,12 @@ def fix_total_debit_credit():
 
 
 def get_currency_precision():
-	precision = cint(frappe.db.get_default("currency_precision"))
-	if not precision:
-		number_format = frappe.db.get_default("number_format") or "#,###.##"
-		precision = get_number_format_info(number_format)[2]
+	currency_precision = frappe.db.get_default("currency_precision")
+	if currency_precision not in (None, ""):
+		return cint(currency_precision)
 
-	return precision
+	number_format = frappe.db.get_default("number_format") or "#,###.##"
+	return get_number_format_info(number_format)[2]
 
 
 def get_fraction_units(currency: str) -> int:
@@ -1387,6 +1405,7 @@ def update_cost_center(docname, cost_center_name, cost_center_number, company, m
 	Renames the document by adding the number as a prefix to the current name and updates
 	all transaction where it was present.
 	"""
+	frappe.has_permission("Cost Center", "write", doc=docname, throw=True)
 	validate_field_number("Cost Center", docname, cost_center_number, company, "cost_center_number")
 
 	if cost_center_number:
@@ -1422,6 +1441,9 @@ def validate_field_number(doctype_name, docname, number_value, company, field_na
 def get_autoname_with_number(number_value, doc_title, company):
 	"""append title with prefix as number and suffix as company's abbreviation separated by '-'"""
 	company_abbr = frappe.get_cached_value("Company", company, "abbr")
+	if not company_abbr:
+		frappe.throw(_("Company {0} does not exist or has no abbreviation").format(company))
+
 	parts = [doc_title.strip(), company_abbr]
 
 	if cstr(number_value).strip():
@@ -1618,14 +1640,11 @@ def get_voucherwise_gl_entries(future_stock_vouchers, posting_date):
 
 	voucher_nos = [d[1] for d in future_stock_vouchers]
 
-	gles = frappe.db.sql(
-		"""
-		select name, account, credit, debit, cost_center, project, voucher_type, voucher_no
-			from `tabGL Entry`
-		where
-			posting_date >= {} and voucher_no in ({})""".format("%s", ", ".join(["%s"] * len(voucher_nos))),
-		tuple([posting_date, *voucher_nos]),
-		as_dict=1,
+	gles = frappe.get_all(
+		"GL Entry",
+		filters={"is_cancelled": 0, "posting_date": [">=", posting_date], "voucher_no": ["in", voucher_nos]},
+		fields=["name", "account", "credit", "debit", "cost_center", "project", "voucher_type", "voucher_no"],
+		limit=0,
 	)
 
 	for d in gles:
@@ -1933,8 +1952,9 @@ def create_payment_ledger_entry(
 			ple = frappe.get_doc(entry)
 
 			if cancel:
-				delink_original_entry(ple, partial_cancel=partial_cancel)
-				if is_immutable_ledger_enabled():
+				if not is_immutable_ledger_enabled():
+					delink_original_entry(ple, partial_cancel=partial_cancel)
+				else:
 					ple.delinked = 0
 					ple.posting_date = frappe.form_dict.get("posting_date") or getdate()
 
@@ -2026,6 +2046,7 @@ def delink_original_entry(pl_entry, partial_cancel=False):
 			qb.update(ple)
 			.set(ple.modified, now())
 			.set(ple.modified_by, frappe.session.user)
+			.set(ple.delinked, True)
 			.where(
 				(ple.company == pl_entry.company)
 				& (ple.account_type == pl_entry.account_type)
@@ -2041,9 +2062,6 @@ def delink_original_entry(pl_entry, partial_cancel=False):
 
 		if partial_cancel:
 			query = query.where(ple.voucher_detail_no == pl_entry.voucher_detail_no)
-
-		if not is_immutable_ledger_enabled():
-			query = query.set(ple.delinked, True)
 
 		query.run()
 
@@ -2319,6 +2337,7 @@ def create_gain_loss_journal(
 	ref2_detail_no,
 	cost_center,
 	dimensions,
+	project=None,
 ) -> str:
 	journal_entry = frappe.new_doc("Journal Entry")
 	journal_entry.voucher_type = "Exchange Gain Or Loss"
@@ -2345,6 +2364,7 @@ def create_gain_loss_journal(
 			"account_currency": party_account_currency,
 			"exchange_rate": 0,
 			"cost_center": cost_center or erpnext.get_default_cost_center(company),
+			"project": project,
 			"reference_type": ref1_dt,
 			"reference_name": ref1_dn,
 			"reference_detail_no": ref1_detail_no,
@@ -2362,6 +2382,7 @@ def create_gain_loss_journal(
 			"account_currency": gain_loss_account_currency,
 			"exchange_rate": 1,
 			"cost_center": cost_center or erpnext.get_default_cost_center(company),
+			"project": project,
 			"reference_type": ref2_dt,
 			"reference_name": ref2_dn,
 			"reference_detail_no": ref2_detail_no,

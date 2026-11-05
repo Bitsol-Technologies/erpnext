@@ -121,8 +121,25 @@ def filter_result_items(result, pos_profile):
 		result["items"] = [item for item in result.get("items") if item.get("item_group") in pos_item_groups]
 
 
+def check_pos_profile_access(pos_profile):
+	"""The POS Profile is what entitles a caller to POS data — see the Bin/Item analysis on
+	pos_invoice.get_stock_availability. Record-level when a profile is named, so a Company User
+	Permission applies too."""
+	# select-or-read: a bare check defaults to `read`, and the shipped POS Profile rows give
+	# Sales Manager only `select`. Defaulting to read denies the role the page exists for.
+	ptype = "select" if frappe.only_has_select_perm("POS Profile") else "read"
+
+	if isinstance(pos_profile, str) and pos_profile:
+		frappe.has_permission("POS Profile", ptype, doc=pos_profile, throw=True)
+	else:
+		frappe.has_permission("POS Profile", ptype, throw=True)
+
+
 @frappe.whitelist()
 def get_parent_item_group():
+	# no profile is named here, so the POS Profile check is doctype level
+	check_pos_profile_access(None)
+
 	# Using get_all to ignore user permission
 	item_group = frappe.get_all("Item Group", {"lft": 1, "is_group": 1}, pluck="name")
 	if item_group:
@@ -131,6 +148,8 @@ def get_parent_item_group():
 
 @frappe.whitelist()
 def get_items(start, page_length, price_list, item_group, pos_profile, search_term=""):
+	check_pos_profile_access(pos_profile)
+
 	warehouse, hide_unavailable_items = frappe.db.get_value(
 		"POS Profile", pos_profile, ["warehouse", "hide_unavailable_items"]
 	)
@@ -257,6 +276,12 @@ def get_items(start, page_length, price_list, item_group, pos_profile, search_te
 
 @frappe.whitelist()
 def search_for_serial_or_batch_or_barcode_number(search_value: str) -> dict[str, str | None]:
+	# POS-page wrapper around scan_barcode; the page's entitlement is the POS Profile.
+	# select-or-read for the same reason as check_pos_profile_access: get_items() reaches this
+	# in-process, so a bare read check denies POS search to Sales Manager.
+	ptype = "select" if frappe.only_has_select_perm("POS Profile") else "read"
+	frappe.has_permission("POS Profile", ptype, throw=True)
+
 	return scan_barcode(search_value)
 
 
@@ -293,26 +318,33 @@ def get_item_group_condition(pos_profile):
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def item_group_query(doctype, txt, searchfield, start, page_len, filters):
-	item_groups = []
-	cond = "1=1"
 	pos_profile = filters.get("pos_profile")
+	check_pos_profile_access(pos_profile)
 
+	item_filters = [["name", "like", f"%{txt}%"]]
 	if pos_profile:
 		item_groups = get_item_groups(pos_profile)
-
 		if item_groups:
-			cond = "name in (%s)" % (", ".join(["%s"] * len(item_groups)))
-			cond = cond % tuple(item_groups)
+			item_filters.append(["name", "in", item_groups])
 
-	return frappe.db.sql(
-		f""" select distinct name from `tabItem Group`
-			where {cond} and (name like %(txt)s) limit {page_len} offset {start}""",
-		{"txt": "%%%s%%" % txt},
+	# get_list, not get_all: it adds the caller's Item Group User Permissions; a Desk User select row keeps everyone in
+	return frappe.get_list(
+		"Item Group",
+		filters=item_filters,
+		fields=["name"],
+		limit_start=start,
+		limit_page_length=page_len,
+		order_by="name",
+		as_list=True,
 	)
 
 
 @frappe.whitelist()
 def check_opening_entry(user):
+	# `user` was caller input, so anyone could enumerate another's open POS sessions; this is a POS Opening Entry question
+	if user != frappe.session.user:
+		frappe.has_permission("POS Opening Entry", throw=True)
+
 	open_vouchers = frappe.db.get_all(
 		"POS Opening Entry",
 		filters={"user": user, "pos_closing_entry": ["in", ["", None]], "docstatus": 1},
@@ -323,8 +355,12 @@ def check_opening_entry(user):
 	return open_vouchers
 
 
-@frappe.whitelist()
-def create_opening_voucher(pos_profile, company, balance_details):
+@frappe.whitelist(methods=["POST"])
+def create_opening_voucher(pos_profile: str, company: str, balance_details: str | list):
+	# submit() enforces POS Opening Entry rights per document, but only after the profile and company
+	# have been accepted from the caller — check the profile the session is being opened against.
+	check_pos_profile_access(pos_profile)
+
 	balance_details = json.loads(balance_details)
 
 	new_pos_opening = frappe.get_doc(
@@ -375,48 +411,88 @@ def get_past_order_list(search_term, status, limit=20):
 	return invoice_list
 
 
-@frappe.whitelist()
-def set_customer_info(fieldname, customer, value=""):
+@frappe.whitelist(methods=["POST"])
+def set_customer_info(fieldname: str, customer: str, value: str = ""):
+	customer_doc = frappe.get_doc("Customer", customer)
+	customer_doc.check_permission("write")
+
 	if fieldname == "loyalty_program":
-		frappe.db.set_value("Customer", customer, "loyalty_program", value)
+		customer_doc.loyalty_program = value
+	else:
+		contact = customer_doc.get("customer_primary_contact")
+		if not contact:
+			Contact = DocType("Contact")
+			DynamicLink = DocType("Dynamic Link")
 
-	contact = frappe.get_cached_value("Customer", customer, "customer_primary_contact")
-	if not contact:
-		contact = frappe.db.sql(
-			"""
-			SELECT parent FROM `tabDynamic Link`
-			WHERE
-				parenttype = 'Contact' AND
-				parentfield = 'links' AND
-				link_doctype = 'Customer' AND
-				link_name = %s
-			""",
-			(customer),
-			as_dict=1,
-		)
-		contact = contact[0].get("parent") if contact else None
+			# Inner join with Contact DocType, to priorities records that have is_primary_contact set.
+			query = (
+				frappe.qb.from_(DynamicLink)
+				.join(Contact)
+				.on(DynamicLink.parent == Contact.name)
+				.select(DynamicLink.parent)
+				.where(
+					(DynamicLink.link_name == customer)
+					& (DynamicLink.parentfield == "links")
+					& (DynamicLink.parenttype == "Contact")
+					& (DynamicLink.link_doctype == "Customer")
+				)
+				.orderby(Contact.is_primary_contact, order=Order.desc)
+			)
 
-	if not contact:
-		new_contact = frappe.new_doc("Contact")
-		new_contact.is_primary_contact = 1
-		new_contact.first_name = customer
-		new_contact.set("links", [{"link_doctype": "Customer", "link_name": customer}])
-		new_contact.save()
-		contact = new_contact.name
-		frappe.db.set_value("Customer", customer, "customer_primary_contact", contact)
+			contacts = query.run(pluck=DynamicLink.parent)
 
-	contact_doc = frappe.get_doc("Contact", contact)
-	if fieldname == "email_id":
-		contact_doc.set("email_ids", [{"email_id": value, "is_primary": 1}])
-		frappe.db.set_value("Customer", customer, "email_id", value)
-	elif fieldname == "mobile_no":
-		contact_doc.set("phone_nos", [{"phone": value, "is_primary_mobile_no": 1}])
-		frappe.db.set_value("Customer", customer, "mobile_no", value)
-	contact_doc.save()
+			contact = contacts[0] if contacts else None
+
+		if not contact:
+			new_contact = frappe.new_doc("Contact")
+			new_contact.is_primary_contact = 1
+			new_contact.first_name = customer
+			new_contact.set("links", [{"link_doctype": "Customer", "link_name": customer}])
+			new_contact.save()
+			contact = new_contact.name
+
+		def set_primary_phone_no_email(field, value):
+			# Create new record instead deleting existing email or phone_no and setting the new row as primary.
+			field_mapper = {
+				"email_ids": {"field": "email_id", "primary": "is_primary"},
+				"phone_nos": {"field": "phone", "primary": "is_primary_mobile_no"},
+			}
+
+			value_already_exists = False
+			for d in contact_doc.get(field):
+				if d.get(field_mapper[field].get("field")) == value and not value_already_exists:
+					d.set(field_mapper[field]["primary"], 1)
+					value_already_exists = True
+					continue
+				d.set(field_mapper[field]["primary"], 0)
+
+			if not value_already_exists:
+				contact_doc.append(
+					field, {field_mapper[field]["field"]: value, field_mapper[field]["primary"]: 1}
+				)
+
+		contact_doc = frappe.get_doc("Contact", contact)
+		# setting is_primary_contact = 1 on Contact to refetch the same contact incase it's removed from Customer records.
+		contact_doc.set("is_primary_contact", 1)
+		if fieldname == "email_id":
+			set_primary_phone_no_email("email_ids", value)
+		elif fieldname == "mobile_no":
+			set_primary_phone_no_email("phone_nos", value)
+		# Saving contact_doc to set mobile_no and email.
+		contact_doc.save()
+
+		# Auto-fetches from Contact DocType, no need to set values separately.
+		customer_doc.customer_primary_contact = contact
+
+	# using save method instead db.set_value which bypasses the validation for loyalty program
+	# and auto sets the mobile_no and email field on customer records.
+	customer_doc.save()
 
 
 @frappe.whitelist()
 def get_pos_profile_data(pos_profile):
+	check_pos_profile_access(pos_profile)
+
 	pos_profile = frappe.get_doc("POS Profile", pos_profile)
 	pos_profile = pos_profile.as_dict()
 

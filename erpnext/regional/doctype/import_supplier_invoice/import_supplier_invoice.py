@@ -108,7 +108,7 @@ class ImportSupplierInvoice(Document):
 					pi_name,
 					folder=None,
 					decode=False,
-					is_private=0,
+					is_private=1,
 					df=None,
 				)
 
@@ -159,6 +159,8 @@ class ImportSupplierInvoice(Document):
 
 	@frappe.whitelist()
 	def process_file_data(self):
+		self.check_permission("write")
+
 		self.db_set("status", "Processing File Data", notify=True, commit=True)
 		frappe.enqueue_doc(self.doctype, self.name, "import_xml_data", queue="long", timeout=3600)
 

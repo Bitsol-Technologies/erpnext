@@ -1,17 +1,233 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
 
+import json
+
 import frappe
 from frappe.tests.utils import FrappeTestCase, change_settings
 from frappe.utils import add_days, add_months, flt, getdate, nowdate
 
-from erpnext.controllers.accounts_controller import InvalidQtyError
+from erpnext.controllers.accounts_controller import InvalidQtyError, update_child_qty_rate
+from erpnext.selling.doctype.quotation.quotation import make_sales_order
 from erpnext.setup.utils import get_exchange_rate
 
 test_dependencies = ["Product Bundle"]
 
 
 class TestQuotation(FrappeTestCase):
+	def test_declare_lost_requires_a_reason_without_changing_the_quotation(self):
+		quotation = make_quotation()
+		previous_status = quotation.status
+
+		with self.assertRaises(frappe.ValidationError):
+			quotation.declare_enquiry_lost([], [], "New detailed reason")
+
+		quotation.reload()
+		self.assertEqual(quotation.status, previous_status)
+		self.assertFalse(quotation.order_lost_reason)
+		self.assertFalse(quotation.lost_reasons)
+		self.assertFalse(quotation.competitors)
+
+	def test_declare_lost_on_ordered_quotation_preserves_sales_order_error(self):
+		quotation = make_quotation()
+		sales_order = make_sales_order(quotation.name)
+		sales_order.delivery_date = nowdate()
+		sales_order.submit()
+		quotation.reload()
+
+		with self.assertRaisesRegex(frappe.ValidationError, "Cannot set as Lost as Sales Order is made"):
+			quotation.declare_enquiry_lost([], [])
+
+	def test_declare_lost_with_a_reason(self):
+		reason = "_Test Quotation Lost Reason"
+		if not frappe.db.exists("Quotation Lost Reason", reason):
+			frappe.get_doc({"doctype": "Quotation Lost Reason", "order_lost_reason": reason}).insert()
+		quotation = make_quotation()
+
+		quotation.declare_enquiry_lost([{"lost_reason": reason}], [], "Too expensive")
+
+		quotation.reload()
+		self.assertEqual(quotation.status, "Lost")
+		self.assertEqual(quotation.order_lost_reason, "Too expensive")
+		self.assertEqual([row.lost_reason for row in quotation.lost_reasons], [reason])
+
+	def test_update_child_quotation_add_item(self):
+		from erpnext.stock.doctype.item.test_item import make_item
+
+		item_1 = make_item("_Test Item")
+		item_2 = make_item("_Test Item 1")
+
+		item_list = [
+			{"item_code": item_1.item_code, "warehouse": "", "qty": 10, "rate": 300},
+			{"item_code": item_2.item_code, "warehouse": "", "qty": 5, "rate": 400},
+		]
+
+		qo = make_quotation(item_list=item_list)
+		first_item = qo.get("items")[0]
+		second_item = qo.get("items")[1]
+		trans_item = json.dumps(
+			[
+				{
+					"item_code": first_item.item_code,
+					"rate": first_item.rate,
+					"qty": 11,
+					"docname": first_item.name,
+				},
+				{
+					"item_code": second_item.item_code,
+					"rate": second_item.rate,
+					"qty": second_item.qty,
+					"docname": second_item.name,
+				},
+				{"item_code": "_Test Item 2", "rate": 100, "qty": 7},
+			]
+		)
+
+		update_child_qty_rate("Quotation", trans_item, qo.name)
+		qo.reload()
+		self.assertEqual(qo.get("items")[0].qty, 11)
+		self.assertEqual(qo.get("items")[-1].rate, 100)
+
+	def test_update_items_keeps_price_list_rate_on_new_row(self):
+		from erpnext.stock.doctype.item.test_item import make_item
+
+		item_code = make_item("_Test Update Items Priced Item").name
+		qo = make_quotation()
+		existing_row = qo.items[0]
+		trans_items = [
+			{
+				"item_code": existing_row.item_code,
+				"rate": existing_row.rate,
+				"qty": existing_row.qty,
+				"docname": existing_row.name,
+			},
+			{"item_code": item_code, "rate": 900, "price_list_rate": 1000, "qty": 1},
+		]
+
+		update_child_qty_rate("Quotation", json.dumps(trans_items), qo.name)
+
+		new_row = qo.reload().items[-1]
+		self.assertEqual(new_row.price_list_rate, 1000)
+		self.assertEqual(new_row.discount_amount, 100)
+
+	def test_update_items_keeps_zero_rate_on_priced_row(self):
+		from erpnext.stock.doctype.item.test_item import make_item
+
+		item_code = make_item("_Test Update Items Priced Item").name
+		qo = make_quotation()
+		existing_row = qo.items[0]
+		trans_items = [
+			{
+				"item_code": existing_row.item_code,
+				"rate": existing_row.rate,
+				"qty": existing_row.qty,
+				"docname": existing_row.name,
+			},
+			{"item_code": item_code, "rate": 0, "price_list_rate": 1000, "qty": 1},
+		]
+
+		update_child_qty_rate("Quotation", json.dumps(trans_items), qo.name)
+
+		new_row = qo.reload().items[-1]
+		self.assertEqual(new_row.rate, 0)
+		self.assertEqual(new_row.discount_amount, 1000)
+
+	def test_update_child_rate_change(self):
+		from erpnext.stock.doctype.item.test_item import make_item
+
+		item_1 = make_item("_Test Item")
+		item_2 = make_item("_Test Item 1")
+
+		item_list = [
+			{"item_code": item_1.item_code, "warehouse": "_Test Warehouse - _TC", "qty": 10, "rate": 300},
+			{"item_code": item_2.item_code, "warehouse": "_Test Warehouse - _TC", "qty": 5, "rate": 400},
+		]
+
+		qo = make_quotation(item_list=item_list)
+		so = make_sales_order(qo.name, args={"filtered_children": [qo.items[0].name]})
+		so.delivery_date = nowdate()
+		so.submit()
+		qo.reload()
+		trans_item = json.dumps(
+			[
+				{
+					"item_code": qo.items[0].item_code,
+					"rate": 5000,
+					"qty": qo.items[0].qty,
+					"docname": qo.items[0].name,
+				},
+				{
+					"item_code": qo.items[1].item_code,
+					"rate": qo.items[1].rate,
+					"qty": qo.items[1].qty,
+					"docname": qo.items[1].name,
+				},
+			]
+		)
+		self.assertRaises(frappe.ValidationError, update_child_qty_rate, "Quotation", trans_item, qo.name)
+		trans_item = json.dumps(
+			[
+				{
+					"item_code": qo.items[0].item_code,
+					"rate": qo.items[0].rate,
+					"qty": qo.items[0].qty,
+					"docname": qo.items[0].name,
+				},
+				{
+					"item_code": qo.items[1].item_code,
+					"rate": 50,
+					"qty": qo.items[1].qty,
+					"docname": qo.items[1].name,
+				},
+			]
+		)
+		update_child_qty_rate("Quotation", trans_item, qo.name)
+		qo.reload()
+		self.assertEqual(qo.items[1].rate, 50)
+
+	def test_update_child_removing_item(self):
+		qo = make_quotation(qty=10)
+		sales_order = make_sales_order(qo.name)
+		sales_order.delivery_date = nowdate()
+
+		trans_item = json.dumps(
+			[
+				{
+					"item_code": qo.items[0].item_code,
+					"rate": qo.items[0].rate,
+					"qty": qo.items[0].qty,
+					"docname": qo.items[0].name,
+				},
+				{"item_code": "_Test Item 2", "rate": 100, "qty": 7},
+			]
+		)
+
+		update_child_qty_rate("Quotation", trans_item, qo.name)
+		sales_order.submit()
+		qo.reload()
+		self.assertEqual(qo.status, "Partially Ordered")
+
+		trans_item = json.dumps([{"item_code": "_Test Item 2", "rate": 100, "qty": 7}])
+
+		# check if items having a sales order can be removed
+		self.assertRaises(frappe.ValidationError, update_child_qty_rate, "Quotation", trans_item, qo.name)
+
+		trans_item = json.dumps(
+			[
+				{
+					"item_code": qo.items[0].item_code,
+					"rate": qo.items[0].rate,
+					"qty": qo.items[0].qty,
+					"docname": qo.items[0].name,
+				}
+			]
+		)
+
+		# remove item with no sales order
+		update_child_qty_rate("Quotation", trans_item, qo.name)
+		qo.reload()
+		self.assertEqual(len(qo.get("items")), 1)
+
 	def test_quotation_qty(self):
 		qo = make_quotation(qty=0, do_not_save=True)
 		with self.assertRaises(InvalidQtyError):
@@ -39,6 +255,65 @@ class TestQuotation(FrappeTestCase):
 
 		self.assertTrue(quotation.payment_schedule)
 
+	def test_terms_attachments_are_copied_to_quotation(self):
+		terms = make_terms_and_conditions(copy_attachments_to_transaction=True)
+		first_attachment = make_file_attachment(
+			"Terms and Conditions",
+			terms.name,
+			content="First terms attachment",
+		)
+
+		quotation = make_quotation(do_not_save=1)
+		quotation.tc_name = terms.name
+		quotation.insert()
+
+		self.assertEqual(get_attachment_urls("Quotation", quotation.name), {first_attachment.file_url})
+
+		second_attachment = make_file_attachment(
+			"Terms and Conditions",
+			terms.name,
+			content="Second terms attachment",
+		)
+		quotation.valid_till = add_days(getdate(quotation.valid_till), 1)
+		quotation.save()
+
+		quotation_attachments = get_attachment_urls("Quotation", quotation.name)
+		self.assertEqual(quotation_attachments, {first_attachment.file_url})
+		self.assertNotIn(second_attachment.file_url, quotation_attachments)
+
+		new_terms = make_terms_and_conditions(copy_attachments_to_transaction=True)
+		new_terms_attachment = make_file_attachment(
+			"Terms and Conditions",
+			new_terms.name,
+			content="Attachment from updated terms",
+		)
+		quotation.tc_name = new_terms.name
+		quotation.valid_till = add_days(getdate(quotation.valid_till), 1)
+		quotation.save()
+
+		self.assertEqual(
+			get_attachment_urls("Quotation", quotation.name),
+			{first_attachment.file_url, new_terms_attachment.file_url},
+		)
+
+	def test_terms_attachments_are_not_copied_when_disabled(self):
+		terms = make_terms_and_conditions(copy_attachments_to_transaction=False)
+		make_file_attachment(
+			"Terms and Conditions",
+			terms.name,
+			content="Terms attachment should stay on the template",
+		)
+
+		quotation = make_quotation(do_not_save=1)
+		quotation.tc_name = terms.name
+		quotation.insert()
+
+		self.assertFalse(get_attachment_urls("Quotation", quotation.name))
+
+	@change_settings(
+		"Accounts Settings",
+		{"automatically_fetch_payment_terms": 1},
+	)
 	def test_make_sales_order_terms_copied(self):
 		from erpnext.selling.doctype.quotation.quotation import make_sales_order
 
@@ -181,7 +456,11 @@ class TestQuotation(FrappeTestCase):
 
 	@change_settings(
 		"Accounts Settings",
-		{"add_taxes_from_item_tax_template": 0, "add_taxes_from_taxes_and_charges_template": 0},
+		{
+			"add_taxes_from_item_tax_template": 0,
+			"add_taxes_from_taxes_and_charges_template": 0,
+			"automatically_fetch_payment_terms": 1,
+		},
 	)
 	def test_make_sales_order_with_terms(self):
 		from erpnext.selling.doctype.quotation.quotation import make_sales_order
@@ -219,10 +498,13 @@ class TestQuotation(FrappeTestCase):
 		sales_order.save()
 
 		self.assertEqual(sales_order.payment_schedule[0].payment_amount, 8906.00)
-		self.assertEqual(sales_order.payment_schedule[0].due_date, getdate(quotation.transaction_date))
+		self.assertEqual(
+			getdate(sales_order.payment_schedule[0].due_date), getdate(quotation.transaction_date)
+		)
 		self.assertEqual(sales_order.payment_schedule[1].payment_amount, 8906.00)
 		self.assertEqual(
-			sales_order.payment_schedule[1].due_date, getdate(add_days(quotation.transaction_date, 30))
+			getdate(sales_order.payment_schedule[1].due_date),
+			getdate(add_days(quotation.transaction_date, 30)),
 		)
 
 	def test_valid_till_before_transaction_date(self):
@@ -871,12 +1153,12 @@ class TestQuotation(FrappeTestCase):
 	def test_make_quotation_qar_to_inr(self):
 		quotation = make_quotation(
 			currency="QAR",
-			transaction_date="2026-06-04",
+			transaction_date="2026-01-01",
 		)
 
 		cache = frappe.cache()
-		key = "currency_exchange_rate_{}:{}:{}".format("2026-06-04", "QAR", "INR")
-		value = cache.get(key)
+		key = "currency_exchange_rate_{}:{}:{}".format("2026-01-01", "QAR", "INR")
+		value = cache.get_value(key)
 		expected_rate = flt(value) / 3.64
 
 		self.assertEqual(
@@ -896,6 +1178,183 @@ class TestQuotation(FrappeTestCase):
 
 		so1.submit()
 		self.assertRaises(frappe.ValidationError, so2.submit)
+
+	def test_quotation_status(self):
+		quotation = make_quotation()
+
+		so1 = make_sales_order(quotation.name)
+		so1.delivery_date = nowdate()
+		so1.submit()
+		quotation.reload()
+		self.assertEqual(quotation.status, "Ordered")
+		so1.cancel()
+
+		quotation.reload()
+		self.assertEqual(quotation.status, "Open")
+
+		so2 = make_sales_order(quotation.name)
+		so2.delivery_date = nowdate()
+		so2.items[0].qty = 1
+		so2.submit()
+		quotation.reload()
+		self.assertEqual(quotation.status, "Partially Ordered")
+
+		so2.cancel()
+
+		quotation.reload()
+		self.assertEqual(quotation.status, "Open")
+
+	@change_settings(
+		"Accounts Settings",
+		{"automatically_fetch_payment_terms": 1},
+	)
+	def test_make_sales_order_with_payment_terms(self):
+		from erpnext.selling.doctype.quotation.quotation import make_sales_order
+
+		template = frappe.get_doc(
+			{
+				"doctype": "Payment Terms Template",
+				"template_name": "_Test Payment Terms Template for Quotation",
+				"terms": [
+					{
+						"doctype": "Payment Terms Template Detail",
+						"invoice_portion": 50.00,
+						"credit_days_based_on": "Day(s) after invoice date",
+						"credit_days": 0,
+					},
+					{
+						"doctype": "Payment Terms Template Detail",
+						"invoice_portion": 50.00,
+						"credit_days_based_on": "Day(s) after invoice date",
+						"credit_days": 10,
+					},
+				],
+			}
+		).save()
+
+		quotation = make_quotation(qty=10, rate=1000, do_not_submit=1)
+		quotation.transaction_date = add_days(nowdate(), -2)
+		quotation.valid_till = add_days(nowdate(), 10)
+		quotation.update({"payment_terms_template": template.name, "payment_schedule": []})
+		quotation.save()
+		quotation.submit()
+
+		self.assertEqual(quotation.payment_schedule[0].payment_amount, 5000)
+		self.assertEqual(quotation.payment_schedule[1].payment_amount, 5000)
+		self.assertEqual(quotation.payment_schedule[0].due_date, quotation.transaction_date)
+		self.assertEqual(quotation.payment_schedule[1].due_date, add_days(quotation.transaction_date, 10))
+
+		sales_order = make_sales_order(quotation.name)
+		sales_order.transaction_date = nowdate()
+		sales_order.delivery_date = nowdate()
+		sales_order.save()
+
+		self.assertEqual(sales_order.payment_schedule[0].due_date, sales_order.transaction_date)
+		self.assertEqual(sales_order.payment_schedule[1].due_date, add_days(sales_order.transaction_date, 10))
+		self.assertEqual(sales_order.payment_schedule[0].payment_amount, 5000)
+		self.assertEqual(sales_order.payment_schedule[1].payment_amount, 5000)
+
+	def test_unordered_alternative_set_keeps_quotation_partially_ordered(self):
+		from erpnext.stock.doctype.item.test_item import make_item
+
+		warehouse = "_Test Warehouse - _TC"
+		simple = make_item(properties={"is_stock_item": 1}).item_code
+		main = make_item(properties={"is_stock_item": 1}).item_code
+		alt = make_item(properties={"is_stock_item": 1}).item_code
+		quotation = make_quotation(
+			item_list=[
+				{"item_code": simple, "qty": 1, "rate": 100, "warehouse": warehouse},
+				{"item_code": main, "qty": 1, "rate": 100, "warehouse": warehouse},
+				{"item_code": alt, "qty": 1, "rate": 100, "is_alternative": True, "warehouse": warehouse},
+			]
+		)
+
+		frappe.flags.args = frappe._dict(selected_items=[quotation.items[0]])
+		so = make_sales_order(quotation.name)
+		frappe.flags.args = frappe._dict()
+		so.delivery_date = add_days(so.transaction_date, 10)
+		so.insert()
+		so.submit()
+
+		self.assertEqual(len(so.items), 1)
+		self.assertEqual(so.items[0].item_code, simple)
+		quotation.reload()
+		self.assertEqual(quotation.status, "Partially Ordered")
+
+	def test_lost_or_expired_quotation_cannot_be_invoiced(self):
+		from erpnext.selling.doctype.quotation.quotation import make_sales_invoice
+
+		if not frappe.db.exists("Quotation Lost Reason", "_Test Quotation Lost Reason"):
+			frappe.get_doc(
+				{"doctype": "Quotation Lost Reason", "order_lost_reason": "_Test Quotation Lost Reason"}
+			).insert()
+
+		lost = make_quotation()
+		lost.declare_enquiry_lost([{"lost_reason": "_Test Quotation Lost Reason"}], [])
+		self.assertRaises(frappe.ValidationError, make_sales_invoice, lost.name)
+
+		expired = make_quotation(do_not_submit=1)
+		expired.transaction_date = add_days(nowdate(), -10)
+		expired.valid_till = add_days(nowdate(), -5)
+		expired.submit()
+		self.assertRaises(frappe.ValidationError, make_sales_invoice, expired.name)
+
+	def test_quotation_update_items_recomputes_status(self):
+		from erpnext.stock.doctype.item.test_item import make_item
+
+		warehouse = "_Test Warehouse - _TC"
+		item1 = make_item().item_code
+		item2 = make_item().item_code
+		quotation = make_quotation(
+			item_list=[
+				{"item_code": item1, "qty": 2, "rate": 100, "warehouse": warehouse},
+				{"item_code": item2, "qty": 2, "rate": 100, "warehouse": warehouse},
+			]
+		)
+
+		so = make_sales_order(quotation.name, args={"filtered_children": [quotation.items[0].name]})
+		so.delivery_date = nowdate()
+		so.insert()
+		so.submit()
+
+		quotation.reload()
+		self.assertEqual(quotation.status, "Partially Ordered")
+
+		row = quotation.items[0]
+		trans_items = json.dumps(
+			[{"item_code": row.item_code, "qty": row.qty, "rate": row.rate, "docname": row.name}]
+		)
+		update_child_qty_rate("Quotation", trans_items, quotation.name)
+
+		quotation.reload()
+		self.assertEqual(quotation.status, "Ordered")
+
+		row = quotation.items[0]
+		raised = json.dumps([{"item_code": row.item_code, "qty": 5, "rate": row.rate, "docname": row.name}])
+		self.assertRaises(frappe.ValidationError, update_child_qty_rate, "Quotation", raised, quotation.name)
+
+	def test_quotation_update_items_rebuilds_bundle_packed_items(self):
+		from erpnext.selling.doctype.product_bundle.test_product_bundle import make_product_bundle
+		from erpnext.stock.doctype.item.test_item import make_item
+
+		make_item("_Test Product Bundle", {"is_stock_item": 0})
+		make_item("_Test Bundle Item 1", {"is_stock_item": 1})
+		make_item("_Test Bundle Item 2", {"is_stock_item": 1})
+		make_product_bundle("_Test Product Bundle", ["_Test Bundle Item 1", "_Test Bundle Item 2"])
+
+		quotation = make_quotation(item_code="_Test Product Bundle", qty=1, rate=100)
+		before = {pi.item_code: pi.qty for pi in quotation.packed_items}
+		self.assertTrue(before)
+
+		row = quotation.items[0]
+		trans_items = json.dumps(
+			[{"item_code": row.item_code, "qty": 3, "rate": row.rate, "docname": row.name}]
+		)
+		update_child_qty_rate("Quotation", trans_items, quotation.name)
+
+		quotation.reload()
+		after = {pi.item_code: pi.qty for pi in quotation.packed_items}
+		self.assertEqual(after, {code: qty * 3 for code, qty in before.items()})
 
 
 test_records = frappe.get_test_records("Quotation")
@@ -917,6 +1376,42 @@ def get_quotation_dict(party_name=None, item_code=None):
 		"doctype": "Quotation",
 		"party_name": party_name,
 		"items": [{"item_code": item_code, "qty": 1, "rate": 100}],
+	}
+
+
+def make_terms_and_conditions(copy_attachments_to_transaction=False):
+	return frappe.get_doc(
+		{
+			"doctype": "Terms and Conditions",
+			"title": f"_Test Terms and Conditions {frappe.generate_hash(length=8)}",
+			"selling": 1,
+			"terms": "Test terms",
+			"copy_attachments_to_transaction": 1 if copy_attachments_to_transaction else 0,
+		}
+	).insert()
+
+
+def make_file_attachment(doctype, docname, content):
+	return frappe.get_doc(
+		{
+			"doctype": "File",
+			"file_name": f"terms-attachment-{frappe.generate_hash(length=8)}.txt",
+			"attached_to_doctype": doctype,
+			"attached_to_name": docname,
+			"content": content,
+		}
+	).insert()
+
+
+def get_attachment_urls(doctype, docname):
+	return {
+		file.file_url
+		for file in frappe.get_all(
+			"File",
+			filters={"attached_to_doctype": doctype, "attached_to_name": docname},
+			fields=["file_url"],
+		)
+		if file.file_url
 	}
 
 

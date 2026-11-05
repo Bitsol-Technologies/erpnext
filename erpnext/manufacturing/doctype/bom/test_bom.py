@@ -57,6 +57,30 @@ class TestBOM(FrappeTestCase):
 		self.assertEqual(len(get_bom_items(bom=get_default_bom(), company="_Test Company")), 3)
 
 	@timeout
+	def test_bom_diff_preserves_repeated_rows(self):
+		from erpnext.manufacturing.doctype.bom.bom import diff_table_field
+
+		for old_qtys, new_qtys, added, removed, changed in (
+			([1, 2], [2, 1], [], [], []),
+			([1, 2], [2], [], [1], []),
+			([1], [1, 1], [1], [], []),
+			([1, 2], [2, 3], [], [], [1]),
+		):
+			with self.subTest(old_qtys=old_qtys, new_qtys=new_qtys):
+				old, new = (
+					frappe.get_doc(
+						{"doctype": "BOM", "items": [{"item_code": "_Test Item", "qty": qty} for qty in qtys]}
+					)
+					for qtys in (old_qtys, new_qtys)
+				)
+				out = frappe._dict(added=[], removed=[], row_changed=[])
+				diff_table_field(old.meta.get_field("items"), old, new, out)
+
+				self.assertEqual([row.qty for _, row in out.added], added)
+				self.assertEqual([row.qty for _, row in out.removed], removed)
+				self.assertEqual([index for _, index, _, _ in out.row_changed], changed)
+
+	@timeout
 	def test_default_bom(self):
 		def _get_default_bom_in_item():
 			return cstr(frappe.db.get_value("Item", "_Test FG Item 2", "default_bom"))
@@ -133,6 +157,15 @@ class TestBOM(FrappeTestCase):
 		self.assertAlmostEqual(bom.base_total_cost, base_raw_material_cost + base_op_cost)
 
 	@timeout
+	def test_bom_no_operation_time_validation(self):
+		bom = frappe.copy_doc(test_records[2])
+		bom.docstatus = 0
+		for op_row in bom.operations:
+			op_row.time_in_mins = 0
+
+		self.assertRaises(frappe.ValidationError, bom.save)
+
+	@timeout
 	def test_bom_cost_with_batch_size(self):
 		bom = frappe.copy_doc(test_records[2])
 		bom.docstatus = 0
@@ -153,7 +186,6 @@ class TestBOM(FrappeTestCase):
 
 	@timeout
 	def test_bom_cost_multi_uom_multi_currency_based_on_price_list(self):
-		frappe.db.set_value("Price List", "_Test Price List", "price_not_uom_dependent", 1)
 		for item_code, rate in (("_Test Item", 3600), ("_Test Item Home Desktop Manufactured", 3000)):
 			frappe.db.sql(
 				"delete from `tabItem Price` where price_list='_Test Price List' and item_code=%s", item_code
@@ -451,6 +483,29 @@ class TestBOM(FrappeTestCase):
 
 		self.assertNotEqual(len(test_items), len(filtered), msg="Item filtering showing excessive results")
 		self.assertTrue(0 < len(filtered) <= 3, msg="Item filtering showing excessive results")
+
+	@timeout
+	def test_bom_item_query_matches_item_code_colliding_with_another_barcode(self):
+		item = make_item(
+			"_Test BOM Query 2.5MM",
+			{"is_stock_item": 1, "item_name": "_Test BOM Query Sheet", "description": "sheet"},
+		)
+		make_item(
+			"_Test BOM Query Barcode Holder",
+			{"is_stock_item": 1},
+			barcode=f"90{item.name}90",
+		)
+
+		results = item_query(
+			doctype="Item",
+			txt=item.name,
+			searchfield="name",
+			start=0,
+			page_len=20,
+			filters={"is_stock_item": 1},
+		)
+
+		self.assertIn(item.name, [d[0] for d in results])
 
 	@timeout
 	def test_exclude_exploded_items_from_bom(self):

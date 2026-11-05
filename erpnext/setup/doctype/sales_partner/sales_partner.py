@@ -7,6 +7,8 @@ from frappe.contacts.address_and_contact import load_address_and_contact
 from frappe.utils import cstr, filter_strip_join
 from frappe.website.website_generator import WebsiteGenerator
 
+from erpnext.setup.doctype.target_detail.target_detail import validate_targets
+
 
 class SalesPartner(WebsiteGenerator):
 	# begin: auto-generated types
@@ -47,11 +49,21 @@ class SalesPartner(WebsiteGenerator):
 		self.name = self.partner_name
 
 	def validate(self):
+		validate_targets(self.get("targets"))
 		if not self.route:
 			self.route = "partners/" + self.scrub(self.partner_name)
 		super().validate()
-		if self.partner_website and not self.partner_website.startswith("http"):
-			self.partner_website = "http://" + self.partner_website
+		if self.partner_website:
+			from urllib.parse import urlsplit, urlunsplit
+
+			# scrub http
+			parts = urlsplit(self.partner_website)
+			if not parts.netloc and parts.path:
+				parts = parts._replace(netloc=parts.path, path="")
+			if not parts.scheme or parts.scheme == "http":
+				parts = parts._replace(scheme="https")
+
+			self.partner_website = urlunsplit(parts)
 
 	def get_context(self, context):
 		address = frappe.db.get_value(

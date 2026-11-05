@@ -25,13 +25,15 @@ erpnext.buying = {
 					};
 				});
 
-				this.frm.set_query("project", function (doc) {
-					return {
-						filters: {
-							company: doc.company,
-						},
-					};
+				const get_project_filters = () => ({
+					query: "erpnext.controllers.queries.get_project_name",
+					filters: {
+						company: this.frm.doc.company,
+					},
 				});
+
+				this.frm.set_query("project", get_project_filters);
+				this.frm.set_query("project", "items", get_project_filters);
 
 				if (this.frm.doc.__islocal
 					&& frappe.meta.has_field(this.frm.doc.doctype, "disable_rounded_total")) {
@@ -68,7 +70,7 @@ erpnext.buying = {
 				if(this.frm.fields_dict.buying_price_list) {
 					this.frm.set_query("buying_price_list", function() {
 						return{
-							filters: { 'buying': 1 }
+							filters: { 'buying': 1, 'enabled': 1 }
 						}
 					});
 				}
@@ -140,6 +142,7 @@ erpnext.buying = {
 
 				this.toggle_subcontracting_fields();
 				super.refresh();
+				this.prevent_past_schedule_dates(this.frm);
 			}
 
 			toggle_subcontracting_fields() {
@@ -175,12 +178,39 @@ erpnext.buying = {
 
 						this.frm.set_value("billing_address", r.message.primary_address || "");
 
-						if (frappe.meta.has_field(this.frm.doc.doctype, "shipping_address")) {
+						const is_drop_ship = this.frm.doc.items.some((item) => item.delivered_by_supplier);
+						if (
+							frappe.meta.has_field(this.frm.doc.doctype, "shipping_address") &&
+							!is_drop_ship
+						) {
 							this.frm.set_value("shipping_address", r.message.shipping_address || "");
 						}
 					},
 				});
 				erpnext.utils.set_letter_head(this.frm)
+			}
+
+			schedule_date(doc, cdt, cdn) {
+				if (doc.schedule_date && !cdt.endsWith(" Item")) {
+					doc.items.forEach((d) => {
+						frappe.model.set_value(d.doctype, d.name, "schedule_date", doc.schedule_date);
+					});
+				}
+			}
+
+			transaction_date() {
+				super.transaction_date();
+				if (!this.frm.fields_dict.schedule_date) return;
+				this.frm.set_value("schedule_date", "");
+				this.prevent_past_schedule_dates(this.frm);
+			}
+
+			prevent_past_schedule_dates(frm) {
+				if (frm.doc.transaction_date && frm.fields_dict["schedule_date"]) {
+					frm.fields_dict["schedule_date"].datepicker?.update({
+						minDate: new Date(frm.doc.transaction_date),
+					});
+				}
 			}
 
 			supplier_address() {

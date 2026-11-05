@@ -59,7 +59,7 @@ erpnext.sales_common = {
 
 				if (this.frm.fields_dict.selling_price_list) {
 					this.frm.set_query("selling_price_list", function () {
-						return { filters: { selling: 1 } };
+						return { filters: { selling: 1, enabled: 1 } };
 					});
 				}
 
@@ -276,23 +276,39 @@ erpnext.sales_common = {
 				}
 
 				this.set_actual_qty(doc, cdt, cdn);
+
+				if (cdt !== "Packed Item" && doc.packed_items) {
+					doc.packed_items
+						.filter(
+							(item) =>
+								item.parent_detail_docname === cdn ||
+								(/^\d+$/.test(String(item.parent_detail_docname)) &&
+									Number(item.parent_detail_docname) === locals[cdt][cdn].idx)
+						)
+						.forEach((item) => {
+							frappe.model.set_value(
+								item.doctype,
+								item.name,
+								"warehouse",
+								locals[cdt][cdn].warehouse
+							);
+						});
+				}
 			}
 
 			set_actual_qty(doc, cdt, cdn) {
 				let row = locals[cdt][cdn];
-				let sales_doctypes = ["Sales Invoice", "Delivery Note", "Sales Order"];
+				let sales_doctypes = ["Sales Invoice", "Delivery Note", "Sales Order", "Quotation"];
 
 				if (row.item_code && row.warehouse && sales_doctypes.includes(doc.doctype)) {
-					frappe.call({
+					return this.frm.call({
 						method: "erpnext.stock.get_item_details.get_bin_details",
+						child: row,
 						args: {
 							item_code: row.item_code,
 							warehouse: row.warehouse,
-						},
-						callback(r) {
-							if (r.message) {
-								frappe.model.set_value(cdt, cdn, "actual_qty", r.message.actual_qty);
-							}
+							company: doc.company,
+							include_child_warehouses: true,
 						},
 					});
 				}
@@ -606,9 +622,7 @@ erpnext.pre_sales = {
 							fieldname: "detailed_reason",
 						},
 					],
-					primary_action: function () {
-						let values = dialog.get_values();
-
+					primary_action: function (values) {
 						frm.call({
 							doc: frm.doc,
 							method: "declare_enquiry_lost",

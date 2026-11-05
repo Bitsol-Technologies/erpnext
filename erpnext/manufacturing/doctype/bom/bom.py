@@ -10,12 +10,12 @@ import frappe
 from frappe import _, bold
 from frappe.core.doctype.version.version import get_diff
 from frappe.model.mapper import get_mapped_doc
-from frappe.utils import cint, cstr, flt, today
+from frappe.utils import cint, cstr, flt, get_link_to_form, today
 from frappe.website.website_generator import WebsiteGenerator
 
 import erpnext
 from erpnext.setup.utils import get_exchange_rate
-from erpnext.stock.doctype.item.item import get_item_details
+from erpnext.stock.doctype.item.item import _get_item_details
 from erpnext.stock.get_item_details import get_conversion_factor, get_price_list_rate
 
 form_grid_templates = {"items": "templates/form_grid/item_grid.html"}
@@ -337,7 +337,7 @@ class BOM(WebsiteGenerator):
 		self.manage_default_bom()
 
 	def get_item_det(self, item_code):
-		item = get_item_details(item_code)
+		item = _get_item_details(item_code)
 
 		if not item:
 			frappe.throw(_("Item: {0} does not exist in the system").format(item_code))
@@ -500,6 +500,18 @@ class BOM(WebsiteGenerator):
 
 	@frappe.whitelist()
 	def update_cost(self, update_parent=True, from_child_bom=False, update_hour_rate=True, save=True):
+		if cint(save) and not self.is_new():
+			self.load_from_db()
+			self.check_permission("write")
+
+		self._update_cost(
+			update_parent=cint(update_parent) and cint(save),
+			from_child_bom=from_child_bom,
+			update_hour_rate=update_hour_rate,
+			save=cint(save),
+		)
+
+	def _update_cost(self, update_parent=True, from_child_bom=False, update_hour_rate=True, save=True):
 		if self.docstatus == 2:
 			return
 
@@ -523,7 +535,7 @@ class BOM(WebsiteGenerator):
 			)
 
 			for bom in parent_boms:
-				frappe.get_doc("BOM", bom).update_cost(from_child_bom=True)
+				frappe.get_doc("BOM", bom)._update_cost(from_child_bom=True)
 
 		if not from_child_bom:
 			msg = "Cost Updated"
@@ -653,6 +665,19 @@ class BOM(WebsiteGenerator):
 				frappe.throw(_("Quantity required for Item {0} in row {1}").format(m.item_code, m.idx))
 			check_list.append(m)
 
+		bom_items = {self.item}
+		bom_items.update(d.item_code for d in self.get("items"))
+		bom_items.update(d.item_code for d in self.get("scrap_items"))
+
+		if disabled_items := frappe.db.get_all(
+			"Item", filters={"item_code": ("in", list(bom_items)), "disabled": 1}, pluck="name"
+		):
+			frappe.throw(
+				_("Disabled Item {0} cannot be used in BOMs.").format(
+					", ".join(get_link_to_form("Item", item) for item in disabled_items)
+				)
+			)
+
 	def check_recursion(self, bom_list=None):
 		"""Check whether recursion occurs in any bom"""
 
@@ -767,12 +792,14 @@ class BOM(WebsiteGenerator):
 					hour_rate / flt(self.conversion_rate) if self.conversion_rate and hour_rate else hour_rate
 				)
 
-		if row.hour_rate and row.time_in_mins:
+		if row.hour_rate:
 			row.base_hour_rate = flt(row.hour_rate) * flt(self.conversion_rate)
-			row.operating_cost = flt(row.hour_rate) * flt(row.time_in_mins) / 60.0
-			row.base_operating_cost = flt(row.operating_cost) * flt(self.conversion_rate)
-			row.cost_per_unit = row.operating_cost / (row.batch_size or 1.0)
-			row.base_cost_per_unit = row.base_operating_cost / (row.batch_size or 1.0)
+
+			if row.time_in_mins:
+				row.operating_cost = flt(row.hour_rate) * flt(row.time_in_mins) / 60.0
+				row.base_operating_cost = flt(row.operating_cost) * flt(self.conversion_rate)
+				row.cost_per_unit = row.operating_cost / (row.batch_size or 1.0)
+				row.base_cost_per_unit = row.base_operating_cost / (row.batch_size or 1.0)
 
 		if update_hour_rate:
 			row.db_update()
@@ -785,7 +812,7 @@ class BOM(WebsiteGenerator):
 
 		for d in self.get("items"):
 			old_rate = d.rate
-			if not self.bom_creator and d.is_stock_item:
+			if d.is_stock_item:
 				d.rate = self.get_rm_rate(
 					{
 						"company": self.company,
@@ -1019,6 +1046,12 @@ class BOM(WebsiteGenerator):
 							"Row {0}: Workstation or Workstation Type is mandatory for an operation {1}"
 						).format(d.idx, d.operation)
 					)
+				if not d.time_in_mins or d.time_in_mins <= 0:
+					frappe.throw(
+						_("Row {0}: Operation time should be greater than 0 for operation {1}").format(
+							d.idx, d.operation
+						)
+					)
 
 	def get_tree_representation(self) -> BOMTree:
 		"""Get a complete tree representation preserving order of child items."""
@@ -1143,7 +1176,11 @@ def get_bom_items_as_dict(
 	fetch_scrap_items=0,
 	include_non_stock_items=False,
 	fetch_qty_in_stock_uom=True,
+	ignore_permissions=True,
 ):
+	if not ignore_permissions:
+		frappe.has_permission("BOM", "read", doc=bom, throw=True)
+
 	item_dict = {}
 
 	# Did not use qty_consumed_per_unit in the query, as it leads to rounding loss
@@ -1235,7 +1272,11 @@ def get_bom_items_as_dict(
 
 @frappe.whitelist()
 def get_bom_items(bom, company, qty=1, fetch_exploded=1):
-	items = get_bom_items_as_dict(bom, company, qty, fetch_exploded, include_non_stock_items=True).values()
+	frappe.has_permission("BOM", "read", doc=bom, throw=True)
+
+	items = get_bom_items_as_dict(
+		bom, company, qty, fetch_exploded, include_non_stock_items=True, ignore_permissions=False
+	).values()
 	items = list(items)
 	items.sort(key=functools.cmp_to_key(lambda a, b: a.item_code > b.item_code and 1 or -1))
 	return items
@@ -1267,7 +1308,7 @@ def validate_bom_no(item, bom_no):
 
 
 @frappe.whitelist()
-def get_children(parent=None, is_root=False, **filters):
+def get_children(doctype=None, parent=None, is_root=False, **filters):
 	if not parent or parent == "BOM":
 		frappe.msgprint(_("Please select a BOM"))
 		return
@@ -1329,9 +1370,10 @@ def add_non_stock_items_cost(stock_entry, work_order, expense_account):
 	bom = frappe.get_doc("BOM", work_order.bom_no)
 	table = "exploded_items" if work_order.get("use_multi_level_bom") else "items"
 
-	items = {}
+	items = frappe._dict()
 	for d in bom.get(table):
-		items.setdefault(d.item_code, d.amount)
+		items.setdefault(d.item_code, 0)
+		items[d.item_code] += flt(d.base_amount if table == "items" else d.amount)
 
 	non_stock_items = frappe.get_all(
 		"Item",
@@ -1358,18 +1400,71 @@ def add_non_stock_items_cost(stock_entry, work_order, expense_account):
 
 
 def add_operations_cost(stock_entry, work_order=None, expense_account=None):
-	from erpnext.stock.doctype.stock_entry.stock_entry import get_operating_cost_per_unit
+	from erpnext.stock.doctype.stock_entry.stock_entry import (
+		get_consumed_operating_cost,
+		get_operating_cost_per_unit,
+	)
 
-	operating_cost_per_unit = get_operating_cost_per_unit(work_order, stock_entry.bom_no)
-
-	if operating_cost_per_unit:
-		stock_entry.append(
-			"additional_costs",
-			{
+	def append_operating_cost(amount, operation=None, qty=None):
+		if amount:
+			row = {
 				"expense_account": expense_account,
 				"description": _("Operating Cost as per Work Order / BOM"),
-				"amount": operating_cost_per_unit * flt(stock_entry.fg_completed_qty),
-			},
+				"amount": flt(
+					amount,
+					frappe.get_precision("Landed Cost Taxes and Charges", "amount"),
+				),
+				"has_operating_cost": 1,
+			}
+			if operation:
+				row["operation_id"] = operation.name
+			if qty is not None:
+				row["qty"] = qty
+			stock_entry.append(
+				"additional_costs",
+				row,
+			)
+
+	if (
+		work_order
+		and stock_entry.bom_no
+		and frappe.db.get_single_value("Manufacturing Settings", "set_op_cost_and_scrap_from_sub_assemblies")
+		and work_order.get("use_multi_level_bom")
+	):
+		operating_cost_per_unit = get_operating_cost_per_unit(work_order, stock_entry.bom_no)
+		append_operating_cost(
+			operating_cost_per_unit * flt(stock_entry.fg_completed_qty),
+			qty=flt(stock_entry.fg_completed_qty),
+		)
+	elif work_order and work_order.get("operations"):
+		for operation in work_order.get("operations"):
+			qty = flt(stock_entry.fg_completed_qty)
+			amount = 0
+
+			if flt(operation.completed_qty):
+				consumed_cost = get_consumed_operating_cost(
+					work_order.name, stock_entry.bom_no, operation.name
+				)
+				remaining_cost = flt(
+					flt(operation.actual_operating_cost) - flt(consumed_cost.get("consumed_cost")),
+					operation.precision("actual_operating_cost"),
+				)
+				remaining_qty = flt(operation.completed_qty) - flt(consumed_cost.get("consumed_qty"))
+
+				if remaining_cost <= 0 or remaining_qty <= 0:
+					continue
+
+				qty = min(remaining_qty, flt(stock_entry.fg_completed_qty))
+				amount = remaining_cost / remaining_qty * qty
+			elif work_order.qty:
+				amount = flt(operation.planned_operating_cost) / flt(work_order.qty) * qty
+
+			append_operating_cost(amount, operation=operation, qty=qty)
+	else:
+		operating_cost_per_unit = get_operating_cost_per_unit(work_order, stock_entry.bom_no)
+		append_operating_cost(
+			operating_cost_per_unit * flt(stock_entry.fg_completed_qty),
+			qty=flt(stock_entry.fg_completed_qty),
 		)
 
 	if work_order and work_order.additional_operating_cost and work_order.qty:
@@ -1445,9 +1540,7 @@ def add_operations_cost(stock_entry, work_order=None, expense_account=None):
 
 
 @frappe.whitelist()
-def get_bom_diff(bom1, bom2):
-	from frappe.model import table_fields
-
+def get_bom_diff(bom1: str, bom2: str):
 	if bom1 == bom2:
 		frappe.throw(
 			_("BOM 1 {0} and BOM 2 {1} should not be same").format(frappe.bold(bom1), frappe.bold(bom2))
@@ -1455,13 +1548,25 @@ def get_bom_diff(bom1, bom2):
 
 	doc1 = frappe.get_doc("BOM", bom1)
 	doc2 = frappe.get_doc("BOM", bom2)
+	doc1.check_permission()
+	doc2.check_permission()
 
 	out = get_diff(doc1, doc2)
 	out.row_changed = []
 	out.added = []
 	out.removed = []
 
-	meta = doc1.meta
+	for df in doc1.meta.fields:
+		diff_table_field(df, doc1, doc2, out)
+
+	return out
+
+
+def diff_table_field(df, doc1, doc2, out):
+	from frappe.model import table_fields
+
+	if df.fieldtype not in table_fields:
+		return
 
 	identifiers = {
 		"operations": "operation",
@@ -1469,34 +1574,39 @@ def get_bom_diff(bom1, bom2):
 		"scrap_items": "item_code",
 		"exploded_items": "item_code",
 	}
+	identifier = identifiers.get(df.fieldname)
+	if not identifier:
+		return
+	old_rows = {}
+	for row in doc1.get(df.fieldname):
+		old_rows.setdefault(row.get(identifier), []).append(row)
 
-	for df in meta.fields:
-		old_value, new_value = doc1.get(df.fieldname), doc2.get(df.fieldname)
+	unmatched_rows = []
+	for index, row in enumerate(doc2.get(df.fieldname)):
+		if not pop_unchanged_row(old_rows.get(row.get(identifier), []), row):
+			unmatched_rows.append((index, row))
 
-		if df.fieldtype in table_fields:
-			identifier = identifiers[df.fieldname]
-			# make maps
-			old_row_by_identifier, new_row_by_identifier = {}, {}
-			for d in old_value:
-				old_row_by_identifier[d.get(identifier)] = d
-			for d in new_value:
-				new_row_by_identifier[d.get(identifier)] = d
+	collect_row_changes(df, identifier, old_rows, unmatched_rows, out)
+	for rows in old_rows.values():
+		out.removed.extend([df.fieldname, row.as_dict()] for row in rows)
 
-			# check rows for additions, changes
-			for i, d in enumerate(new_value):
-				if d.get(identifier) in old_row_by_identifier:
-					diff = get_diff(old_row_by_identifier[d.get(identifier)], d, for_child=True)
-					if diff and diff.changed:
-						out.row_changed.append((df.fieldname, i, d.get(identifier), diff.changed))
-				else:
-					out.added.append([df.fieldname, d.as_dict()])
 
-			# check for deletions
-			for d in old_value:
-				if d.get(identifier) not in new_row_by_identifier:
-					out.removed.append([df.fieldname, d.as_dict()])
+def pop_unchanged_row(candidates, row):
+	for index, candidate in enumerate(candidates):
+		if not get_diff(candidate, row, for_child=True):
+			return candidates.pop(index)
 
-	return out
+
+def collect_row_changes(df, identifier, old_rows, unmatched_rows, out):
+	for index, row in unmatched_rows:
+		candidates = old_rows.get(row.get(identifier))
+		if not candidates:
+			out.added.append([df.fieldname, row.as_dict()])
+			continue
+
+		diff = get_diff(candidates.pop(0), row, for_child=True)
+		if diff and diff.changed:
+			out.row_changed.append((df.fieldname, index, row.get(identifier), diff.changed))
 
 
 @frappe.whitelist()
@@ -1515,10 +1625,10 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 
 	query_filters = {"disabled": 0, "ifnull(end_of_life, '3099-12-31')": (">", today())}
 
-	or_cond_filters = {}
+	or_cond_filters = []
 	if txt:
 		for s_field in searchfields:
-			or_cond_filters[s_field] = ("like", f"%{txt}%")
+			or_cond_filters.append([s_field, "like", f"%{txt}%"])
 
 		barcodes = frappe.get_all(
 			"Item Barcode",
@@ -1528,7 +1638,7 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 
 		barcodes = [d.item_code for d in barcodes]
 		if barcodes:
-			or_cond_filters["name"] = ("in", barcodes)
+			or_cond_filters.append(["name", "in", barcodes])
 
 	if filters and filters.get("item_code"):
 		has_variants = frappe.get_cached_value("Item", filters.get("item_code"), "has_variants")
@@ -1559,7 +1669,7 @@ def make_variant_bom(source_name, bom_no, item, variant_items, target_doc=None):
 		doc.item = item
 		doc.quantity = 1
 
-		item_data = get_item_details(item)
+		item_data = _get_item_details(item)
 		doc.update(
 			{
 				"item_name": item_data.item_name,

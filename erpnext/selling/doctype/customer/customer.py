@@ -14,16 +14,22 @@ from frappe.contacts.address_and_contact import (
 from frappe.model.mapper import get_mapped_doc
 from frappe.model.naming import set_name_by_naming_series, set_name_from_naming_options
 from frappe.model.utils.rename_doc import update_linked_doctypes
-from frappe.utils import cint, cstr, flt, get_formatted_email, today
+from frappe.query_builder import Criterion
+from frappe.query_builder.functions import Coalesce, IfNull, Sum
+from frappe.utils import cint, cstr, flt, get_formatted_email, get_link_to_form, today
 from frappe.utils.deprecations import deprecated
 from frappe.utils.user import get_users_with_role
 
+from erpnext import get_company_currency
 from erpnext.accounts.party import (
 	get_dashboard_info,
 	validate_party_accounts,
 	validate_party_currency_before_merging,
 )
-from erpnext.controllers.website_list_for_contact import add_role_for_portal_user
+from erpnext.controllers.website_list_for_contact import (
+	add_role_for_portal_user,
+	link_portal_users_to_contacts,
+)
 from erpnext.utilities.transaction_base import TransactionBase
 
 
@@ -145,6 +151,7 @@ class Customer(TransactionBase):
 	def validate(self):
 		self.flags.is_new_doc = self.is_new()
 		self.flags.old_lead = self.lead_name
+		self.validate_customer_group()
 		validate_party_accounts(self)
 		self.validate_credit_limit_on_change()
 		self.set_loyalty_program()
@@ -161,10 +168,11 @@ class Customer(TransactionBase):
 				self.loyalty_program_tier = customer.loyalty_program_tier
 
 		if self.sales_team:
-			if sum(member.allocated_percentage or 0 for member in self.sales_team) != 100:
+			total = sum(flt(member.allocated_percentage) for member in self.sales_team)
+			if flt(total, self.precision("allocated_percentage", "sales_team")) != 100:
 				frappe.throw(_("Total contribution percentage should be equal to 100"))
 
-	@frappe.whitelist()
+	@frappe.whitelist(methods=["POST"])
 	def get_customer_group_details(self):
 		doc = frappe.get_doc("Customer Group", self.customer_group)
 		self.accounts = []
@@ -222,10 +230,15 @@ class Customer(TransactionBase):
 		)
 
 		if internal_customer:
+			internal_customer_link = get_link_to_form("Customer", internal_customer)
 			frappe.throw(
-				_("Internal Customer for company {0} already exists").format(
-					frappe.bold(self.represents_company)
-				)
+				_(
+					"Internal Customer {0} already exists for {1}. Disable it to make this Customer internal."
+				).format(
+					internal_customer_link,
+					frappe.bold(self.represents_company),
+				),
+				title=_("Internal Customer Already Exists"),
 			)
 
 	def on_update(self):
@@ -241,6 +254,8 @@ class Customer(TransactionBase):
 			self.copy_communication()
 
 		self.update_customer_groups()
+
+		link_portal_users_to_contacts(self)
 
 	def add_role_for_user(self):
 		for portal_user in self.portal_users:
@@ -274,8 +289,27 @@ class Customer(TransactionBase):
 	def update_lead_status(self):
 		"""If Customer created from Lead, update lead status to "Converted"
 		update Customer link in Quotation, Opportunity"""
-		if self.lead_name:
-			frappe.db.set_value("Lead", self.lead_name, "status", "Converted")
+		if not self.lead_name:
+			return
+
+		frappe.db.set_value("Lead", self.lead_name, "status", "Converted")
+		for doctype, party_type_field in (("Quotation", "quotation_to"), ("Opportunity", "opportunity_from")):
+			self.link_lead_records(doctype, party_type_field)
+
+	def link_lead_records(self, doctype: str, party_type_field: str):
+		names = [
+			name
+			for name in frappe.get_all(
+				doctype, {party_type_field: "Lead", "party_name": self.lead_name}, pluck="name"
+			)
+			if frappe.has_permission(doctype, "write", name)
+		]
+		if names:
+			frappe.db.set_value(
+				doctype,
+				{"name": ("in", names), party_type_field: "Lead", "party_name": self.lead_name},
+				{party_type_field: "Customer", "party_name": self.name},
+			)
 
 	def link_address_and_contact(self):
 		linked_documents = {
@@ -322,6 +356,17 @@ class Customer(TransactionBase):
 					"A Customer Group exists with same name please change the Customer name or rename the Customer Group"
 				),
 				frappe.NameError,
+			)
+
+	def validate_customer_group(self):
+		if not self.customer_group:
+			return
+
+		is_group = frappe.db.get_value("Customer Group", self.customer_group, "is_group")
+		if is_group:
+			frappe.throw(
+				_("Cannot select a Group type Customer Group. Please select a non-group Customer Group."),
+				title=_("Invalid Customer Group"),
 			)
 
 	def validate_credit_limit_on_change(self):
@@ -418,15 +463,11 @@ def create_contact(contact, party_type, party, email):
 
 @frappe.whitelist()
 def make_quotation(source_name, target_doc=None):
-	def set_missing_values(source, target):
-		_set_missing_values(source, target)
-
 	target_doc = get_mapped_doc(
 		"Customer",
 		source_name,
 		{"Customer": {"doctype": "Quotation", "field_map": {"name": "party_name"}}},
 		target_doc,
-		set_missing_values,
 	)
 
 	target_doc.quotation_to = "Customer"
@@ -552,8 +593,12 @@ def check_credit_limit(customer, company, ignore_outstanding_sales_order=False, 
 	customer_outstanding = get_customer_outstanding(customer, company, ignore_outstanding_sales_order)
 	if extra_amount > 0:
 		customer_outstanding += flt(extra_amount)
+	customer_outstanding = flt(
+		customer_outstanding,
+		frappe.get_precision("Customer Credit Limit", "credit_limit", get_company_currency(company)),
+	)
 
-	if credit_limit > 0 and flt(customer_outstanding) > credit_limit:
+	if credit_limit > 0 and customer_outstanding > credit_limit:
 		message = _("Credit limit has been crossed for customer {0} ({1}/{2})").format(
 			customer, customer_outstanding, credit_limit
 		)
@@ -586,11 +631,8 @@ def check_credit_limit(customer, company, ignore_outstanding_sales_order=False, 
 
 			# if the current user does not have permissions to override credit limit,
 			# prompt them to send out an email to the controller users
-			frappe.msgprint(
-				message,
-				title=_("Credit Limit Crossed"),
-				raise_exception=1,
-				primary_action={
+			primary_action = (
+				{
 					"label": "Send Email",
 					"server_action": "erpnext.selling.doctype.customer.customer.send_emails",
 					"hide_on_success": True,
@@ -600,7 +642,16 @@ def check_credit_limit(customer, company, ignore_outstanding_sales_order=False, 
 						"credit_limit": credit_limit,
 						"credit_controller_users_list": credit_controller_users,
 					},
-				},
+				}
+				if frappe.has_permission("Customer", ptype="email", doc=customer)
+				else None
+			)
+
+			frappe.msgprint(
+				message,
+				title=_("Credit Limit Crossed"),
+				raise_exception=1,
+				primary_action=primary_action,
 			)
 
 
@@ -608,6 +659,7 @@ def check_credit_limit(customer, company, ignore_outstanding_sales_order=False, 
 def send_emails(args):
 	args = json.loads(args)
 	subject = _("Credit limit reached for customer {0}").format(args.get("customer"))
+	frappe.has_permission("Customer", ptype="email", doc=args.get("customer"), throw=True)
 	message = _("Credit limit has been crossed for customer {0} ({1}/{2})").format(
 		args.get("customer"), args.get("customer_outstanding"), args.get("credit_limit")
 	)
@@ -651,49 +703,77 @@ def get_customer_outstanding(customer, company, ignore_outstanding_sales_order=F
 
 		outstanding_based_on_so = flt(outstanding_based_on_so[0][0]) if outstanding_based_on_so else 0
 
-	# Outstanding based on Delivery Note, which are not created against Sales Order
-	outstanding_based_on_dn = 0
+	DeliveryNote = frappe.qb.DocType("Delivery Note")
+	DeliveryNoteItem = frappe.qb.DocType("Delivery Note Item")
+	SalesInvoice = frappe.qb.DocType("Sales Invoice")
+	SalesInvoiceItem = frappe.qb.DocType("Sales Invoice Item")
 
-	unmarked_delivery_note_items = frappe.db.sql(
-		"""select
-			dn_item.name, dn_item.amount, dn.base_net_total, dn.base_grand_total
-		from `tabDelivery Note` dn, `tabDelivery Note Item` dn_item
-		where
-			dn.name = dn_item.parent
-			and dn.customer=%s and dn.company=%s
-			and dn.docstatus = 1 and dn.status not in ('Closed', 'Stopped')
-			and ifnull(dn_item.against_sales_order, '') = ''
-			and ifnull(dn_item.against_sales_invoice, '') = ''
-		""",
-		(customer, company),
-		as_dict=True,
+	returned_items = (
+		frappe.qb.from_(DeliveryNoteItem)
+		.join(DeliveryNote)
+		.on(DeliveryNote.name == DeliveryNoteItem.parent)
+		.select(DeliveryNoteItem.name, DeliveryNoteItem.dn_detail)
+		.where(DeliveryNote.customer == customer)
+		.where(DeliveryNote.company == company)
+		.where(DeliveryNote.docstatus == 1)
+		.where(DeliveryNote.is_return == 1)
+	).as_("returned_items")
+	# Credits against a return delivery reduce the original delivery row's billed quantity.
+	billed_dn_detail = Coalesce(returned_items.dn_detail, SalesInvoiceItem.dn_detail)
+
+	si_subquery = (
+		frappe.qb.from_(SalesInvoiceItem)
+		.join(SalesInvoice)
+		.on(SalesInvoice.name == SalesInvoiceItem.parent)
+		.left_join(returned_items)
+		.on((returned_items.name == SalesInvoiceItem.dn_detail) & (SalesInvoice.is_return == 1))
+		.select(billed_dn_detail.as_("dn_detail"), Sum(SalesInvoiceItem.stock_qty).as_("billed_qty"))
+		.where(SalesInvoiceItem.docstatus == 1)
+		.where((SalesInvoice.is_return == 0) | (SalesInvoice.update_billed_amount_in_delivery_note == 1))
+		.groupby(billed_dn_detail)
 	)
+	returned_qty = IfNull(DeliveryNoteItem.returned_qty, 0.0)
 
-	if not unmarked_delivery_note_items:
-		return outstanding_based_on_gle + outstanding_based_on_so
-
-	si_amounts = frappe.db.sql(
-		"""
-		SELECT
-			dn_detail, sum(amount) from `tabSales Invoice Item`
-		WHERE
-			docstatus = 1
-			and dn_detail in ({})
-		GROUP BY dn_detail""".format(
-			", ".join(frappe.db.escape(dn_item.name) for dn_item in unmarked_delivery_note_items)
+	dn_query = (
+		frappe.qb.from_(DeliveryNote)
+		.join(DeliveryNoteItem)
+		.on(DeliveryNote.name == DeliveryNoteItem.parent)
+		.left_join(si_subquery)
+		.on(DeliveryNoteItem.name == si_subquery.dn_detail)
+		.select(
+			Sum(
+				(
+					DeliveryNoteItem.base_net_amount
+					* (DeliveryNoteItem.stock_qty - IfNull(si_subquery.billed_qty, 0.0) - returned_qty)
+					/ DeliveryNoteItem.stock_qty
+					/ DeliveryNote.base_net_total
+				)
+				* DeliveryNote.base_grand_total
+			)
+		)
+		.where(DeliveryNote.customer == customer)
+		.where(DeliveryNote.company == company)
+		.where(DeliveryNote.docstatus == 1)
+		.where(DeliveryNote.base_net_total > 0)
+		.where(DeliveryNote.status.notin(["Closed", "Stopped"]))
+		.where(DeliveryNoteItem.stock_qty > IfNull(si_subquery.billed_qty, 0.0) + returned_qty)
+		.where(
+			Criterion.any(
+				[DeliveryNoteItem.against_sales_order.isnull(), DeliveryNoteItem.against_sales_order == ""]
+			)
+		)
+		.where(
+			Criterion.any(
+				[
+					DeliveryNoteItem.against_sales_invoice.isnull(),
+					DeliveryNoteItem.against_sales_invoice == "",
+				]
+			)
 		)
 	)
 
-	si_amounts = {si_item[0]: si_item[1] for si_item in si_amounts}
-
-	for dn_item in unmarked_delivery_note_items:
-		dn_amount = flt(dn_item.amount)
-		si_amount = flt(si_amounts.get(dn_item.name))
-
-		if dn_amount > si_amount and dn_item.base_net_total:
-			outstanding_based_on_dn += (
-				(dn_amount - si_amount) / dn_item.base_net_total
-			) * dn_item.base_grand_total
+	dn_res = dn_query.run()
+	outstanding_based_on_dn = flt(dn_res[0][0]) if dn_res and dn_res[0][0] is not None else 0.0
 
 	return outstanding_based_on_gle + outstanding_based_on_so + outstanding_based_on_dn
 
@@ -815,6 +895,15 @@ def make_address(args, is_primary_address=1, is_shipping_address=1):
 def get_customer_primary(doctype, txt, searchfield, start, page_len, filters):
 	customer = filters.get("customer")
 	type = filters.get("type")
+
+	# `type` is caller-supplied and was interpolated into qb.DocType(), so any doctype could be
+	# joined to Dynamic Link and read. The two pickers send only these values.
+	if type not in ("Contact", "Address"):
+		frappe.throw(_("Invalid type"), frappe.PermissionError)
+
+	# authorise the party, not Contact/Address: the `if_owner` row on Address would empty the picker rather than error
+	frappe.has_permission("Customer", doc=customer, throw=True)
+
 	type_doctype = qb.DocType(type)
 	dlink = qb.DocType("Dynamic Link")
 

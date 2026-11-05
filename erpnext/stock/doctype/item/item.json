@@ -145,12 +145,14 @@
    "ignore_user_permissions": 1,
    "in_standard_filter": 1,
    "label": "Variant Of",
+   "link_filters": "[[\"Item\",\"has_variants\",\"=\",1]]",
    "options": "Item",
    "read_only": 1,
    "search_index": 1,
    "set_only_once": 1
   },
   {
+   "allow_in_quick_entry": 1,
    "bold": 1,
    "fieldname": "item_name",
    "fieldtype": "Data",
@@ -167,7 +169,6 @@
    "in_preview": 1,
    "in_standard_filter": 1,
    "label": "Item Group",
-   "link_filters": "[[\"Item Group\",\"is_group\",\"=\",0]]",
    "oldfieldname": "item_group",
    "oldfieldtype": "Link",
    "options": "Item Group",
@@ -339,6 +340,7 @@
   },
   {
    "depends_on": "is_stock_item",
+   "documentation_url": "https://docs.frappe.io/erpnext/change-valuation-method",
    "fieldname": "valuation_method",
    "fieldtype": "Select",
    "label": "Valuation Method",
@@ -793,6 +795,7 @@
    "fieldname": "over_delivery_receipt_allowance",
    "fieldtype": "Float",
    "label": "Over Delivery/Receipt Allowance (%)",
+   "non_negative": 1,
    "oldfieldname": "tolerance",
    "oldfieldtype": "Currency"
   },
@@ -800,7 +803,8 @@
    "depends_on": "eval:!doc.__islocal && !doc.is_fixed_asset",
    "fieldname": "over_billing_allowance",
    "fieldtype": "Float",
-   "label": "Over Billing Allowance (%)"
+   "label": "Over Billing Allowance (%)",
+   "non_negative": 1
   },
   {
    "default": "0",
@@ -895,7 +899,7 @@
  "image_field": "image",
  "links": [],
  "make_attachments_public": 1,
- "modified": "2025-12-15 20:08:35.634046",
+ "modified": "2026-09-07 19:53:27.830229",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Item",

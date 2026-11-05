@@ -86,7 +86,7 @@ frappe.query_reports["Stock Balance"] = {
 					...(company && { company }),
 				};
 
-				return frappe.db.get_link_options("Warehouse", txt, filters);
+				return erpnext.utils.get_link_options("Warehouse", txt, filters);
 			},
 		},
 		{
@@ -130,7 +130,7 @@ frappe.query_reports["Stock Balance"] = {
 			fieldname: "include_zero_stock_items",
 			label: __("Include Zero Stock Items"),
 			fieldtype: "Check",
-			default: 0,
+			default: 1,
 		},
 		{
 			fieldname: "show_dimension_wise_stock",

@@ -5,13 +5,16 @@
 import frappe
 from frappe import _, bold
 from frappe.query_builder.functions import IfNull, Sum
-from frappe.utils import cint, flt, get_link_to_form, getdate, nowdate
+from frappe.utils import cint, cstr, flt, get_link_to_form, getdate, nowdate, strip_html
 from frappe.utils.nestedset import get_descendants_of
 
+from erpnext import _refuse
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import validate_loyalty_points
 from erpnext.accounts.doctype.payment_request.payment_request import make_payment_request
+from erpnext.accounts.doctype.pricing_rule.utils import validate_coupon_code
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import (
 	SalesInvoice,
+	get_discounting_status,
 	get_mode_of_payment_info,
 	update_multi_mode_option,
 )
@@ -183,7 +186,6 @@ class POSInvoice(SalesInvoice):
 		total_taxes_and_charges: DF.Currency
 		update_billed_amount_in_delivery_note: DF.Check
 		update_billed_amount_in_sales_order: DF.Check
-		update_stock: DF.Check
 		write_off_account: DF.Link | None
 		write_off_amount: DF.Currency
 		write_off_cost_center: DF.Link | None
@@ -226,9 +228,11 @@ class POSInvoice(SalesInvoice):
 		self.validate_full_payment()
 		self.update_packing_list()
 		if self.coupon_code:
-			from erpnext.accounts.doctype.pricing_rule.utils import validate_coupon_code
+			validate_coupon_code(self.coupon_code, self.customer)
 
-			validate_coupon_code(self.coupon_code)
+	def before_submit(self):
+		super().before_submit()
+		self.validate_mandatory_pos_fields()
 
 	def on_submit(self):
 		# create the loyalty point ledger entry if the customer is enrolled in any loyalty program
@@ -251,6 +255,37 @@ class POSInvoice(SalesInvoice):
 			from erpnext.accounts.doctype.pricing_rule.utils import update_coupon_code_count
 
 			update_coupon_code_count(self.coupon_code, "used")
+
+	def validate_mandatory_pos_fields(self):
+		mandatory_fields = frappe.get_all(
+			"POS Field",
+			filters={"parent": "POS Settings", "parenttype": "POS Settings", "reqd": 1},
+			fields=["fieldname", "label", "fieldtype"],
+		)
+		missing_fields = []
+		for field in mandatory_fields:
+			if field.fieldtype == "Check" or not self.meta.has_field(field.fieldname):
+				continue
+
+			value = self.get(field.fieldname)
+			value = "" if value in (None, []) else cstr(value)
+			if field.fieldtype == "Text Editor" and "<img" in value:
+				continue
+
+			if not strip_html(value).strip():
+				missing_fields.append(_(field.label))
+		if not missing_fields:
+			return
+
+		message = _("{0} is mandatory in POS Settings")
+		if len(missing_fields) > 1:
+			message = _("{0} are mandatory in POS Settings")
+
+		frappe.throw(
+			message.format(", ".join(map(frappe.bold, missing_fields))),
+			frappe.MandatoryError,
+			title=_("Missing POS Fields"),
+		)
 
 	def before_cancel(self):
 		if (
@@ -418,12 +453,14 @@ class POSInvoice(SalesInvoice):
 						)
 
 	def validate_serialised_or_batched_item(self):
+		auto_picks_serial_nos = self.auto_picks_outward_serial_batch()
 		error_msg = []
 		for d in self.get("items"):
 			error_msg = ""
+			serial_no_missing = not d.serial_no and not (auto_picks_serial_nos and d.get("has_batch_no"))
 			if d.get("has_serial_no") and (
 				(not d.use_serial_batch_fields and not d.serial_and_batch_bundle)
-				or (d.use_serial_batch_fields and not d.serial_no)
+				or (d.use_serial_batch_fields and serial_no_missing)
 			):
 				error_msg = f"Row #{d.idx}: Please select Serial No. for item {bold(d.item_code)}"
 
@@ -574,7 +611,7 @@ class POSInvoice(SalesInvoice):
 					flt(self.outstanding_amount) > 0
 					and getdate(self.due_date) < getdate(nowdate())
 					and self.is_discounted
-					and self.get_discounting_status() == "Disbursed"
+					and get_discounting_status(self.name) == "Disbursed"
 				):
 					self.status = "Overdue and Discounted"
 				elif flt(self.outstanding_amount) > 0 and getdate(self.due_date) < getdate(nowdate()):
@@ -583,7 +620,7 @@ class POSInvoice(SalesInvoice):
 					flt(self.outstanding_amount) > 0
 					and getdate(self.due_date) >= getdate(nowdate())
 					and self.is_discounted
-					and self.get_discounting_status() == "Disbursed"
+					and get_discounting_status(self.name) == "Disbursed"
 				):
 					self.status = "Unpaid and Discounted"
 				elif flt(self.outstanding_amount) > 0 and getdate(self.due_date) >= getdate(nowdate()):
@@ -652,7 +689,6 @@ class POSInvoice(SalesInvoice):
 				"tax_category",
 				"ignore_pricing_rule",
 				"company_address",
-				"update_stock",
 			):
 				if not for_validate:
 					self.set(fieldname, profile.get(fieldname))
@@ -803,6 +839,21 @@ class POSInvoice(SalesInvoice):
 
 @frappe.whitelist()
 def get_stock_availability(item_code, warehouse):
+	# POS Profile is the only boundary that fits: Item/Bin `read` exclude Accounts Manager, Item
+	# `select` is granted to every desk user, and POS Invoice `read` is granted to `All`.
+	# select-or-read: the shipped rows give Sales Manager only `select`.
+	ptype = "select" if frappe.only_has_select_perm("POS Profile") else "read"
+	frappe.has_permission("POS Profile", ptype, throw=True)
+
+	# the caller picks the warehouse when allow_warehouse_change is set; costs nobody who has no
+	# Warehouse User Permission
+	from frappe.permissions import get_allowed_docs_for_doctype, get_user_permissions
+
+	if warehouse_permissions := get_user_permissions(frappe.session.user).get("Warehouse"):
+		allowed_warehouses = get_allowed_docs_for_doctype(warehouse_permissions, "POS Invoice")
+		if allowed_warehouses and warehouse not in allowed_warehouses:
+			frappe.throw(_("Not permitted for {0}").format(warehouse), frappe.PermissionError)
+
 	if frappe.db.get_value("Item", item_code, "is_stock_item"):
 		is_stock_item = True
 		bin_qty = get_bin_qty(item_code, warehouse)
@@ -940,6 +991,12 @@ def make_merge_log(invoices):
 
 	if len(invoices) == 0:
 		frappe.throw(_("Atleast one invoice has to be selected."))
+
+	for inv in invoices:
+		name = cstr(inv.get("name"))
+		inv["name"] = name
+		if not name or not frappe.has_permission("POS Invoice", "read", doc=name):
+			_refuse()
 
 	merge_log = frappe.new_doc("POS Invoice Merge Log")
 	merge_log.posting_date = getdate(nowdate())

@@ -162,8 +162,6 @@ class EmailDigest(Document):
 				context.purchase_order_list,
 				context.purchase_orders_items_overdue_list,
 			) = self.get_purchase_orders_items_overdue_list()
-			if not context.purchase_order_list:
-				frappe.throw(_("No items to be received are overdue"))
 
 		if not context:
 			return None
@@ -903,7 +901,9 @@ def send():
 
 @frappe.whitelist()
 def get_digest_msg(name):
-	return frappe.get_doc("Email Digest", name).get_msg_html()
+	email_digest = frappe.get_doc("Email Digest", name)
+	email_digest.check_permission()
+	return email_digest.get_msg_html()
 
 
 def get_incomes_expenses_for_period(account, from_date, to_date):

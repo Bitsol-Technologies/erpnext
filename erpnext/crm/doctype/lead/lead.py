@@ -9,10 +9,11 @@ from frappe.contacts.address_and_contact import (
 )
 from frappe.email.inbox import link_communication_to_document
 from frappe.model.mapper import get_mapped_doc
-from frappe.utils import comma_and, get_link_to_form, has_gravatar, validate_email_address
+from frappe.utils import comma_and, get_link_to_form, validate_email_address
 
 from erpnext.accounts.party import set_taxes
 from erpnext.controllers.selling_controller import SellingController
+from erpnext.crm.doctype.utils import get_phone_number_key, get_phone_number_like_pattern
 from erpnext.crm.utils import CRMNote, copy_comments, link_communications, link_open_events
 from erpnext.selling.doctype.customer.customer import parse_full_name
 
@@ -171,9 +172,6 @@ class Lead(SellingController, CRMNote):
 			if self.email_id == self.lead_owner:
 				frappe.throw(_("Lead Owner cannot be same as the Lead Email Address"))
 
-			if self.is_new() or not self.image:
-				self.image = has_gravatar(self.email_id)
-
 	def link_to_contact(self):
 		# update contact links
 		if self.contact_doc:
@@ -236,7 +234,9 @@ class Lead(SellingController, CRMNote):
 		return frappe.db.get_value("Quotation", {"party_name": self.name, "docstatus": 1, "status": "Lost"})
 
 	@frappe.whitelist()
-	def create_prospect_and_contact(self, data):
+	def create_prospect_and_contact(self, data: dict):
+		self.check_permission("write")
+
 		data = frappe._dict(data)
 		if data.create_contact:
 			self.create_contact()
@@ -441,6 +441,7 @@ def get_lead_details(lead, posting_date=None, company=None, doctype=None):
 	out = frappe._dict()
 
 	lead_doc = frappe.get_doc("Lead", lead)
+	lead_doc.check_permission()
 	lead = lead_doc
 
 	out.update(
@@ -470,9 +471,17 @@ def get_lead_details(lead, posting_date=None, company=None, doctype=None):
 	return out
 
 
-@frappe.whitelist()
-def make_lead_from_communication(communication, ignore_communication_links=False):
+@frappe.whitelist(methods=["POST"])
+def make_lead_from_communication(communication: str, ignore_communication_links: bool = False):
 	"""raise a issue from email"""
+
+	# `communication` is caller-supplied. Communication grants read to `All` only for the owner and
+	# carries a has_permission hook, so doc= is what decides access.
+	frappe.has_permission("Communication", doc=communication, throw=True)
+
+	# the insert path checks `create` itself, but the path that reuses an existing Lead required
+	# nothing, so it returned a Lead name to callers with no access to Leads at all
+	frappe.has_permission("Lead", ptype="create", throw=True)
 
 	doc = frappe.get_doc("Communication", communication)
 	lead_name = None
@@ -490,7 +499,6 @@ def make_lead_from_communication(communication, ignore_communication_links=False
 			}
 		)
 		lead.flags.ignore_mandatory = True
-		lead.flags.ignore_permissions = True
 		lead.insert()
 
 		lead_name = lead.name
@@ -499,31 +507,38 @@ def make_lead_from_communication(communication, ignore_communication_links=False
 	return lead_name
 
 
-def get_lead_with_phone_number(number):
-	if not number:
-		return
+def get_leads_with_phone_number(number: str | None) -> list[str]:
+	"""Return all leads with a phone, WhatsApp or mobile number matching the given number."""
+	if not (key := get_phone_number_key(number)):
+		return []
 
+	phone_fields = ["phone", "whatsapp_no", "mobile_no"]
+	pattern = get_phone_number_like_pattern(key)
 	leads = frappe.get_all(
 		"Lead",
-		or_filters={
-			"phone": ["like", f"%{number}"],
-			"whatsapp_no": ["like", f"%{number}"],
-			"mobile_no": ["like", f"%{number}"],
-		},
-		limit=1,
-		order_by="creation DESC",
+		or_filters={field: ["like", pattern] for field in phone_fields},
+		fields=["name", *phone_fields],
+		order_by="creation desc",
 	)
+	return [
+		lead.name for lead in leads if any(get_phone_number_key(lead[field]) == key for field in phone_fields)
+	]
 
-	lead = leads[0].name if leads else None
 
-	return lead
+def get_lead_with_phone_number(number: str | None) -> str | None:
+	"""Return the latest lead matching the given number, kept for callers of the old helper."""
+	leads = get_leads_with_phone_number(number)
+	return leads[0] if leads else None
 
 
-@frappe.whitelist()
-def add_lead_to_prospect(lead, prospect):
+@frappe.whitelist(methods=["POST"])
+def add_lead_to_prospect(lead: str, prospect: str):
+	if lead:
+		frappe.has_permission("Lead", "read", lead, throw=True)
+
 	prospect = frappe.get_doc("Prospect", prospect)
 	prospect.append("leads", {"lead": lead})
-	prospect.save(ignore_permissions=True)
+	prospect.save()
 
 	carry_forward_communication_and_comments = frappe.db.get_single_value(
 		"CRM Settings", "carry_forward_communication_and_comments"

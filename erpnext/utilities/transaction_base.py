@@ -15,6 +15,14 @@ class UOMMustBeIntegerError(frappe.ValidationError):
 
 
 class TransactionBase(StatusUpdater):
+	def on_change(self):
+		# `on_change` also fires for `db_set()`, so only run during an actual insert/save.
+		is_real_save = self.flags.in_insert or (self.doctype, self.name) in frappe.flags.currently_saving
+		if not is_real_save:
+			return
+
+		self.copy_terms_and_conditions_attachments()
+
 	def validate_posting_time(self):
 		# set Edit Posting Date and Time to 1 while data import
 		if frappe.flags.in_import and self.posting_date:
@@ -32,6 +40,56 @@ class TransactionBase(StatusUpdater):
 
 	def validate_uom_is_integer(self, uom_field, qty_fields, child_dt=None):
 		validate_uom_is_integer(self, uom_field, qty_fields, child_dt)
+
+	def copy_terms_and_conditions_attachments(self):
+		if (
+			not self.name
+			or not self.meta.has_field("tc_name")
+			or not self.tc_name
+			or not self.has_value_changed("tc_name")
+		):
+			return
+
+		copy_attachments_to_transaction = frappe.db.get_value(
+			"Terms and Conditions", self.tc_name, "copy_attachments_to_transaction"
+		)
+		if not cint(copy_attachments_to_transaction):
+			return
+
+		source_attachments = frappe.get_all(
+			"File",
+			filters={
+				"attached_to_doctype": "Terms and Conditions",
+				"attached_to_name": self.tc_name,
+			},
+			fields=["name", "file_url"],
+		)
+		if not source_attachments:
+			return
+
+		existing_file_urls = {
+			attachment.file_url
+			for attachment in frappe.get_all(
+				"File",
+				filters={
+					"attached_to_doctype": self.doctype,
+					"attached_to_name": self.name,
+				},
+				fields=["file_url"],
+			)
+			if attachment.file_url
+		}
+
+		for source_attachment in source_attachments:
+			if not source_attachment.file_url or source_attachment.file_url in existing_file_urls:
+				continue
+
+			# Reuse the existing file metadata so the same on-disk blob is shared.
+			new_attachment = frappe.get_doc("File", source_attachment.name).create_attachment_copy(
+				attached_to_doctype=self.doctype,
+				attached_to_name=self.name,
+			)
+			existing_file_urls.add(new_attachment.file_url)
 
 	def validate_with_previous_doc(self, ref):
 		self.exclude_fields = ["conversion_factor", "uom"] if self.get("is_return") else []
@@ -89,11 +147,15 @@ class TransactionBase(StatusUpdater):
 
 		if self.doctype in buying_doctypes:
 			action, role_allowed_to_override = frappe.get_cached_value(
-				"Buying Settings", "None", ["maintain_same_rate_action", "role_to_override_stop_action"]
+				"Buying Settings",
+				"Buying Settings",
+				["maintain_same_rate_action", "role_to_override_stop_action"],
 			)
 		else:
 			action, role_allowed_to_override = frappe.get_cached_value(
-				"Selling Settings", "None", ["maintain_same_rate_action", "role_to_override_stop_action"]
+				"Selling Settings",
+				"Selling Settings",
+				["maintain_same_rate_action", "role_to_override_stop_action"],
 			)
 
 		stop_actions = []
@@ -256,17 +318,21 @@ def delete_events(ref_type, ref_name):
 		frappe.delete_doc("Event", events, for_reload=True)
 
 
-def validate_uom_is_integer(doc, uom_field, qty_fields, child_dt=None):
-	if isinstance(qty_fields, str):
-		qty_fields = [qty_fields]
-
-	distinct_uoms = tuple(set(uom for uom in (d.get(uom_field) for d in doc.get_all_children()) if uom))
-	integer_uoms = set(
+def get_whole_number_uoms(uoms):
+	distinct_uoms = tuple(set(uom for uom in uoms if uom))
+	return set(
 		d[0]
 		for d in frappe.db.get_values(
 			"UOM", (("name", "in", distinct_uoms), ("must_be_whole_number", "=", 1)), cache=True
 		)
 	)
+
+
+def validate_uom_is_integer(doc, uom_field, qty_fields, child_dt=None):
+	if isinstance(qty_fields, str):
+		qty_fields = [qty_fields]
+
+	integer_uoms = get_whole_number_uoms(d.get(uom_field) for d in doc.get_all_children())
 
 	if not integer_uoms:
 		return
@@ -276,13 +342,13 @@ def validate_uom_is_integer(doc, uom_field, qty_fields, child_dt=None):
 			for f in qty_fields:
 				qty = d.get(f)
 				if qty:
-					precision = d.precision(f)
-					if abs(cint(qty) - flt(qty, precision)) > 0.0000001:
+					qty = flt(qty, d.precision(f))
+					if qty != cint(qty):
 						frappe.throw(
 							_(
 								"Row {1}: Quantity ({0}) cannot be a fraction. To allow this, disable '{2}' in UOM {3}."
 							).format(
-								flt(qty, precision),
+								qty,
 								d.idx,
 								frappe.bold(_("Must be Whole Number")),
 								frappe.bold(d.get(uom_field)),

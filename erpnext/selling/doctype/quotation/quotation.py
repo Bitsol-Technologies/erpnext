@@ -7,8 +7,10 @@ import json
 import frappe
 from frappe import _
 from frappe.model.mapper import get_mapped_doc
-from frappe.utils import flt, getdate, nowdate
+from frappe.utils import cint, flt, getdate, nowdate
 
+from erpnext.accounts.doctype.pricing_rule.utils import validate_coupon_code
+from erpnext.controllers.mapper import get_qty_already_mapped
 from erpnext.controllers.selling_controller import SellingController
 
 form_grid_templates = {"items": "templates/form_grid/item_grid.html"}
@@ -139,6 +141,10 @@ class Quotation(SellingController):
 		self.validate_uom_is_integer("stock_uom", "stock_qty")
 		self.validate_uom_is_integer("uom", "qty")
 		self.validate_valid_till()
+		if self.coupon_code:
+			customer = get_existing_customer_name(self.quotation_to, self.party_name)
+			validate_coupon_code(self.coupon_code, customer)
+
 		self.set_customer_name()
 		if self.items:
 			self.with_items = 1
@@ -146,6 +152,9 @@ class Quotation(SellingController):
 		from erpnext.stock.doctype.packed_item.packed_item import make_packing_list
 
 		make_packing_list(self)
+
+	def after_insert(self):
+		self.carry_forward_communication()
 
 	def before_submit(self):
 		self.set_has_alternative_item()
@@ -188,32 +197,44 @@ class Quotation(SellingController):
 		)
 
 		for row in self._items:
-			if row.name not in ordered_items or row.qty > ordered_items[row.name]:
+			if row.name not in ordered_items or row.stock_qty > ordered_items[row.name]:
 				return "Partially Ordered"
 
 		return "Ordered"
 
 	def get_valid_items(self):
-		"""
-		Filters out items in an alternatives set that were not ordered.
-		"""
+		"""Collapse each alternatives set to its ordered row, or keep the main row if none was ordered."""
 
 		def is_in_sales_order(row):
-			in_sales_order = bool(
+			return bool(
 				frappe.db.exists(
 					"Sales Order Item",
 					{"quotation_item": row.name, "item_code": row.item_code, "docstatus": 1},
 				)
 			)
-			return in_sales_order
 
-		def can_map(row) -> bool:
-			if row.is_alternative or row.has_alternative_item:
-				return is_in_sales_order(row)
+		valid_items = []
+		alternatives_set = []
 
-			return True
+		def collapse_set():
+			if not alternatives_set:
+				return
+			ordered_rows = [row for row in alternatives_set if is_in_sales_order(row)]
+			valid_items.extend(ordered_rows or alternatives_set[:1])
 
-		return list(filter(can_map, self.get("items")))
+		for row in self.get("items"):
+			if row.has_alternative_item:
+				collapse_set()
+				alternatives_set = [row]
+			elif row.is_alternative:
+				alternatives_set.append(row)
+			else:
+				collapse_set()
+				alternatives_set = []
+				valid_items.append(row)
+
+		collapse_set()
+		return valid_items
 
 	def is_fully_ordered(self):
 		return self.get_ordered_status() == "Ordered"
@@ -254,8 +275,18 @@ class Quotation(SellingController):
 		opp.set_status(status=status, update=True)
 
 	@frappe.whitelist()
-	def declare_enquiry_lost(self, lost_reasons_list, competitors, detailed_reason=None):
+	def declare_enquiry_lost(
+		self, lost_reasons_list: list, competitors: list, detailed_reason: str | None = None
+	):
+		self.check_permission("write")
+
+		if self.docstatus != 1:
+			frappe.throw(_("Only a submitted Quotation can be set as Lost."))
+
 		if not (self.is_fully_ordered() or self.is_partially_ordered()):
+			if not lost_reasons_list:
+				frappe.throw(_("Please select at least one Lost Reason"))
+
 			get_lost_reasons = frappe.get_list("Quotation Lost Reason", fields=["name"])
 			lost_reasons_lst = [reason.get("name") for reason in get_lost_reasons]
 			self.db_set("status", "Lost")
@@ -303,6 +334,18 @@ class Quotation(SellingController):
 		self.update_opportunity("Open")
 		self.update_lead()
 
+	def carry_forward_communication(self):
+		from erpnext.crm.utils import copy_comments, link_communications
+
+		if not (
+			self.opportunity
+			and frappe.get_single_value("CRM Settings", "carry_forward_communication_and_comments")
+		):
+			return
+
+		copy_comments("Opportunity", self.opportunity, self)
+		link_communications("Opportunity", self.opportunity, self)
+
 	def print_other_charges(self, docname):
 		print_lst = []
 		for d in self.get("taxes"):
@@ -348,19 +391,22 @@ def get_list_context(context=None):
 	return list_context
 
 
+def validate_quotation_expiry(source_name):
+	if frappe.db.get_singles_value("Selling Settings", "allow_sales_order_creation_for_expired_quotation"):
+		return
+
+	quotation = frappe.db.get_value("Quotation", source_name, ["transaction_date", "valid_till"], as_dict=1)
+	if (
+		quotation
+		and quotation.valid_till
+		and (quotation.valid_till < quotation.transaction_date or quotation.valid_till < getdate(nowdate()))
+	):
+		frappe.throw(_("Validity period of this quotation has ended."))
+
+
 @frappe.whitelist()
 def make_sales_order(source_name: str, target_doc=None, args=None):
-	if not frappe.db.get_singles_value(
-		"Selling Settings", "allow_sales_order_creation_for_expired_quotation"
-	):
-		quotation = frappe.db.get_value(
-			"Quotation", source_name, ["transaction_date", "valid_till"], as_dict=1
-		)
-		if quotation.valid_till and (
-			quotation.valid_till < quotation.transaction_date or quotation.valid_till < getdate(nowdate())
-		):
-			frappe.throw(_("Validity period of this quotation has ended."))
-
+	validate_quotation_expiry(source_name)
 	return _make_sales_order(source_name, target_doc, args=args)
 
 
@@ -372,6 +418,9 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False, ar
 
 	customer = _make_customer(source_name, ignore_permissions)
 	ordered_items = get_ordered_items(source_name)
+	mapped_items = get_qty_already_mapped(target_doc, "quotation_item", "stock_qty")
+	for name, stock_qty in mapped_items.items():
+		ordered_items[name] = flt(ordered_items.get(name)) + stock_qty
 
 	selected_rows = [x.get("name") for x in frappe.flags.get("args", {}).get("selected_items", [])]
 
@@ -409,9 +458,9 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False, ar
 		target.run_method("calculate_taxes_and_totals")
 
 	def update_item(obj, target, source_parent):
-		balance_qty = obj.qty if is_unit_price_row(obj) else obj.qty - ordered_items.get(obj.name, 0.0)
-		target.qty = balance_qty if balance_qty > 0 else 0
-		target.stock_qty = flt(target.qty) * flt(obj.conversion_factor)
+		balance_stock_qty = obj.stock_qty - ordered_items.get(obj.name, 0.0)
+		target.stock_qty = balance_stock_qty if balance_stock_qty > 0 else 0
+		target.qty = flt(target.stock_qty) / flt(obj.conversion_factor)
 
 		if obj.against_blanket_order:
 			target.against_blanket_order = obj.against_blanket_order
@@ -425,7 +474,10 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False, ar
 		2. If selections: Is Alternative Item/Has Alternative Item: Map if selected and adequate qty
 		3. If no selections: Simple row: Map if adequate qty
 		"""
-		if not ((item.qty > ordered_items.get(item.name, 0.0)) or is_unit_price_row(item)):
+		if not (
+			(item.stock_qty > ordered_items.get(item.name, 0.0))
+			or (is_unit_price_row(item) and item.name not in mapped_items)
+		):
 			return False
 
 		if not selected_rows:
@@ -442,6 +494,10 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False, ar
 		child_filter = d.name in filtered_items if filtered_items else True
 		return child_filter
 
+	automatically_fetch_payment_terms = cint(
+		frappe.get_single_value("Accounts Settings", "automatically_fetch_payment_terms")
+	)
+
 	doclist = get_mapped_doc(
 		"Quotation",
 		source_name,
@@ -449,6 +505,7 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False, ar
 			"Quotation": {
 				"doctype": "Sales Order",
 				"validation": {"docstatus": ["=", 1]},
+				"field_no_map": ["payment_terms_template"],
 			},
 			"Quotation Item": {
 				"doctype": "Sales Order Item",
@@ -458,12 +515,14 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False, ar
 			},
 			"Sales Taxes and Charges": {"doctype": "Sales Taxes and Charges", "reset_value": True},
 			"Sales Team": {"doctype": "Sales Team", "add_if_empty": True},
-			"Payment Schedule": {"doctype": "Payment Schedule", "add_if_empty": True},
 		},
 		target_doc,
 		set_missing_values,
 		ignore_permissions=ignore_permissions,
 	)
+
+	if automatically_fetch_payment_terms:
+		doclist.set_payment_schedule()
 
 	return doclist
 
@@ -492,6 +551,10 @@ def set_expired_status():
 
 @frappe.whitelist()
 def make_sales_invoice(source_name, target_doc=None, args=None):
+	if frappe.db.get_value("Quotation", source_name, "status") == "Lost":
+		frappe.throw(_("Cannot create a Sales Invoice against Lost Quotation {0}.").format(source_name))
+
+	validate_quotation_expiry(source_name)
 	return _make_sales_invoice(source_name, target_doc, args=args)
 
 
@@ -550,18 +613,7 @@ def _make_customer(source_name, ignore_permissions=False):
 		as_dict=1,
 	)
 
-	if quotation.quotation_to == "Customer":
-		return frappe.get_doc("Customer", quotation.party_name)
-	elif quotation.quotation_to == "CRM Deal":
-		return frappe.get_doc("Customer", {"crm_deal": quotation.party_name})
-
-	# Check if a Customer already exists for the Lead or Prospect.
-	existing_customer = None
-	if quotation.quotation_to == "Lead":
-		existing_customer = frappe.db.get_value("Customer", {"lead_name": quotation.party_name})
-	elif quotation.quotation_to == "Prospect":
-		existing_customer = frappe.db.get_value("Customer", {"prospect_name": quotation.party_name})
-
+	existing_customer = get_existing_customer_name(quotation.quotation_to, quotation.party_name)
 	if existing_customer:
 		return frappe.get_doc("Customer", existing_customer)
 
@@ -572,6 +624,20 @@ def _make_customer(source_name, ignore_permissions=False):
 		return create_customer_from_prospect(quotation.party_name, ignore_permissions=ignore_permissions)
 
 	return None
+
+
+def get_existing_customer_name(quotation_to, party_name):
+	if not party_name:
+		return
+
+	if quotation_to == "Customer":
+		return party_name
+
+	customer_field = {"Lead": "lead_name", "Prospect": "prospect_name", "CRM Deal": "crm_deal"}.get(
+		quotation_to
+	)
+	if customer_field:
+		return frappe.db.get_value("Customer", {customer_field: party_name})
 
 
 def create_customer_from_lead(lead_name, ignore_permissions=False):
@@ -614,9 +680,13 @@ def handle_mandatory_error(e, customer, lead_name):
 	frappe.throw(message, title=_("Mandatory Missing"))
 
 
+@frappe.whitelist()
 def get_ordered_items(quotation: str):
 	return frappe._dict(
 		frappe.get_all(
-			"Quotation Item", {"docstatus": 1, "parent": quotation}, ["name", "ordered_qty"], as_list=True
+			"Quotation Item",
+			{"docstatus": 1, "parent": quotation, "ordered_qty": (">", 0)},
+			["name", "ordered_qty"],
+			as_list=True,
 		)
 	)

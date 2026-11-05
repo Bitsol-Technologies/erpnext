@@ -13,6 +13,7 @@ from frappe.query_builder import DocType, Interval
 from frappe.query_builder.functions import Now
 from frappe.utils import flt, get_fullname
 
+from erpnext.accounts.party import validate_party_frozen_disabled
 from erpnext.crm.utils import (
 	CRMNote,
 	copy_comments,
@@ -131,7 +132,10 @@ class Opportunity(TransactionBase, CRMNote):
 		self.validate_item_details()
 		self.validate_uom_is_integer("uom", "qty")
 		self.validate_cust_name()
+		self.validate_party()
+		self.validate_party_specific_items()
 		self.map_fields()
+		self.validate_qty()
 		self.set_exchange_rate()
 
 		if not self.title:
@@ -141,6 +145,41 @@ class Opportunity(TransactionBase, CRMNote):
 
 	def on_update(self):
 		self.update_prospect()
+
+	def validate_party_specific_items(self):
+		if self.opportunity_from != "Customer" or not self.party_name:
+			return
+
+		from erpnext.selling.doctype.party_specific_item.party_specific_item import get_party_specific_items
+
+		allowed_values = get_party_specific_items(self.party_name)
+		if not allowed_values:
+			return
+
+		rows = [row for row in self.get("items") if row.item_code]
+		allowed_items = frappe.get_all(
+			"Item",
+			filters=[["name", "in", list({row.item_code for row in rows})]]
+			+ [[field, "in", values] for field, values in allowed_values.items()],
+			pluck="name",
+		)
+		for row in rows:
+			if row.item_code not in allowed_items:
+				frappe.throw(
+					_("Row {0}: Item {1} is not allowed for {2} {3}.").format(
+						row.idx, frappe.bold(row.item_code), _("Customer"), frappe.bold(self.party_name)
+					),
+					title=_("Item Restricted for Party"),
+				)
+
+	def validate_qty(self):
+		for item in self.items:
+			if flt(item.qty) <= 0:
+				frappe.throw(
+					_("Row #{0}: Quantity must be greater than 0 for Item {1}").format(
+						item.idx, item.item_code
+					)
+				)
 
 	def map_fields(self):
 		for field in self.meta.get_valid_columns():
@@ -277,13 +316,17 @@ class Opportunity(TransactionBase, CRMNote):
 			self.save()
 
 		else:
-			frappe.throw(_("Cannot declare as lost, because Quotation has been made."))
+			frappe.throw(_("Cannot declare as Lost because an active Quotation exists."))
 
 	def has_active_quotation(self):
 		if not self.get("items", []):
 			return frappe.get_all(
 				"Quotation",
-				{"opportunity": self.name, "status": ("not in", ["Lost", "Closed"]), "docstatus": 1},
+				{
+					"opportunity": self.name,
+					"status": ("not in", ["Lost", "Cancelled", "Expired"]),
+					"docstatus": 1,
+				},
 				"name",
 			)
 		else:
@@ -292,14 +335,20 @@ class Opportunity(TransactionBase, CRMNote):
 				select q.name
 				from `tabQuotation` q, `tabQuotation Item` qi
 				where q.name = qi.parent and q.docstatus=1 and qi.prevdoc_docname =%s
-				and q.status not in ('Lost', 'Closed')""",
+				and q.status not in ('Lost', 'Cancelled', 'Expired')""",
 				self.name,
 			)
 
 	def has_ordered_quotation(self):
 		if not self.get("items", []):
 			return frappe.get_all(
-				"Quotation", {"opportunity": self.name, "status": "Ordered", "docstatus": 1}, "name"
+				"Quotation",
+				{
+					"opportunity": self.name,
+					"status": ("in", ["Ordered", "Partially Ordered"]),
+					"docstatus": 1,
+				},
+				"name",
 			)
 		else:
 			return frappe.db.sql(
@@ -307,7 +356,7 @@ class Opportunity(TransactionBase, CRMNote):
 				select q.name
 				from `tabQuotation` q, `tabQuotation Item` qi
 				where q.name = qi.parent and q.docstatus=1 and qi.prevdoc_docname =%s
-				and q.status = 'Ordered'""",
+				and q.status in ('Ordered', 'Partially Ordered')""",
 				self.name,
 			)
 
@@ -325,6 +374,10 @@ class Opportunity(TransactionBase, CRMNote):
 			if self.has_active_quotation():
 				return False
 			return True
+
+	def validate_party(self) -> None:
+		if self.opportunity_from == "Customer":
+			validate_party_frozen_disabled("Customer", self.party_name)
 
 	def validate_cust_name(self):
 		if self.party_name:
@@ -380,7 +433,7 @@ def get_item_details(item_code):
 @frappe.whitelist()
 def make_quotation(source_name, target_doc=None):
 	def set_missing_values(source, target):
-		from erpnext.controllers.accounts_controller import get_default_taxes_and_charges
+		from erpnext.controllers.accounts_controller import _get_default_taxes_and_charges
 
 		quotation = frappe.get_doc(target)
 
@@ -396,7 +449,7 @@ def make_quotation(source_name, target_doc=None):
 		quotation.conversion_rate = exchange_rate
 
 		# get default taxes
-		taxes = get_default_taxes_and_charges("Sales Taxes and Charges Template", company=quotation.company)
+		taxes = _get_default_taxes_and_charges("Sales Taxes and Charges Template", company=quotation.company)
 		if taxes.get("taxes"):
 			quotation.update(taxes)
 
@@ -491,8 +544,8 @@ def make_supplier_quotation(source_name, target_doc=None):
 	return doclist
 
 
-@frappe.whitelist()
-def set_multiple_status(names, status):
+@frappe.whitelist(methods=["POST"])
+def set_multiple_status(names: str | list[str], status: str):
 	names = json.loads(names)
 	for name in names:
 		opp = frappe.get_doc("Opportunity", name)
@@ -521,12 +574,20 @@ def auto_close_opportunity():
 		doc.save()
 
 
-@frappe.whitelist()
-def make_opportunity_from_communication(communication, company, ignore_communication_links=False):
+@frappe.whitelist(methods=["POST"])
+def make_opportunity_from_communication(
+	communication: str, company: str, ignore_communication_links: bool = False
+):
 	from erpnext.crm.doctype.lead.lead import make_lead_from_communication
+
+	# `communication` is caller-supplied. Communication grants read to `All` only for the owner and
+	# carries a has_permission hook, so doc= is what decides access.
+	frappe.has_permission("Communication", doc=communication, throw=True)
 
 	doc = frappe.get_doc("Communication", communication)
 
+	# make_lead_from_communication() carries its own check, but it is skipped entirely when the
+	# email already references a Lead, so this cannot rely on it.
 	lead = doc.reference_name if doc.reference_doctype == "Lead" else None
 	if not lead:
 		lead = make_lead_from_communication(communication, ignore_communication_links=True)
@@ -540,7 +601,7 @@ def make_opportunity_from_communication(communication, company, ignore_communica
 			"opportunity_from": opportunity_from,
 			"party_name": lead,
 		}
-	).insert(ignore_permissions=True)
+	).insert()
 
 	link_communication_to_document(doc, "Opportunity", opportunity.name, ignore_communication_links)
 

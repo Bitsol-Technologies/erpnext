@@ -4,11 +4,14 @@
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import add_days, flt, now_datetime, nowdate
+from frappe.utils import add_days, flt, getdate, now_datetime, nowdate
 
 import erpnext
+from erpnext.setup.doctype.employee.test_employee import make_employee
+from erpnext.stock.doctype.delivery_note.delivery_note import make_delivery_trip
 from erpnext.stock.doctype.delivery_trip.delivery_trip import (
 	get_contact_and_address,
+	get_driver_email,
 	notify_customers,
 )
 from erpnext.tests.utils import create_test_contact_and_address
@@ -76,6 +79,43 @@ class TestDeliveryTrip(FrappeTestCase):
 	def test_delivery_trip_status_draft(self):
 		self.assertEqual(self.delivery_trip.status, "Draft")
 
+	def test_unfit_driver_cannot_submit(self):
+		for status, expiry_date in (("Left", None), ("Suspended", None), ("Active", add_days(nowdate(), -1))):
+			with self.subTest(status=status, expiry_date=expiry_date):
+				frappe.db.set_value(
+					"Driver", self.delivery_trip.driver, {"status": status, "expiry_date": expiry_date}
+				)
+				with self.assertRaises(frappe.ValidationError):
+					self.delivery_trip.submit()
+				self.delivery_trip.reload()
+
+	def test_license_valid_on_departure_date_can_submit(self):
+		frappe.db.set_value(
+			"Driver", self.delivery_trip.driver, "expiry_date", getdate(self.delivery_trip.departure_time)
+		)
+		self.delivery_trip.submit()
+		self.assertEqual(self.delivery_trip.docstatus, 1)
+
+	def test_driver_email_respects_employee_access(self):
+		user = f"driver-{frappe.generate_hash(length=10)}@example.com"
+		employee = make_employee(user, company="_Test Company")
+		driver = self.delivery_trip.driver
+		frappe.db.set_value("Driver", driver, "employee", employee)
+		frappe.db.set_value(
+			"Employee", employee, {"company_email": None, "prefered_email": "private@example.com"}
+		)
+
+		reader = f"delivery-{frappe.generate_hash(length=10)}@example.com"
+		frappe.get_doc(
+			{"doctype": "User", "email": reader, "first_name": "Delivery", "send_welcome_email": 0}
+		).insert().add_roles("Delivery User")
+		with self.set_user(reader):
+			self.assertFalse(frappe.has_permission("Employee", "read", doc=employee))
+			self.assertEqual(get_driver_email(driver), {"email": None})
+		self.assertEqual(get_driver_email(driver), {"email": "private@example.com"})
+		frappe.db.set_value("Employee", employee, "company_email", user)
+		self.assertEqual(get_driver_email(driver), {"email": user})
+
 	def test_delivery_trip_status_scheduled(self):
 		self.delivery_trip.submit()
 		self.assertEqual(self.delivery_trip.status, "Scheduled")
@@ -99,6 +139,32 @@ class TestDeliveryTrip(FrappeTestCase):
 
 		self.delivery_trip.save()
 		self.assertEqual(self.delivery_trip.status, "Completed")
+
+	def map_delivery_note_onto_trip(self, existing_stop):
+		from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
+
+		delivery_note = create_delivery_note()
+		trip = frappe.new_doc("Delivery Trip")
+		trip.append("delivery_stops", existing_stop)
+
+		return delivery_note, make_delivery_trip(delivery_note.name, trip)
+
+	def test_mapping_drops_placeholder_stop(self):
+		delivery_note, trip = self.map_delivery_note_onto_trip({})
+
+		self.assertEqual(len(trip.delivery_stops), 1)
+		self.assertEqual(trip.delivery_stops[0].delivery_note, delivery_note.name)
+
+	def test_mapping_keeps_partially_filled_stop(self):
+		_, trip = self.map_delivery_note_onto_trip({"customer": "_Test Customer"})
+
+		self.assertEqual(len(trip.delivery_stops), 2)
+		self.assertIsNone(trip.delivery_stops[0].delivery_note)
+
+	def test_stop_without_address_throws_mandatory_error(self):
+		self.delivery_trip.append("delivery_stops", {"customer": "_Test Customer"})
+
+		self.assertRaises(frappe.MandatoryError, self.delivery_trip.save)
 
 
 def create_address(driver):
@@ -129,6 +195,7 @@ def create_driver():
 			{
 				"doctype": "Driver",
 				"full_name": "Newton Scmander",
+				"status": "Active",
 				"cell_number": "98343424242",
 				"license_number": "B809",
 			}

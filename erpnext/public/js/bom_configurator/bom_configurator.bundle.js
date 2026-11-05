@@ -79,8 +79,8 @@ class BOMConfigurator {
 			},
 			onrender(node) {
 				const qty = node.data.qty || frm_obj.frm.doc.qty;
-				const uom = node.data.uom || frm_obj.frm.doc.uom;
-				const docname = node.data.name || frm_obj.frm.doc.name;
+				const uom = frappe.utils.escape_html(node.data.uom || frm_obj.frm.doc.uom);
+				const docname = frappe.utils.escape_html(node.data.name || frm_obj.frm.doc.name);
 				let amount = node.data.amount;
 				if (node.data.value === frm_obj.frm.doc.item_code) {
 					amount = frm_obj.frm.doc.raw_material_cost;
@@ -219,14 +219,10 @@ class BOMConfigurator {
 				},
 			],
 			(data) => {
-				if (!node.data.parent_id) {
-					node.data.parent_id = this.frm.doc.name;
-				}
-
 				frappe.call({
-					method: "erpnext.manufacturing.doctype.bom_creator.bom_creator.add_item",
+					method: "add_item",
+					doc: this.frm.doc,
 					args: {
-						parent: node.data.parent_id,
 						fg_item: node.data.value,
 						item_code: data.item_code,
 						fg_reference_id: node.data.name || this.frm.doc.name,
@@ -252,17 +248,11 @@ class BOMConfigurator {
 		dialog.show();
 		view.events.set_default_qty(dialog);
 
-		dialog.set_primary_action(__("Add"), () => {
-			let bom_item = dialog.get_values();
-
-			if (!node.data?.parent_id) {
-				node.data.parent_id = this.frm.doc.name;
-			}
-
+		dialog.set_primary_action(__("Add"), (bom_item) => {
 			frappe.call({
-				method: "erpnext.manufacturing.doctype.bom_creator.bom_creator.add_sub_assembly",
+				method: "add_sub_assembly",
+				doc: this.frm.doc,
 				args: {
-					parent: node.data.parent_id,
 					fg_item: node.data.value,
 					fg_reference_id: node.data.name || this.frm.doc.name,
 					bom_item: bom_item,
@@ -353,13 +343,11 @@ class BOMConfigurator {
 		dialog.show();
 		view.events.set_default_qty(dialog);
 
-		dialog.set_primary_action(__("Add"), () => {
-			let bom_item = dialog.get_values();
-
+		dialog.set_primary_action(__("Add"), (bom_item) => {
 			frappe.call({
-				method: "erpnext.manufacturing.doctype.bom_creator.bom_creator.add_sub_assembly",
+				method: "add_sub_assembly",
+				doc: this.frm.doc,
 				args: {
-					parent: node.data.parent_id,
 					fg_item: node.data.value,
 					bom_item: bom_item,
 					fg_reference_id: node.data.name || this.frm.doc.name,
@@ -389,11 +377,10 @@ class BOMConfigurator {
 	delete_node(node, view) {
 		frappe.confirm(__("Are you sure you want to delete this Item?"), () => {
 			frappe.call({
-				method: "erpnext.manufacturing.doctype.bom_creator.bom_creator.delete_node",
+				method: "delete_node",
+				doc: this.frm.doc,
 				args: {
-					parent: node.data.parent_id,
 					fg_item: node.data.value,
-					doctype: node.data.doctype,
 					docname: node.data.name,
 				},
 				callback: (r) => {
@@ -408,23 +395,21 @@ class BOMConfigurator {
 		frappe.prompt(
 			[{ label: __("Qty"), fieldname: "qty", default: qty, fieldtype: "Float", reqd: 1 }],
 			(data) => {
-				let doctype = node.data.doctype || this.frm.doc.doctype;
 				let docname = node.data.name || this.frm.doc.name;
 
 				frappe.call({
-					method: "erpnext.manufacturing.doctype.bom_creator.bom_creator.edit_qty",
+					method: "edit_qty",
+					doc: this.frm.doc,
 					args: {
-						doctype: doctype,
 						docname: docname,
 						qty: data.qty,
-						parent: node.data.parent_id ? node.data.parent_id : this.frm.doc.name,
 					},
 					callback: (r) => {
 						node.data.qty = data.qty;
 						let uom = node.data.uom || this.frm.doc.uom;
 						$(node.parent.get(0))
-							.find(`[data-bom-qty-docname='${docname}']`)
-							.html(data.qty + " " + uom);
+							.find(`[data-bom-qty-docname="${CSS.escape(docname)}"]`)
+							.text(data.qty + " " + uom);
 						view.events.load_tree(r, node);
 					},
 				});

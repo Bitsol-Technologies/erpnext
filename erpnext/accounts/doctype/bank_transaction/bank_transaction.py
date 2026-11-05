@@ -51,6 +51,7 @@ class BankTransaction(Document):
 		self.update_allocated_amount()
 
 	def validate(self):
+		self.set_status()
 		self.validate_included_fee()
 		self.validate_duplicate_references()
 		self.validate_currency()
@@ -75,13 +76,14 @@ class BankTransaction(Document):
 					)
 
 	def set_status(self):
-		if self.docstatus == 2:
+		if self.docstatus.is_draft():
+			self.status = "Pending"
+		elif self.docstatus.is_cancelled():
 			self.db_set("status", "Cancelled")
-		elif self.docstatus == 1:
-			if self.unallocated_amount > 0:
-				self.db_set("status", "Unreconciled")
-			elif self.unallocated_amount <= 0:
-				self.db_set("status", "Reconciled")
+		elif self.unallocated_amount > 0:
+			self.db_set("status", "Unreconciled")
+		else:
+			self.db_set("status", "Reconciled")
 
 	def validate_duplicate_references(self):
 		"""Make sure the same voucher is not allocated twice within the same Bank Transaction"""
@@ -136,6 +138,8 @@ class BankTransaction(Document):
 		self.set_status()
 
 	def on_cancel(self):
+		self.ignore_linked_doctypes = ["GL Entry"]
+
 		for payment_entry in self.payment_entries:
 			self.delink_payment_entry(payment_entry)
 
@@ -370,11 +374,12 @@ def get_clearance_details(transaction, payment_entry, bt_allocations, gl_entries
 			("unallocated_amount", "bank_account"),
 			as_dict=True,
 		)
+		bt_bank_account = frappe.db.get_value("Bank Account", bt.bank_account, "account")
 
-		if bt.bank_account != gl_bank_account:
+		if bt_bank_account != gl_bank_account:
 			frappe.throw(
 				_("Bank Account {} in Bank Transaction {} is not matching with Bank Account {}").format(
-					bt.bank_account, payment_entry.payment_entry, gl_bank_account
+					bt_bank_account, payment_entry.payment_entry, gl_bank_account
 				)
 			)
 

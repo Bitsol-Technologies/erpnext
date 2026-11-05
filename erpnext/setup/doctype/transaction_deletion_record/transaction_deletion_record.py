@@ -209,6 +209,8 @@ class TransactionDeletionRecord(Document):
 
 	@frappe.whitelist()
 	def start_deletion_tasks(self):
+		self.check_permission("write")
+
 		# This method is the entry point for the chain of events that follow
 		self.db_set("status", "Running")
 		self.enqueue_task(task="Delete Bins")
@@ -235,8 +237,6 @@ class TransactionDeletionRecord(Document):
 					"Dynamic Link", filters={"link_name": ("in", leads)}, pluck="parent"
 				)
 				if addresses:
-					addresses = ["%s" % frappe.db.escape(addr) for addr in addresses]
-
 					address = qb.DocType("Address")
 					dl1 = qb.DocType("Dynamic Link")
 					dl2 = qb.DocType("Dynamic Link")
@@ -270,10 +270,11 @@ class TransactionDeletionRecord(Document):
 	def reset_company_values(self):
 		self.validate_doc_status()
 		if not self.reset_company_default_values:
-			company_obj = frappe.get_doc("Company", self.company)
-			company_obj.total_monthly_sales = 0
-			company_obj.sales_monthly_history = None
-			company_obj.save()
+			frappe.db.set_value(
+				"Company",
+				self.company,
+				{"total_monthly_sales": 0, "sales_monthly_history": None},
+			)
 			self.db_set("reset_company_default_values", 1)
 		self.enqueue_task(task="Clear Notifications")
 
@@ -310,6 +311,7 @@ class TransactionDeletionRecord(Document):
 						reference_docs = frappe.get_all(
 							docfield.doctype_name,
 							filters={docfield.docfield_name: self.company},
+							order_by="name asc",
 							limit=self.batch_size,
 						)
 						reference_doc_names = [r.name for r in reference_docs]

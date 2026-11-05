@@ -36,6 +36,7 @@ frappe.ui.form.on("Asset", {
 	},
 
 	company: function (frm) {
+		frm.trigger("set_dynamic_labels");
 		erpnext.accounts.dimensions.update_dimension(frm, frm.doctype);
 	},
 
@@ -87,6 +88,7 @@ frappe.ui.form.on("Asset", {
 	},
 
 	refresh: function (frm) {
+		frm.trigger("set_dynamic_labels");
 		frappe.ui.form.trigger("Asset", "is_existing_asset");
 		frm.toggle_display("next_depreciation_date", frm.doc.docstatus < 1);
 
@@ -219,6 +221,10 @@ frappe.ui.form.on("Asset", {
 				});
 			}
 		}
+	},
+
+	set_dynamic_labels: function (frm) {
+		frm.set_currency_labels(["gross_purchase_amount"], erpnext.get_currency(frm.doc.company));
 	},
 
 	set_depr_posting_failure_alert: function (frm) {
@@ -414,7 +420,7 @@ frappe.ui.form.on("Asset", {
 
 			let asset_depr_schedule_doc = (
 				await frappe.call(
-					"erpnext.assets.doctype.asset_depreciation_schedule.asset_depreciation_schedule.get_asset_depr_schedule_doc",
+					"erpnext.assets.doctype.asset_depreciation_schedule.asset_depreciation_schedule.get_asset_depreciation_schedule",
 					{
 						asset_name: frm.doc.name,
 						status: "Active",
@@ -606,8 +612,7 @@ frappe.ui.form.on("Asset", {
 			fields: fields,
 		});
 
-		dialog.set_primary_action(__("Split"), function () {
-			const dialog_data = dialog.get_values();
+		dialog.set_primary_action(__("Split"), function (dialog_data) {
 			frappe.call({
 				args: {
 					asset_name: frm.doc.name,
@@ -696,6 +701,7 @@ frappe.ui.form.on("Asset", {
 				purchase_doc_name: frm.doc.purchase_receipt || frm.doc.purchase_invoice,
 				item_code: frm.doc.item_code,
 				doctype: doctype,
+				asset: frm.is_new() ? null : frm.doc.name,
 			},
 			callback: (r) => {
 				if (r.message) {

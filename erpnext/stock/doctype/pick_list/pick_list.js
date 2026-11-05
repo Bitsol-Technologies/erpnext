@@ -9,6 +9,22 @@ frappe.ui.form.on("Pick List", {
 		}, 500);
 	},
 
+	set_warehouse_query: function (frm, fieldname, parentfield = null) {
+		const query = () => {
+			let filters = { company: frm.doc.company };
+
+			frm.doc.consider_rejected_warehouses ? null : (filters.is_rejected_warehouse = 0);
+
+			return { filters };
+		};
+
+		if (parentfield) {
+			frm.set_query(fieldname, parentfield, query);
+		} else {
+			frm.set_query(fieldname, query);
+		}
+	},
+
 	setup: (frm) => {
 		frm.ignore_doctypes_on_cancel_all = ["Serial and Batch Bundle"];
 
@@ -21,21 +37,8 @@ frappe.ui.form.on("Pick List", {
 			"Stock Entry": "Stock Entry",
 		};
 
-		frm.set_query("warehouse", "locations", () => {
-			return {
-				filters: {
-					company: frm.doc.company,
-				},
-			};
-		});
-
-		frm.set_query("parent_warehouse", () => {
-			return {
-				filters: {
-					company: frm.doc.company,
-				},
-			};
-		});
+		frm.events.set_warehouse_query(frm, "warehouse", "locations");
+		frm.events.set_warehouse_query(frm, "parent_warehouse");
 
 		frm.set_query("work_order", () => {
 			return {
@@ -246,7 +249,11 @@ frappe.ui.form.on("Pick List", {
 		frm.clear_table("locations");
 		frm.trigger("add_get_items_button");
 	},
-	create_delivery_note: (frm) => {
+	create_delivery_note: async (frm) => {
+		if (!(await confirm_if_delivery_note_drafts_exist(frm.doc))) {
+			return;
+		}
+
 		frappe.model.open_mapped_doc({
 			method: "erpnext.stock.doctype.pick_list.pick_list.create_delivery_note",
 			frm: frm,
@@ -294,7 +301,8 @@ frappe.ui.form.on("Pick List", {
 			items_table_name: "locations",
 			qty_field: "picked_qty",
 			max_qty_field: "qty",
-			dont_allow_new_row: true,
+			demand_ref_fields: ["sales_order_item", "material_request_item", "product_bundle_item"],
+			dont_allow_new_row: !frm.doc.pick_manually,
 			prompt_qty: frm.doc.prompt_qty,
 			serial_no_field: "serial_no",
 		};
@@ -348,6 +356,42 @@ frappe.ui.form.on("Pick List", {
 		frappe.set_route("query-report", "Reserved Stock");
 	},
 });
+
+async function confirm_if_delivery_note_drafts_exist(source_doc) {
+	let drafts;
+	try {
+		drafts = await frappe.xcall("erpnext.stock.doctype.pick_list.pick_list.get_existing_drafts", {
+			source_name: source_doc.name,
+		});
+	} catch (error) {
+		console.error(error);
+		return true;
+	}
+
+	if (!drafts.length) {
+		return true;
+	}
+
+	const links = drafts.map((name) => frappe.utils.get_form_link("Delivery Note", name, true)).join(", ");
+	const message =
+		drafts.length === 1
+			? __(
+					"A draft Delivery Note already exists for this Pick List: {0}. Do you still want to create a new one?",
+					[links]
+			  )
+			: __(
+					"{0} draft Delivery Note documents already exist for this Pick List: {1}. Do you still want to create a new one?",
+					[drafts.length, links]
+			  );
+
+	return new Promise((resolve) => {
+		frappe.confirm(
+			message,
+			() => resolve(true),
+			() => resolve(false)
+		);
+	});
+}
 
 frappe.ui.form.on("Pick List Item", {
 	item_code: (frm, cdt, cdn) => {

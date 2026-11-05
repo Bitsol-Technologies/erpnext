@@ -28,7 +28,7 @@ class ItemPrice(Document):
 		currency: DF.Link | None
 		customer: DF.Link | None
 		item_code: DF.Link
-		item_description: DF.Text | None
+		item_description: DF.TextEditor | None
 		item_name: DF.Data | None
 		lead_time_days: DF.Int
 		note: DF.Text | None
@@ -144,14 +144,11 @@ class ItemPrice(Document):
 			)
 
 	def before_save(self):
-		if self.selling:
-			self.reference = self.customer
-		if self.buying:
-			self.reference = self.supplier
-
 		if self.selling and not self.buying:
 			# if only selling then remove supplier
 			self.supplier = None
 		if self.buying and not self.selling:
 			# if only buying then remove customer
 			self.customer = None
+
+		self.reference = self.customer or self.supplier

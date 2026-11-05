@@ -365,8 +365,6 @@ frappe.ui.form.on("Production Plan", {
 			frappe.throw(__("Select the Warehouse"));
 		}
 
-		frm.set_value("consider_minimum_order_qty", 0);
-
 		if (frm.doc.ignore_existing_ordered_qty) {
 			frm.events.get_items_for_material_requests(frm);
 		} else {
@@ -399,8 +397,8 @@ frappe.ui.form.on("Production Plan", {
 
 			dialog.show();
 
-			dialog.set_primary_action(__("Get Items"), () => {
-				let warehouses = dialog.get_values().warehouses;
+			dialog.set_primary_action(__("Get Items"), (values) => {
+				let warehouses = values.warehouses;
 				frm.events.get_items_for_material_requests(frm, warehouses);
 				dialog.hide();
 			});

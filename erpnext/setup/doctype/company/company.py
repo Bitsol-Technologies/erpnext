@@ -21,7 +21,7 @@ from frappe.utils import (
 	get_timestamp,
 	today,
 )
-from frappe.utils.nestedset import NestedSet, rebuild_tree
+from frappe.utils.nestedset import NestedSet, get_root_of, rebuild_tree
 
 from erpnext.accounts.doctype.account.account import get_account_currency
 from erpnext.setup.setup_wizard.operations.taxes_setup import setup_taxes_and_charges
@@ -74,6 +74,7 @@ class Company(NestedSet):
 		default_operating_cost_account: DF.Link | None
 		default_payable_account: DF.Link | None
 		default_provisional_account: DF.Link | None
+		default_purchase_price_variance_account: DF.Link | None
 		default_receivable_account: DF.Link | None
 		default_sales_contact: DF.Link | None
 		default_selling_terms: DF.Link | None
@@ -345,6 +346,7 @@ class Company(NestedSet):
 			)
 			warehouse.flags.ignore_permissions = True
 			warehouse.flags.ignore_mandatory = True
+			warehouse.flags.ignore_inventory_account_validation = True
 			warehouse.insert()
 
 			if wh_detail["is_group"]:
@@ -369,91 +371,92 @@ class Company(NestedSet):
 		)
 
 	def create_default_departments(self):
+		root = get_root_of("Department") or "All Departments"
 		records = [
 			# Department
 			{
 				"doctype": "Department",
-				"department_name": _("All Departments"),
+				"department_name": root,
 				"is_group": 1,
 				"parent_department": "",
-				"__condition": lambda: not frappe.db.exists("Department", _("All Departments")),
+				"__condition": lambda: not frappe.db.exists("Department", root),
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Accounts"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Marketing"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Sales"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Purchase"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Operations"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Production"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Dispatch"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Customer Service"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Human Resources"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Management"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Quality Management"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Research & Development"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 			{
 				"doctype": "Department",
 				"department_name": _("Legal"),
-				"parent_department": _("All Departments"),
+				"parent_department": root,
 				"company": self.name,
 			},
 		]
@@ -665,6 +668,13 @@ class Company(NestedSet):
 		"""
 		Trash accounts and cost centers for this company if no gl entry exists
 		"""
+		if frappe.db.get_single_value("Global Defaults", "demo_company") == self.name:
+			frappe.throw(
+				_("{0} is the site's Demo Company and cannot be deleted directly. Use {1} instead.").format(
+					self.name, _("Delete Demo Data")
+				)
+			)
+
 		NestedSet.validate_if_child_exists(self)
 		frappe.utils.nestedset.update_nsm(self)
 
@@ -828,11 +838,24 @@ def update_transactions_annual_history(company, commit=False):
 
 
 def cache_companies_monthly_sales_history():
+	refresh_total_monthly_sales = _should_refresh_total_monthly_sales()
 	companies = [d["name"] for d in frappe.get_list("Company")]
 	for company in companies:
 		update_company_monthly_sales(company)
 		update_transactions_annual_history(company)
+		if refresh_total_monthly_sales:
+			update_company_current_month_sales(company)
+
 	frappe.db.commit()
+
+
+def _should_refresh_total_monthly_sales():
+	# "Each Transaction" updates on submit; refresh the cached figure for the
+	# scheduled frequencies only ("Monthly" just on the 1st).
+	frequency = frappe.get_single_value("Selling Settings", "sales_update_frequency")
+	if frequency == "Monthly":
+		return frappe.utils.now_datetime().day == 1
+	return frequency == "Daily"
 
 
 @frappe.whitelist()
@@ -840,26 +863,27 @@ def get_children(doctype, parent=None, company=None, is_root=False):
 	if parent is None or parent == "All Companies":
 		parent = ""
 
-	return frappe.db.sql(
-		f"""
-		select
-			name as value,
-			is_group as expandable
-		from
-			`tabCompany` comp
-		where
-			ifnull(parent_company, "")={frappe.db.escape(parent)}
-		""",
-		as_dict=1,
+	filters = {"parent_company": parent} if parent else {"parent_company": ["is", "not set"]}
+
+	# get_list, not db.sql: it applies the caller's Company permission and their Company User
+	# Permissions, so a restricted user sees only their own companies.
+	return frappe.get_list(
+		"Company",
+		filters=filters,
+		fields=["name as value", "is_group as expandable"],
 	)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def add_node():
 	from frappe.desk.treeview import make_tree_args
 
 	args = frappe.form_dict
 	args = make_tree_args(**args)
+
+	# `args` comes straight from form_dict, so without this the caller chooses the doctype that
+	# gets created; nothing here is meant to build anything but a Company.
+	args.doctype = "Company"
 
 	if args.parent_company == "All Companies":
 		args.parent_company = None
@@ -947,6 +971,10 @@ def get_default_company_address(name, sort_key="is_primary_address", existing_ad
 	if sort_key not in ["is_shipping_address", "is_primary_address"]:
 		return None
 
+	# `select`, not `read`: denies the portal identities and costs none of the transaction-writing
+	# roles. doc= so the named company is evaluated and User Permissions apply.
+	frappe.has_permission("Company", ptype="select", doc=name, throw=True)
+
 	out = frappe.db.sql(
 		""" SELECT
 			addr.name, addr.{}
@@ -977,8 +1005,12 @@ def get_billing_shipping_address(name, billing_address=None, shipping_address=No
 	return {"primary_address": primary_address, "shipping_address": shipping_address}
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def create_transaction_deletion_request(company):
+	frappe.only_for("System Manager")
+	# User Permission check
+	frappe.has_permission("Company", ptype="delete", doc=company, throw=True)
+
 	from erpnext.setup.doctype.transaction_deletion_record.transaction_deletion_record import (
 		is_deletion_doc_running,
 	)
@@ -986,6 +1018,7 @@ def create_transaction_deletion_request(company):
 	is_deletion_doc_running(company)
 
 	tdr = frappe.get_doc({"doctype": "Transaction Deletion Record", "company": company})
+
 	tdr.submit()
 	tdr.start_deletion_tasks()
 

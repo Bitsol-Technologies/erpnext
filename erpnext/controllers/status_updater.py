@@ -7,6 +7,9 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import comma_or, flt, get_link_to_form, getdate, now, nowdate, safe_div
 
+# Percentages at this threshold count as complete.
+COMPLETE_PERCENTAGE = 99.999999
+
 
 class OverAllowanceError(frappe.ValidationError):
 	pass
@@ -111,7 +114,7 @@ status_map = {
 		["Pending", "eval:self.status != 'Stopped' and self.per_ordered == 0 and self.docstatus == 1"],
 		[
 			"Ordered",
-			"eval:self.status != 'Stopped' and self.per_ordered == 100 and self.docstatus == 1 and self.material_request_type in ['Purchase', 'Manufacture']",
+			"eval:self.status != 'Stopped' and self.per_ordered == 100 and self.docstatus == 1 and self.material_request_type in ['Purchase', 'Manufacture', 'Subcontracting']",
 		],
 		[
 			"Transferred",
@@ -135,7 +138,7 @@ status_map = {
 		],
 		[
 			"Partially Ordered",
-			"eval:self.status != 'Stopped' and self.per_ordered < 100 and self.per_ordered > 0 and self.docstatus == 1 and self.material_request_type != 'Material Transfer'",
+			"eval:self.status != 'Stopped' and self.per_ordered < 100 and self.per_ordered > 0 and self.per_received < 100 and self.docstatus == 1 and self.material_request_type not in ['Material Transfer', 'Customer Provided']",
 		],
 	],
 	"POS Opening Entry": [
@@ -158,7 +161,8 @@ status_map = {
 	"Pick List": [
 		["Draft", None],
 		["Open", "eval:self.docstatus == 1"],
-		["Completed", "stock_entry_exists"],
+		["Completed", "is_fully_transferred"],
+		["Partially Transferred", "is_partially_transferred"],
 		[
 			"Partly Delivered",
 			"eval:self.purpose == 'Delivery' and self.delivery_status == 'Partly Delivered'",
@@ -234,16 +238,21 @@ class StatusUpdater(Document):
 		self.global_amount_allowance = None
 
 		for args in self.status_updater:
-			if "target_ref_field" not in args:
-				# if target_ref_field is not specified, the programmer does not want to validate qty / amount
+			if "target_ref_field" not in args or args.get("validate_qty") is False:
+				# if target_ref_field is not specified or validate_qty is explicitly set to False, skip validation
 				continue
+
+			is_installation = args.get("overflow_type") == "installation"
+			# a later return can lower the installation limit below an already-installed qty;
+			# cancelling a note only reduces it, so don't re-enforce the limit on cancel
+			skip_on_cancel = is_installation and self.docstatus == 2
 
 			# get unique transactions to update
 			for d in self.get_all_children():
-				if hasattr(d, "qty") and d.qty < 0 and not self.get("is_return"):
+				if hasattr(d, "qty") and flt(d.qty) < 0 and not self.get("is_return"):
 					frappe.throw(_("For an item {0}, quantity must be positive number").format(d.item_code))
 
-				if hasattr(d, "qty") and d.qty > 0 and self.get("is_return"):
+				if hasattr(d, "qty") and flt(d.qty) > 0 and self.get("is_return"):
 					frappe.throw(_("For an item {0}, quantity must be negative number").format(d.item_code))
 
 				if not frappe.db.get_single_value("Selling Settings", "allow_negative_rates_for_items"):
@@ -258,15 +267,30 @@ class StatusUpdater(Document):
 							),
 						)
 
-				if d.doctype == args["source_dt"] and d.get(args["join_field"]):
+				if d.doctype == args["source_dt"] and d.get(args["join_field"]) and not skip_on_cancel:
 					args["name"] = d.get(args["join_field"])
+
+					# installation consumes delivered-minus-returned qty (returned_qty is in stock UOM)
+					ref_expr = (
+						"(`{}` - `returned_qty` / `conversion_factor`)".format(args["target_ref_field"])
+						if is_installation
+						else "`{}`".format(args["target_ref_field"])
+					)
+
+					if self.get("is_return") and args.get("overflow_type") == "billing":
+						if args.get("billing_flag") and not self.get(args["billing_flag"]):
+							# the return never changes the order's billed amount
+							continue
+						if self.docstatus != 2 and flt(d.get("qty")) * flt(d.get("rate")) <= 0:
+							# this return row lowers billing, so it cannot create an overflow
+							continue
 
 					# get all qty where qty > target_field
 					item = frappe.db.sql(
-						"""select item_code, `{target_ref_field}`,
+						"""select item_code, {ref_expr} as `{target_ref_field}`,
 						`{target_field}`, parenttype, parent from `tab{target_dt}`
-						where `{target_ref_field}` < `{target_field}`
-						and name=%s and docstatus=1""".format(**args),
+						where {ref_expr} < `{target_field}`
+						and name=%s and docstatus=1""".format(ref_expr=ref_expr, **args),
 						args["name"],
 						as_dict=1,
 					)
@@ -274,6 +298,14 @@ class StatusUpdater(Document):
 						item = item[0]
 						item["idx"] = d.idx
 						item["target_ref_field"] = args["target_ref_field"].replace("_", " ")
+
+						# skip qty over-allowance check for non-stock items
+						if (
+							"qty" in args.get("target_ref_field", "")
+							and not is_installation
+							and not frappe.get_cached_value("Item", item["item_code"], "is_stock_item")
+						):
+							continue
 
 						# if not item[args['target_ref_field']]:
 						# 	msgprint(_("Note: System will not check over-delivery and over-booking for Item {0} as quantity or amount is 0").format(item.item_code))
@@ -284,6 +316,11 @@ class StatusUpdater(Document):
 
 						elif item[args["target_ref_field"]]:
 							self.check_overflow_with_allowance(item, args)
+
+						elif is_installation and flt(item[args["target_field"]]) > 0:
+							# nothing left to install (e.g. fully returned) but a positive qty was entered
+							item["reduce_by"] = flt(item[args["target_field"]])
+							self.limits_crossed_error(args, item, "qty")
 
 	def check_overflow_with_allowance(self, item, args):
 		"""
@@ -305,13 +342,12 @@ class StatusUpdater(Document):
 			qty_or_amount,
 		)
 
-		role_allowed_to_over_deliver_receive = frappe.db.get_single_value(
-			"Stock Settings", "role_allowed_to_over_deliver_receive"
-		)
-		role_allowed_to_over_bill = frappe.db.get_single_value(
-			"Accounts Settings", "role_allowed_to_over_bill"
-		)
-		role = role_allowed_to_over_deliver_receive if qty_or_amount == "qty" else role_allowed_to_over_bill
+		role = None
+		if qty_or_amount == "qty":
+			if args.get("overflow_type") in ("delivery", "receipt"):
+				role = frappe.get_single_value("Stock Settings", "role_allowed_to_over_deliver_receive")
+		else:
+			role = frappe.get_single_value("Accounts Settings", "role_allowed_to_over_bill")
 
 		overflow_percent = (
 			(item[args["target_field"]] - item[args["target_ref_field"]]) / item[args["target_ref_field"]]
@@ -394,9 +430,9 @@ class StatusUpdater(Document):
 		for args in self.status_updater:
 			# condition to include current record (if submit or no if cancel)
 			if self.docstatus == 1:
-				args["cond"] = " or parent='%s'" % self.name.replace('"', '"')
+				args["cond"] = " or parent=%s" % frappe.db.escape(self.name)
 			else:
-				args["cond"] = " and parent!='%s'" % self.name.replace('"', '"')
+				args["cond"] = " and parent!=%s" % frappe.db.escape(self.name)
 
 			self._update_children(args, update_modified)
 
@@ -426,9 +462,10 @@ class StatusUpdater(Document):
 				args["second_source_condition"] = frappe.db.sql(
 					""" select ifnull((select sum({second_source_field})
 					from `tab{second_source_dt}`
-					where `{second_join_field}`='{detail_id}'
+					where `{second_join_field}`=%(detail_id)s
 					and (`tab{second_source_dt}`.docstatus=1)
-					{second_source_extra_cond}), 0) """.format(**args)
+					{second_source_extra_cond}), 0) """.format(**args),
+					{"detail_id": args["detail_id"]},
 				)[0][0]
 
 			if args["detail_id"]:
@@ -439,9 +476,10 @@ class StatusUpdater(Document):
 					frappe.db.sql(
 						"""
 						(select ifnull(sum({source_field}), 0)
-							from `tab{source_dt}` where `{join_field}`='{detail_id}'
+							from `tab{source_dt}` where `{join_field}`=%(detail_id)s
 							and (docstatus=1 {cond}) {extra_cond})
-				""".format(**args)
+				""".format(**args),
+						{"detail_id": args["detail_id"]},
 					)[0][0]
 					or 0.0
 				)
@@ -449,19 +487,30 @@ class StatusUpdater(Document):
 				if args["second_source_condition"]:
 					args["source_dt_value"] += flt(args["second_source_condition"])
 
+				target_value = args["source_dt_value"]
+				if args.get("target_conversion_factor"):
+					target_value = f"{target_value} / {args['target_conversion_factor']}"
+
 				frappe.db.sql(
 					"""update `tab{target_dt}`
-					set {target_field} = {source_dt_value} {update_modified}
-					where name='{detail_id}'""".format(**args)
+					set {target_field} = {target_value} {update_modified}
+					where name=%(detail_id)s""".format(target_value=target_value, **args),
+					{"detail_id": args["detail_id"]},
 				)
+
+	@staticmethod
+	def snap_full_percentage(percentage):
+		# Status rules require a full 100.
+		return 100 if flt(percentage) >= COMPLETE_PERCENTAGE else percentage
 
 	def _update_percent_field_in_targets(self, args, update_modified=True):
 		"""Update percent field in parent transaction"""
 		if args.get("percent_join_field_parent"):
 			# if reference to target doc where % is to be updated, is
 			# in source doc's parent form, consider percent_join_field_parent
-			args["name"] = self.get(args["percent_join_field_parent"])
-			self._update_percent_field(args, update_modified)
+			if name := self.get(args["percent_join_field_parent"]):
+				args["name"] = name
+				self._update_percent_field(args, update_modified)
 		else:
 			distinct_transactions = set(
 				d.get(args["percent_join_field"]) for d in self.get_all_children(args["source_dt"])
@@ -489,14 +538,23 @@ class StatusUpdater(Document):
 				where name='{name}'""".format(**args)
 			)
 
+			frappe.db.set_value(
+				args["target_parent_dt"],
+				{"name": args["name"], args["target_parent_field"]: [">=", COMPLETE_PERCENTAGE]},
+				args["target_parent_field"],
+				100,
+				update_modified=False,
+			)
+
 			# update field
 			if args.get("status_field"):
 				frappe.db.sql(
 					"""update `tab{target_parent_dt}`
 					set {status_field} = (case when {target_parent_field}<0.001 then 'Not {keyword}'
-					else case when {target_parent_field}>=99.999999 then 'Fully {keyword}'
+					else case when {target_parent_field}>=%(complete_percentage)s then 'Fully {keyword}'
 					else 'Partly {keyword}' end end)
-					where name='{name}'""".format(**args)
+					where name=%(name)s""".format(**args),
+					{"complete_percentage": COMPLETE_PERCENTAGE, "name": args["name"]},
 				)
 
 			if update_modified:
@@ -555,7 +613,7 @@ class StatusUpdater(Document):
 				)[0][0]
 			)
 
-			per_billed = safe_div(min(ref_doc_qty, billed_qty), ref_doc_qty) * 100
+			per_billed = self.snap_full_percentage(safe_div(min(ref_doc_qty, billed_qty), ref_doc_qty) * 100)
 
 			ref_doc = frappe.get_doc(ref_dt, ref_dn)
 
@@ -565,7 +623,7 @@ class StatusUpdater(Document):
 			if hasattr(ref_doc, "billing_status"):
 				if ref_doc.per_billed < 0.001:
 					ref_doc.db_set("billing_status", "Not Billed")
-				elif ref_doc.per_billed > 99.999999:
+				elif ref_doc.per_billed >= COMPLETE_PERCENTAGE:
 					ref_doc.db_set("billing_status", "Fully Billed")
 				else:
 					ref_doc.db_set("billing_status", "Partly Billed")

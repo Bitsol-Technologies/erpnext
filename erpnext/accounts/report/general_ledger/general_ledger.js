@@ -39,7 +39,7 @@ frappe.query_reports["General Ledger"] = {
 			fieldtype: "MultiSelectList",
 			options: "Account",
 			get_data: function (txt) {
-				return frappe.db.get_link_options("Account", txt, {
+				return erpnext.utils.get_link_options("Account", txt, {
 					company: frappe.query_report.get_filter_value("company"),
 				});
 			},
@@ -80,7 +80,7 @@ frappe.query_reports["General Ledger"] = {
 				let party_type = frappe.query_report.get_filter_value("party_type");
 				if (!party_type) return;
 
-				return frappe.db.get_link_options(party_type, txt);
+				return erpnext.utils.get_link_options(party_type, txt);
 			},
 			on_change: function () {
 				var party_type = frappe.query_report.get_filter_value("party_type");
@@ -154,7 +154,7 @@ frappe.query_reports["General Ledger"] = {
 			fieldtype: "MultiSelectList",
 			options: "Cost Center",
 			get_data: function (txt) {
-				return frappe.db.get_link_options("Cost Center", txt, {
+				return erpnext.utils.get_link_options("Cost Center", txt, {
 					company: frappe.query_report.get_filter_value("company"),
 				});
 			},
@@ -165,7 +165,7 @@ frappe.query_reports["General Ledger"] = {
 			fieldtype: "MultiSelectList",
 			options: "Project",
 			get_data: function (txt) {
-				return frappe.db.get_link_options("Project", txt, {
+				return erpnext.utils.get_link_options("Project", txt, {
 					company: frappe.query_report.get_filter_value("company"),
 				});
 			},
@@ -174,12 +174,18 @@ frappe.query_reports["General Ledger"] = {
 			fieldname: "include_dimensions",
 			label: __("Consider Accounting Dimensions"),
 			fieldtype: "Check",
-			default: 1,
+			default: frappe.boot.sysdefaults.disable_include_dimensions ? 0 : 1,
+		},
+		{
+			fieldname: "disable_opening_balance_calculation",
+			label: __("Disable Opening Balance Calculation"),
+			fieldtype: "Check",
 		},
 		{
 			fieldname: "show_opening_entries",
 			label: __("Show Opening Entries"),
 			fieldtype: "Check",
+			depends_on: "eval: !doc.disable_opening_balance_calculation",
 		},
 		{
 			fieldname: "include_default_book_entries",

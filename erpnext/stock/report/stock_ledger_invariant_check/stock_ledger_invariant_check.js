@@ -21,7 +21,7 @@ frappe.query_reports["Stock Ledger Invariant Check"] = {
 			options: "Item",
 			get_query: function () {
 				return {
-					filters: { is_stock_item: 1, has_serial_no: 0 },
+					filters: { is_stock_item: 1 },
 				};
 			},
 		},
@@ -35,7 +35,7 @@ frappe.query_reports["Stock Ledger Invariant Check"] = {
 		{
 			fieldname: "show_incorrect_entries",
 			fieldtype: "Check",
-			label: "Show Incorrect Entries",
+			label: __("Show Incorrect Entries"),
 			default: 0,
 		},
 	],

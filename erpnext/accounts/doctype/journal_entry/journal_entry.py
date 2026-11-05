@@ -7,7 +7,8 @@ import json
 import frappe
 from frappe import _, msgprint, scrub
 from frappe.core.doctype.submission_queue.submission_queue import queue_submission
-from frappe.utils import comma_and, cstr, flt, fmt_money, formatdate, get_link_to_form, nowdate
+from frappe.model.document import Document
+from frappe.utils import comma_and, cstr, flt, fmt_money, formatdate, get_link_to_form, getdate, nowdate
 
 import erpnext
 from erpnext.accounts.deferred_revenue import get_deferred_booking_accounts
@@ -21,6 +22,7 @@ from erpnext.accounts.doctype.repost_accounting_ledger.repost_accounting_ledger 
 from erpnext.accounts.doctype.tax_withholding_category.tax_withholding_category import (
 	get_party_tax_withholding_details,
 )
+from erpnext.accounts.general_ledger import validate_opening_entry_against_pcv
 from erpnext.accounts.party import get_party_account
 from erpnext.accounts.utils import (
 	cancel_exchange_gain_loss_journal,
@@ -33,7 +35,7 @@ from erpnext.accounts.utils import (
 from erpnext.assets.doctype.asset_depreciation_schedule.asset_depreciation_schedule import (
 	get_depr_schedule,
 )
-from erpnext.controllers.accounts_controller import AccountsController
+from erpnext.controllers.accounts_controller import AccountsController, validate_account_head
 from erpnext.setup.utils import get_exchange_rate as _get_exchange_rate
 
 
@@ -123,9 +125,14 @@ class JournalEntry(AccountsController):
 		if not self.is_opening:
 			self.is_opening = "No"
 
+		if self.is_opening == "Yes":
+			validate_opening_entry_against_pcv(self.company)
+
 		self.clearance_date = None
 
+		self.validate_account_company()
 		self.validate_party()
+		self.ensure_supplier_is_not_blocked()
 		self.validate_entries_for_advance()
 		self.validate_multi_currency()
 		self.set_amounts_in_company_currency()
@@ -150,8 +157,17 @@ class JournalEntry(AccountsController):
 
 		if self.docstatus == 0:
 			self.apply_tax_withholding()
-		if self.is_new() or not self.title:
+
+		if not self.title or (self.is_new() and self.amended_from):
 			self.title = self.get_title()
+
+	def validate_account_company(self):
+		"""Catch an account/Company mismatch on save, before GL Entry has to reject it on submit."""
+		if not self.company:
+			return
+		for d in self.get("accounts"):
+			if d.account:
+				validate_account_head(d.idx, d.account, self.company, _("Journal Entry"))
 
 	def validate_advance_accounts(self):
 		journal_accounts = set([x.account for x in self.accounts])
@@ -181,7 +197,7 @@ class JournalEntry(AccountsController):
 		self.has_asset_adjustment_entry()
 
 	def cancel(self):
-		if len(self.accounts) > 100:
+		if len(self.accounts) > 100 and not self.meta.queue_in_background:
 			queue_submission(self, "_cancel")
 		else:
 			return self._cancel()
@@ -214,6 +230,8 @@ class JournalEntry(AccountsController):
 	def on_cancel(self):
 		# References for this Journal are removed on the `on_cancel` event in accounts_controller
 		super().on_cancel()
+
+		from_doc_events = getattr(self, "ignore_linked_doctypes", ())
 		self.ignore_linked_doctypes = (
 			"GL Entry",
 			"Stock Ledger Entry",
@@ -226,6 +244,10 @@ class JournalEntry(AccountsController):
 			"Unreconcile Payment Entries",
 			"Advance Payment Ledger Entry",
 		)
+
+		if from_doc_events and from_doc_events != self.ignore_linked_doctypes:
+			self.ignore_linked_doctypes = self.ignore_linked_doctypes + from_doc_events
+
 		self.make_gl_entries(1)
 		self.unlink_advance_entry_reference()
 		self.unlink_asset_reference()
@@ -263,6 +285,9 @@ class JournalEntry(AccountsController):
 			frappe.throw(_("Journal Entry type should be set as Depreciation Entry for asset depreciation"))
 
 	def validate_stock_accounts(self):
+		if not erpnext.is_perpetual_inventory_enabled(self.company):
+			return
+
 		stock_accounts = get_stock_accounts(self.company, accounts=self.accounts)
 		for account in stock_accounts:
 			account_bal, stock_bal, warehouse_list = get_stock_and_account_balance(
@@ -474,6 +499,9 @@ class JournalEntry(AccountsController):
 
 	def validate_party(self):
 		for d in self.get("accounts"):
+			if d.party_type and not frappe.db.exists("Party Type", d.party_type):
+				frappe.throw(_("Row {0}: {1} is not a valid Party Type").format(d.idx, d.party_type))
+
 			account_type = frappe.get_cached_value("Account", d.account, "account_type")
 
 			if account_type in ["Receivable", "Payable"]:
@@ -785,6 +813,23 @@ class JournalEntry(AccountsController):
 						)
 					)
 
+				if reference_type == "Purchase Invoice":
+					on_hold, release_date = frappe.db.get_value(
+						reference_type, reference_name, ["on_hold", "release_date"]
+					)
+
+					if not on_hold or (release_date and getdate(release_date) <= getdate(nowdate())):
+						continue
+
+					msg = (
+						_("{0} {1} is blocked and on hold until {2}.").format(
+							reference_type, reference_name, release_date
+						)
+						if release_date
+						else _("{0} {1} is blocked.").format(reference_type, reference_name)
+					)
+					frappe.throw(msg)
+
 	def set_against_account(self):
 		accounts_debited, accounts_credited = [], []
 		if self.voucher_type in ("Deferred Revenue", "Deferred Expense"):
@@ -829,12 +874,14 @@ class JournalEntry(AccountsController):
 			if d.debit and d.credit:
 				frappe.throw(_("You cannot credit and debit same account at the same time"))
 
-			self.total_debit = flt(self.total_debit) + flt(d.debit, d.precision("debit"))
-			self.total_credit = flt(self.total_credit) + flt(d.credit, d.precision("credit"))
+			self.total_debit = flt(
+				self.total_debit + flt(d.debit, d.precision("debit")), self.precision("total_debit")
+			)
+			self.total_credit = flt(
+				self.total_credit + flt(d.credit, d.precision("credit")), self.precision("total_credit")
+			)
 
-		self.difference = flt(self.total_debit, self.precision("total_debit")) - flt(
-			self.total_credit, self.precision("total_credit")
-		)
+		self.difference = flt(self.total_debit - self.total_credit, self.precision("difference"))
 
 	def validate_multi_currency(self):
 		alternate_currency = []
@@ -1175,7 +1222,11 @@ class JournalEntry(AccountsController):
 		self.validate_total_debit_and_credit()
 
 	def get_values(self):
-		cond = f" and outstanding_amount <= {self.write_off_amount}" if flt(self.write_off_amount) > 0 else ""
+		cond = (
+			f" and outstanding_amount <= {flt(self.write_off_amount)}"
+			if flt(self.write_off_amount) > 0
+			else ""
+		)
 
 		if self.write_off_based_on == "Accounts Receivable":
 			return frappe.db.sql(
@@ -1441,6 +1492,10 @@ class JournalEntryTaxWithholding:
 def get_default_bank_cash_account(company, account_type=None, mode_of_payment=None, account=None):
 	from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 
+	# `select`, not `read`: also runs server-side from get_payment_entry, and Auditor/HR User/
+	# Desk User hold only the select row on Company. doc= for User Permissions.
+	frappe.has_permission("Company", ptype="select", doc=company, throw=True)
+
 	if mode_of_payment:
 		account = get_bank_cash_account(mode_of_payment, company).get("account")
 
@@ -1469,6 +1524,10 @@ def get_default_bank_cash_account(company, account_type=None, mode_of_payment=No
 					account = account_list[0].name
 
 	if account:
+		# `account` is caller-supplied; get_balance_on() checks it only on the branch that reads a
+		# balance, and `fetch_balance` is caller-supplied too.
+		frappe.has_permission("Account", doc=account, throw=True)
+
 		account_details = frappe.get_cached_value(
 			"Account", account, ["account_currency", "account_type"], as_dict=1
 		)
@@ -1490,6 +1549,7 @@ def get_payment_entry_against_order(
 	dt, dn, amount=None, debit_in_account_currency=None, journal_entry=False, bank_account=None
 ):
 	ref_doc = frappe.get_doc(dt, dn)
+	ref_doc.check_permission()
 
 	if flt(ref_doc.per_billed, 2) > 0:
 		frappe.throw(_("Can only make payment against unbilled {0}").format(dt))
@@ -1535,6 +1595,8 @@ def get_payment_entry_against_invoice(
 	dt, dn, amount=None, debit_in_account_currency=None, journal_entry=False, bank_account=None
 ):
 	ref_doc = frappe.get_doc(dt, dn)
+	ref_doc.check_permission()
+
 	if dt == "Sales Invoice":
 		party_type = "Customer"
 		party_account = get_party_account_based_on_invoice_discounting(dn) or ref_doc.debit_to
@@ -1570,6 +1632,8 @@ def get_payment_entry_against_invoice(
 
 
 def get_payment_entry(ref_doc, args):
+	frappe.has_permission("Journal Entry", ptype="create", throw=True)
+
 	cost_center = ref_doc.get("cost_center") or frappe.get_cached_value(
 		"Company", ref_doc.company, "cost_center"
 	)
@@ -1649,29 +1713,39 @@ def get_against_jv(doctype, txt, searchfield, start, page_len, filters):
 	if not frappe.db.has_column("Journal Entry", searchfield):
 		return []
 
-	return frappe.db.sql(
-		f"""
-		SELECT jv.name, jv.posting_date, jv.user_remark
-		FROM `tabJournal Entry` jv, `tabJournal Entry Account` jv_detail
-		WHERE jv_detail.parent = jv.name
-			AND jv_detail.account = %(account)s
-			AND IFNULL(jv_detail.party, '') = %(party)s
-			AND (
-				jv_detail.reference_type IS NULL
-				OR jv_detail.reference_type = ''
-			)
-			AND jv.docstatus = 1
-			AND jv.`{searchfield}` LIKE %(txt)s
-		ORDER BY jv.name DESC
-		LIMIT %(limit)s offset %(offset)s
-		""",
-		dict(
-			account=filters.get("account"),
-			party=cstr(filters.get("party")),
-			txt=f"%{txt}%",
-			offset=start,
-			limit=page_len,
-		),
+	account = filters.get("account")
+	party = filters.get("party")
+
+	# each names one value. A list would be read as a filter operator below and widen the search
+	# past what the caller named.
+	for value in (account, party):
+		if value and not isinstance(value, str):
+			frappe.throw(_("Invalid filter"), frappe.PermissionError)
+
+	# get_list applies the permission query conditions; the child-table filter resolves the check to `read`
+	je_filters = [
+		["docstatus", "=", 1],
+		[searchfield, "like", f"%{txt}%"],
+		["Journal Entry Account", "account", "=", account],
+		["Journal Entry Account", "reference_type", "is", "not set"],
+	]
+	je_filters.append(
+		["Journal Entry Account", "party", "=", party]
+		if party
+		else ["Journal Entry Account", "party", "is", "not set"]
+	)
+
+	return frappe.get_list(
+		"Journal Entry",
+		filters=je_filters,
+		fields=["name", "posting_date", "user_remark"],
+		order_by="name desc",
+		limit_start=start,
+		limit_page_length=page_len,
+		as_list=True,
+		# one row per entry, not per matching account row. group_by rather than distinct: frappe
+		# drops ORDER BY from a distinct query on postgres, which would lose the ordering above.
+		group_by="name",
 	)
 
 
@@ -1857,11 +1931,29 @@ def make_inter_company_journal_entry(name, voucher_type, company):
 
 
 @frappe.whitelist()
-def make_reverse_journal_entry(source_name, target_doc=None):
+def make_reverse_journal_entry(source_name: str, target_doc: str | dict | Document | None = None) -> Document:
+	# `get_mapped_doc` checks this as well, but the guard below discloses which entry
+	# reverses which, so read access has to be settled before it runs
+	if not frappe.has_permission("Journal Entry", doc=source_name):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	reversal_of = frappe.db.get_value("Journal Entry", source_name, "reversal_of")
+	if reversal_of:
+		frappe.throw(
+			_("{0} is already a Reverse Journal Entry of {1}. Cancel it instead of reversing it.").format(
+				get_link_to_form("Journal Entry", source_name),
+				get_link_to_form("Journal Entry", reversal_of),
+			)
+		)
+
 	from frappe.model.mapper import get_mapped_doc
 
 	def post_process(source, target):
 		target.reversal_of = source.name
+		target.naming_series = source.naming_series
+		if source.voucher_type == "Bank Entry":
+			target.cheque_no = source.cheque_no
+			target.cheque_date = source.cheque_date
 
 	doclist = get_mapped_doc(
 		"Journal Entry",
