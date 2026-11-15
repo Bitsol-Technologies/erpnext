@@ -70,6 +70,10 @@ frappe.ui.form.on("Journal Entry", {
 	},
 
 	refresh: function (frm) {
+		if (frm.doc.reversal_of && (frm.is_new() || frm.doc.docstatus == 0)) {
+			erpnext.journal_entry.lock_reversal_entry(frm);
+		}
+
 		erpnext.toggle_naming_series();
 
 		if (frm.doc.docstatus > 0) {
@@ -91,7 +95,7 @@ frappe.ui.form.on("Journal Entry", {
 			);
 		}
 
-		if (frm.doc.docstatus == 1) {
+		if (frm.doc.docstatus == 1 && !frm.doc.reversal_of) {
 			frm.add_custom_button(
 				__("Reverse Journal Entry"),
 				function () {
@@ -277,7 +281,21 @@ frappe.ui.form.on("Journal Entry", {
 var update_jv_details = function (doc, r) {
 	$.each(r, function (i, d) {
 		var row = frappe.model.add_child(doc, "Journal Entry Account", "accounts");
-		frappe.model.set_value(row.doctype, row.name, "account", d.account);
+		const {
+			idx,
+			name,
+			owner,
+			parent,
+			parenttype,
+			parentfield,
+			creation,
+			modified,
+			modified_by,
+			doctype,
+			docstatus,
+			...fields
+		} = d;
+		frappe.model.set_value(row.doctype, row.name, fields);
 	});
 	refresh_field("accounts");
 };
@@ -287,10 +305,6 @@ erpnext.accounts.JournalEntry = class JournalEntry extends frappe.ui.form.Contro
 		this.load_defaults();
 		this.setup_queries();
 		erpnext.accounts.dimensions.setup_dimension_filters(this.frm, this.frm.doctype);
-	}
-
-	onload_post_render() {
-		this.frm.get_field("accounts").grid.set_multiple_add("account");
 	}
 
 	load_defaults() {
@@ -419,15 +433,17 @@ erpnext.accounts.JournalEntry = class JournalEntry extends frappe.ui.form.Contro
 
 	accounts_add(doc, cdt, cdn) {
 		var row = frappe.get_doc(cdt, cdn);
-		row.exchange_rate = 1;
-		$.each(doc.accounts, function (i, d) {
-			if (d.account && d.party && d.party_type) {
-				row.account = d.account;
-				row.party = d.party;
-				row.party_type = d.party_type;
-				row.exchange_rate = d.exchange_rate;
-			}
-		});
+		if (!row.exchange_rate) row.exchange_rate = 1;
+		if (!row.account) {
+			$.each(doc.accounts, function (i, d) {
+				if (d.account && d.party && d.party_type) {
+					row.account = d.account;
+					row.party = d.party;
+					row.party_type = d.party_type;
+					row.exchange_rate = d.exchange_rate;
+				}
+			});
+		}
 
 		// set difference
 		if (doc.difference) {
@@ -456,8 +472,8 @@ cur_frm.cscript.update_totals = function (doc) {
 		tc += flt(accounts[i].credit, precision("credit", accounts[i]));
 	}
 	doc = locals[doc.doctype][doc.name];
-	doc.total_debit = td;
-	doc.total_credit = tc;
+	doc.total_debit = flt(td, precision("total_debit"));
+	doc.total_credit = flt(tc, precision("total_credit"));
 	doc.difference = flt(td - tc, precision("difference"));
 	refresh_many(["total_debit", "total_credit", "difference"]);
 };
@@ -548,6 +564,14 @@ $.extend(erpnext.journal_entry, {
 		});
 	},
 
+	lock_reversal_entry: function (frm) {
+		frm.fields
+			.filter((field) => field.has_input)
+			.filter((field) => !["posting_date", "custom_remark", "remark"].includes(field.df.fieldname))
+			.forEach((field) => frm.set_df_property(field.df.fieldname, "read_only", 1));
+		frm.set_df_property("accounts", "read_only", 1);
+	},
+
 	set_debit_credit_in_company_currency: function (frm, cdt, cdn) {
 		var row = locals[cdt][cdn];
 
@@ -599,7 +623,7 @@ $.extend(erpnext.journal_entry, {
 		} else {
 			erpnext.journal_entry.set_debit_credit_in_company_currency(frm, cdt, cdn);
 		}
-		refresh_field("exchange_rate", cdn, "accounts");
+		frm.get_field("accounts").grid.refresh_row(cdn);
 	},
 
 	quick_entry: function (frm) {
@@ -638,7 +662,7 @@ $.extend(erpnext.journal_entry, {
 					reqd: 1,
 					default: frm.doc.posting_date,
 				},
-				{ fieldtype: "Small Text", fieldname: "user_remark", label: __("User Remark") },
+				{ fieldtype: "Small Text", fieldname: "remark", label: __("Remark") },
 				{
 					fieldtype: "Select",
 					fieldname: "naming_series",
@@ -650,13 +674,18 @@ $.extend(erpnext.journal_entry, {
 			],
 		});
 
-		dialog.set_primary_action(__("Save"), function () {
+		dialog.set_primary_action(__("Save"), function (values) {
 			var btn = this;
-			var values = dialog.get_values();
 
 			frm.set_value("posting_date", values.posting_date);
-			frm.set_value("user_remark", values.user_remark);
 			frm.set_value("naming_series", values.naming_series);
+			if (values.remark) {
+				frm.set_value("custom_remark", 1);
+				frm.set_value("remark", values.remark);
+			} else {
+				frm.set_value("custom_remark", 0);
+				frm.set_value("remark", "");
+			}
 
 			// clear table is used because there might've been an error while adding child
 			// and cleanup didn't happen

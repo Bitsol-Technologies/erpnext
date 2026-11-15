@@ -7,6 +7,8 @@ from dateutil.relativedelta import relativedelta
 from frappe.model.document import Document
 from frappe.utils import cint
 
+DEFAULT_CAPACITY_PLANNING_DAYS = 30
+
 
 class ManufacturingSettings(Document):
 	# begin: auto-generated types
@@ -32,7 +34,7 @@ class ManufacturingSettings(Document):
 		mins_between_operations: DF.Int
 		overproduction_percentage_for_sales_order: DF.Percent
 		overproduction_percentage_for_work_order: DF.Percent
-		set_op_cost_and_scrap_from_sub_assemblies: DF.Check
+		set_op_cost_and_secondary_items_from_sub_assemblies: DF.Check
 		transfer_extra_materials_percentage: DF.Percent
 		update_bom_costs_automatically: DF.Check
 		validate_components_quantities_per_bom: DF.Check
@@ -40,6 +42,9 @@ class ManufacturingSettings(Document):
 
 	def before_save(self):
 		self.reset_values()
+		self.capacity_planning_for_days = (
+			cint(self.capacity_planning_for_days) or DEFAULT_CAPACITY_PLANNING_DAYS
+		)
 
 	def reset_values(self):
 		if self.backflush_raw_materials_based_on != "BOM" and self.validate_components_quantities_per_bom:
@@ -48,7 +53,14 @@ class ManufacturingSettings(Document):
 
 def get_mins_between_operations():
 	return relativedelta(
-		minutes=cint(frappe.db.get_single_value("Manufacturing Settings", "mins_between_operations")) or 10
+		minutes=cint(frappe.db.get_single_value("Manufacturing Settings", "mins_between_operations"))
+	)
+
+
+def get_capacity_planning_days():
+	return (
+		cint(frappe.db.get_single_value("Manufacturing Settings", "capacity_planning_for_days"))
+		or DEFAULT_CAPACITY_PLANNING_DAYS
 	)
 
 

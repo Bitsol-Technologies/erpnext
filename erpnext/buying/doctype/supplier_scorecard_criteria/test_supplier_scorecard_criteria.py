@@ -3,44 +3,28 @@
 
 
 import frappe
-from frappe.tests import IntegrationTestCase
+
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestSupplierScorecardCriteria(IntegrationTestCase):
+class TestSupplierScorecardCriteria(ERPNextTestSuite):
 	def test_variables_exist(self):
-		delete_test_scorecards()
 		for d in test_good_criteria:
 			frappe.get_doc(d).insert()
 
 		self.assertRaises(frappe.ValidationError, frappe.get_doc(test_bad_criteria[0]).insert)
 
 	def test_formula_validate(self):
-		delete_test_scorecards()
 		self.assertRaises(frappe.ValidationError, frappe.get_doc(test_bad_criteria[1]).insert)
 
-
-def delete_test_scorecards():
-	# Delete all the periods so we can delete all the criteria
-	frappe.db.sql("""delete from `tabSupplier Scorecard Period`""")
-	frappe.db.sql(
-		"""delete from `tabSupplier Scorecard Scoring Criteria` where parenttype = 'Supplier Scorecard Period'"""
-	)
-	frappe.db.sql(
-		"""delete from `tabSupplier Scorecard Scoring Standing` where parenttype = 'Supplier Scorecard Period'"""
-	)
-	frappe.db.sql(
-		"""delete from `tabSupplier Scorecard Scoring Variable` where parenttype = 'Supplier Scorecard Period'"""
-	)
-
-	for d in test_good_criteria:
-		if frappe.db.exists("Supplier Scorecard Criteria", d.get("name")):
-			# Delete all the periods, then delete the scorecard
-			frappe.delete_doc(d.get("doctype"), d.get("name"))
-
-	for d in test_bad_criteria:
-		if frappe.db.exists("Supplier Scorecard Criteria", d.get("name")):
-			# Delete all the periods, then delete the scorecard
-			frappe.delete_doc(d.get("doctype"), d.get("name"))
+	def test_formula_must_evaluate_with_real_variable_values(self):
+		for formula in (
+			"{cost_of_on_time_shipments} / {tot_cost_shipments} * 100",
+			"{total_working_days}{total_working_days}",
+		):
+			with self.subTest(formula=formula):
+				criteria = frappe.get_doc({"doctype": "Supplier Scorecard Criteria", "formula": formula})
+				self.assertRaises(frappe.ValidationError, criteria.validate_formula)
 
 
 test_good_criteria = [

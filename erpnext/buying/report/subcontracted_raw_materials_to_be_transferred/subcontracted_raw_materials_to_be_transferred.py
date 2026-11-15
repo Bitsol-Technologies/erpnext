@@ -5,9 +5,12 @@
 import frappe
 from frappe import _
 
+from erpnext.accounts.report.utils import validate_date_range
+
 
 def execute(filters=None):
-	if filters.from_date >= filters.to_date:
+	validate_date_range(filters)
+	if filters.from_date > filters.to_date:
 		frappe.msgprint(_("To Date must be greater than From Date"))
 
 	columns = get_columns(filters)
@@ -41,6 +44,7 @@ def get_columns(filters):
 			"fieldname": "transferred_qty",
 			"width": 200,
 		},
+		{"label": _("Returned Quantity"), "fieldtype": "Float", "fieldname": "returned_qty", "width": 150},
 		{"label": _("Pending Quantity"), "fieldtype": "Float", "fieldname": "p_qty", "width": 150},
 	]
 
@@ -50,7 +54,7 @@ def get_data(filters):
 
 	data = []
 	for row in order_rm_item_details:
-		transferred_qty = row.get("transferred_qty") or 0
+		transferred_qty = (row.get("transferred_qty") or 0) - (row.get("returned_qty") or 0)
 		if transferred_qty < row.get("reqd_qty", 0):
 			pending_qty = frappe.utils.flt(row.get("reqd_qty", 0) - transferred_qty)
 			row.p_qty = pending_qty if pending_qty > 0 else 0
@@ -72,6 +76,7 @@ def get_order_items_to_supply(filters):
 		[filters.order_type, "transaction_date", "<=", filters.to_date],
 		[filters.order_type, "transaction_date", ">=", filters.from_date],
 		[filters.order_type, "docstatus", "=", 1],
+		[filters.order_type, "status", "!=", "Closed"],
 	]
 
 	if filters.order_type == "Purchase Order":
@@ -86,6 +91,7 @@ def get_order_items_to_supply(filters):
 			f"`tab{supplied_items_table}`.rm_item_code as rm_item_code",
 			f"`tab{supplied_items_table}`.required_qty as reqd_qty",
 			f"`tab{supplied_items_table}`.supplied_qty as transferred_qty",
+			f"`tab{supplied_items_table}`.returned_qty as returned_qty",
 		],
 		filters=record_filters,
 	)

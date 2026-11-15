@@ -25,6 +25,17 @@ class SerialNoWarehouseError(ValidationError):
 	pass
 
 
+STOCK_MANAGED_FIELDS = (
+	"item_code",
+	"warehouse",
+	"batch_no",
+	"status",
+	"company",
+	"customer",
+	"purchase_rate",
+)
+
+
 class SerialNo(StockController):
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
@@ -77,12 +88,15 @@ class SerialNo(StockController):
 		self.validate_warehouse()
 
 	def validate_warehouse(self):
-		if not self.get("__islocal"):
-			item_code, warehouse = frappe.db.get_value("Serial No", self.name, ["item_code", "warehouse"])
-			if not self.via_stock_ledger and item_code != self.item_code:
-				frappe.throw(_("Item Code cannot be changed for Serial No."), SerialNoCannotCannotChangeError)
-			if not self.via_stock_ledger and warehouse != self.warehouse:
-				frappe.throw(_("Warehouse cannot be changed for Serial No."), SerialNoCannotCannotChangeError)
+		if self.get("__islocal") or self.via_stock_ledger:
+			return
+
+		for fieldname in STOCK_MANAGED_FIELDS:
+			if self.has_value_changed(fieldname):
+				frappe.throw(
+					_("{0} cannot be changed for Serial No.").format(_(self.meta.get_label(fieldname))),
+					SerialNoCannotCannotChangeError,
+				)
 
 	def set_maintenance_status(self):
 		if not self.warranty_expiry_date and not self.amc_expiry_date:
@@ -121,18 +135,18 @@ class SerialNo(StockController):
 			)
 
 
-def get_available_serial_nos(serial_no_series, qty) -> list[str]:
+def get_available_serial_nos(serial_no_series, qty, doc=None) -> list[str]:
 	serial_nos = []
 	for _i in range(cint(qty)):
-		serial_nos.append(get_new_serial_number(serial_no_series))
+		serial_nos.append(get_new_serial_number(serial_no_series, doc))
 
 	return serial_nos
 
 
-def get_new_serial_number(series):
-	sr_no = make_autoname(series, "Serial No")
+def get_new_serial_number(series, doc=None):
+	sr_no = make_autoname(series, "Serial No", doc)
 	if frappe.db.exists("Serial No", sr_no):
-		sr_no = get_new_serial_number(series)
+		sr_no = get_new_serial_number(series, doc)
 	return sr_no
 
 

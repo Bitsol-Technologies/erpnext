@@ -39,7 +39,7 @@ frappe.ui.form.ContactAddressQuickEntryForm = class ContactAddressQuickEntryForm
 			{
 				fieldtype: "Section Break",
 				label: __("Primary Contact Details"),
-				collapsible: 1,
+				collapsible: 0,
 			},
 			{
 				label: __("First Name"),
@@ -71,7 +71,7 @@ frappe.ui.form.ContactAddressQuickEntryForm = class ContactAddressQuickEntryForm
 			{
 				fieldtype: "Section Break",
 				label: __("Primary Address Details"),
-				collapsible: 1,
+				collapsible: 0,
 			},
 			{
 				label: __("Address Line 1"),
@@ -109,12 +109,6 @@ frappe.ui.form.ContactAddressQuickEntryForm = class ContactAddressQuickEntryForm
 				fieldtype: "Link",
 				options: "Country",
 				mandatory_depends_on: "eval:doc.city || doc.address_line1",
-			},
-			{
-				label: __("Customer POS Id"),
-				fieldname: "customer_pos_id",
-				fieldtype: "Data",
-				hidden: 1,
 			},
 		];
 

@@ -41,6 +41,8 @@ frappe.ui.form.on("Delivery Trip", {
 	},
 
 	refresh: function (frm) {
+		frm.ignore_doctypes_on_cancel_all = ["Delivery Note"];
+
 		if (frm.doc.docstatus == 1 && frm.doc.delivery_stops.length > 0) {
 			frm.add_custom_button(__("Notify Customers via Email"), function () {
 				frm.trigger("notify_customers");
@@ -62,7 +64,8 @@ frappe.ui.form.on("Delivery Trip", {
 						},
 						get_query_filters: {
 							company: frm.doc.company,
-							status: ["Not In", ["Completed", "Cancelled"]],
+							docstatus: 1,
+							status: ["!=", "Closed"],
 						},
 					});
 				},
@@ -149,25 +152,19 @@ frappe.ui.form.on("Delivery Trip", {
 			}
 		});
 
-		frappe.db.get_value("Delivery Settings", { name: "Delivery Settings" }, "dispatch_template", (r) => {
-			if (!r.dispatch_template) {
-				frappe.throw(__("Missing email template for dispatch. Please set one in Delivery Settings."));
-			} else {
-				frappe.confirm(__("Do you want to notify all the customers by email?"), function () {
-					frappe.call({
-						method: "erpnext.stock.doctype.delivery_trip.delivery_trip.notify_customers",
-						args: {
-							delivery_trip: frm.doc.name,
-						},
-						callback: function (r) {
-							if (!r.exc) {
-								frm.doc.email_notification_sent = true;
-								frm.refresh_field("email_notification_sent");
-							}
-						},
-					});
-				});
-			}
+		frappe.confirm(__("Do you want to notify all the customers by email?"), function () {
+			frappe.call({
+				method: "erpnext.stock.doctype.delivery_trip.delivery_trip.notify_customers",
+				args: {
+					delivery_trip: frm.doc.name,
+				},
+				callback: function (r) {
+					if (!r.exc) {
+						frm.doc.email_notification_sent = true;
+						frm.refresh_field("email_notification_sent");
+					}
+				},
+			});
 		});
 	},
 });

@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _, bold, scrub
-from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from frappe.custom.doctype.property_setter.property_setter import delete_property_setter
 from frappe.model.document import Document
 from frappe.utils.caching import request_cache
 
@@ -32,11 +32,10 @@ class InventoryDimension(Document):
 		apply_to_all_doctypes: DF.Check
 		condition: DF.Code | None
 		dimension_name: DF.Data
-		disabled: DF.Check
 		document_type: DF.Link | None
 		fetch_from_parent: DF.Literal[None]
 		istable: DF.Check
-		mandatory_depends_on: DF.SmallText | None
+		mandatory_depends_on_backend: DF.SmallText | None
 		reference_document: DF.Link
 		reqd: DF.Check
 		source_fieldname: DF.Data | None
@@ -76,7 +75,6 @@ class InventoryDimension(Document):
 
 		old_doc = self._doc_before_save
 		allow_to_edit_fields = [
-			"disabled",
 			"fetch_from_parent",
 			"type_of_transaction",
 			"condition",
@@ -93,29 +91,44 @@ class InventoryDimension(Document):
 				frappe.throw(_(msg), DoNotChangeError)
 
 	def on_trash(self):
+		if self.has_stock_ledger():
+			frappe.throw(
+				_("Inventory Dimension {0} cannot be deleted as stock transactions exist against it").format(
+					bold(self.name)
+				),
+				DoNotChangeError,
+			)
+
 		self.delete_custom_fields()
 
 	def delete_custom_fields(self):
-		filters = {
-			"fieldname": (
-				"in",
-				[
-					self.source_fieldname,
-					f"to_{self.source_fieldname}",
-					f"from_{self.source_fieldname}",
-					f"rejected_{self.source_fieldname}",
-				],
-			)
-		}
+		document_fieldnames = [
+			self.source_fieldname,
+			f"to_{self.source_fieldname}",
+			f"from_{self.source_fieldname}",
+			f"rejected_{self.source_fieldname}",
+		]
 
-		if self.document_type:
-			filters["dt"] = self.document_type
+		for doctype in self.get_dimension_doctypes():
+			for field in frappe.get_all(
+				"Custom Field", filters={"dt": doctype, "fieldname": ("in", document_fieldnames)}
+			):
+				delete_dimension_custom_field(field.name)
 
-		for field in frappe.get_all("Custom Field", filters=filters):
-			frappe.delete_doc("Custom Field", field.name)
+		for doctype in ("Stock Ledger Entry", "Stock Closing Balance"):
+			for field in frappe.get_all(
+				"Custom Field", filters={"dt": doctype, "fieldname": self.target_fieldname}
+			):
+				delete_dimension_custom_field(field.name)
 
 		msg = f"Deleted custom fields related to the dimension {self.name}"
 		frappe.msgprint(_(msg))
+
+	def get_dimension_doctypes(self):
+		if not self.apply_to_all_doctypes:
+			return [self.document_type]
+
+		return [row[0] for row in get_inventory_documents()]
 
 	def reset_value(self):
 		if self.apply_to_all_doctypes:
@@ -139,7 +152,7 @@ class InventoryDimension(Document):
 			self.source_fieldname = scrub(self.dimension_name)
 
 		if not self.target_fieldname:
-			self.target_fieldname = scrub(self.reference_document)
+			self.target_fieldname = scrub(self.dimension_name)
 
 	def on_update(self):
 		self.add_custom_fields()
@@ -165,9 +178,14 @@ class InventoryDimension(Document):
 			label_start_with = "Source"
 
 		label = self.dimension_name
+		# nosemgrep: python.lang.correctness.useless-comparison.no-strings-as-booleans -- label_start_with is a variable
 		if label_start_with:
 			label = f"{label_start_with} {self.dimension_name}"
 
+		# Note: `reqd` is intentionally NOT set on the custom fields. Mandatory enforcement
+		# happens on the server side via StockController.validate_inventory_dimension_mandatory()
+		# so that it can be gated (e.g. skip service rows) and never blocks documents that are
+		# being cancelled.
 		dimension_fields = [
 			dict(
 				fieldname="inventory_dimension",
@@ -182,9 +200,8 @@ class InventoryDimension(Document):
 				insert_after="inventory_dimension",
 				options=self.reference_document,
 				label=_(label),
+				depends_on="eval:doc.s_warehouse" if doctype == "Stock Entry Detail" else "",
 				search_index=1,
-				reqd=self.reqd,
-				mandatory_depends_on=self.mandatory_depends_on,
 			),
 		]
 
@@ -197,7 +214,6 @@ class InventoryDimension(Document):
 					options=self.reference_document,
 					label=_("Rejected " + self.dimension_name),
 					search_index=1,
-					mandatory_depends_on="eval:doc.rejected_qty > 0",
 				)
 			)
 
@@ -224,9 +240,7 @@ class InventoryDimension(Document):
 				and not frappe.db.get_value("Custom Field", {"dt": dt, "fieldname": self.target_fieldname})
 				and not field_exists(dt, self.target_fieldname)
 			):
-				dimension_field = dimension_fields[1]
-				dimension_field["mandatory_depends_on"] = ""
-				dimension_field["reqd"] = 0
+				dimension_field = dimension_fields[1].copy()
 				dimension_field["fieldname"] = self.target_fieldname
 				custom_fields[dt] = dimension_field
 
@@ -250,7 +264,7 @@ class InventoryDimension(Document):
 					if not field_exists(doctype, field["fieldname"]):
 						filter_custom_fields.setdefault(doctype, []).append(field)
 
-		create_custom_fields(filter_custom_fields)
+		create_dimension_custom_fields(filter_custom_fields)
 
 	def add_transfer_field(self, doctype, dimension_fields):
 		if doctype not in [
@@ -273,7 +287,7 @@ class InventoryDimension(Document):
 		elif doctype != "Stock Entry Detail":
 			display_depends_on = "eval:parent.is_internal_customer == 1"
 		elif doctype == "Stock Entry Detail":
-			display_depends_on = "eval:parent.purpose != 'Material Issue'"
+			display_depends_on = "eval:doc.t_warehouse"
 
 		fieldname = f"{fieldname_start_with}_{self.source_fieldname}"
 		label = f"{label_start_with} {self.dimension_name}"
@@ -300,7 +314,7 @@ class InventoryDimension(Document):
 		)
 
 
-def field_exists(doctype, fieldname) -> str or None:
+def field_exists(doctype, fieldname) -> str | None:
 	return frappe.db.get_value("DocField", {"parent": doctype, "fieldname": fieldname}, "name")
 
 
@@ -351,10 +365,10 @@ def get_evaluated_inventory_dimension(doc, sl_dict, parent_doc=None):
 		if parent_doc:
 			evals["parent"] = parent_doc
 
-		if row.condition and frappe.safe_eval(row.condition, evals):
-			filter_dimensions.append(row)
-		else:
-			filter_dimensions.append(row)
+		if row.condition and not frappe.safe_eval(row.condition, evals):
+			continue
+
+		filter_dimensions.append(row)
 
 	return filter_dimensions
 
@@ -371,9 +385,103 @@ def get_document_wise_inventory_dimensions(doctype) -> dict:
 			"type_of_transaction",
 			"fetch_from_parent",
 		],
-		filters={"disabled": 0},
 		or_filters={"document_type": doctype, "apply_to_all_doctypes": 1},
 	)
+
+
+@request_cache
+def get_mandatory_inventory_dimensions(doctype) -> list:
+	"""Return the inventory dimensions applicable to `doctype` (a child doctype such as
+	`Stock Entry Detail`) that need server-side mandatory enforcement.
+
+	A dimension qualifies only if it is configured as mandatory (`reqd`) or has a server-side
+	mandatory condition (`mandatory_depends_on_backend`). Non-mandatory dimensions are never
+	enforced, including the rejected dimension field on purchase rows."""
+	dimensions = frappe.get_all(
+		"Inventory Dimension",
+		fields=[
+			"name",
+			"dimension_name",
+			"source_fieldname",
+			"reqd",
+			"mandatory_depends_on_backend",
+		],
+		or_filters={"document_type": doctype, "apply_to_all_doctypes": 1},
+	)
+
+	return [d for d in dimensions if d.reqd or d.mandatory_depends_on_backend]
+
+
+def get_mandatory_dimension_fields(doctype, dimension) -> list:
+	"""For a mandatory `dimension` return the list of (fieldname, condition) tuples that must be
+	filled on a row of `doctype`. `condition` is a python expression evaluated with `doc` (the row)
+	and `parent`; a `None` condition means the field is unconditionally mandatory.
+
+	Mirrors the mandatory logic that used to live on the custom fields in `get_dimension_fields`."""
+	fields = []
+	source_fieldname = dimension.source_fieldname
+	# `mandatory_depends_on_backend` is a raw python expression evaluated server-side
+	# (with `doc` and `parent`), so it can be used as a condition directly.
+	backend_condition = (dimension.mandatory_depends_on_backend or "").strip() or None
+
+	# Primary source dimension field
+	if dimension.reqd and doctype == "Stock Entry Detail":
+		fields.append((source_fieldname, "doc.s_warehouse"))
+	elif dimension.reqd and doctype == "Subcontracting Receipt Supplied Item":
+		fields.append((source_fieldname, "doc.reference_name"))
+	elif dimension.reqd and doctype == "Packed Item":
+		fields.append(
+			(
+				source_fieldname,
+				"doc.parent_detail_docname and parent.doctype in ['Delivery Note', 'Sales Invoice', 'POS Invoice']",
+			)
+		)
+	elif dimension.reqd:
+		fields.append((source_fieldname, None))
+	elif backend_condition:
+		fields.append((source_fieldname, backend_condition))
+
+	# Rejected dimension field (only present on purchase rows). Enforced only when the dimension
+	# is mandatory for the row AND there is a rejected quantity.
+	if doctype in ["Purchase Invoice Item", "Purchase Receipt Item"]:
+		if dimension.reqd:
+			fields.append((f"rejected_{source_fieldname}", "doc.rejected_qty > 0"))
+		elif backend_condition:
+			fields.append((f"rejected_{source_fieldname}", f"({backend_condition}) and doc.rejected_qty > 0"))
+
+	# Target/transfer dimension field used for internal transfers (mirrors the old
+	# `add_transfer_field` behaviour). When the dimension is `reqd` the field inherits the
+	# transfer display condition, otherwise it inherits the server-side mandatory condition.
+	if (dimension.reqd or backend_condition) and doctype in [
+		"Stock Entry Detail",
+		"Sales Invoice Item",
+		"Delivery Note Item",
+		"Purchase Invoice Item",
+		"Purchase Receipt Item",
+	]:
+		if doctype in ["Purchase Invoice Item", "Purchase Receipt Item"]:
+			transfer_fieldname, display_condition = (
+				f"from_{source_fieldname}",
+				"parent.is_internal_supplier == 1",
+			)
+		elif doctype == "Stock Entry Detail":
+			transfer_fieldname, display_condition = f"to_{source_fieldname}", "doc.t_warehouse"
+		else:
+			transfer_fieldname, display_condition = (
+				f"to_{source_fieldname}",
+				"parent.is_internal_customer == 1",
+			)
+
+		# The transfer field only applies to internal transfers, so its mandatory check is always
+		# gated on the display condition; the backend condition narrows it further.
+		if dimension.reqd:
+			transfer_condition = display_condition
+		else:
+			transfer_condition = f"({display_condition}) and ({backend_condition})"
+
+		fields.append((transfer_fieldname, transfer_condition))
+
+	return fields
 
 
 @frappe.whitelist()
@@ -388,7 +496,6 @@ def get_inventory_dimensions():
 			"validate_negative_stock",
 			"name as dimension_name",
 		],
-		filters={"disabled": 0},
 		order_by="creation",
 		distinct=True,
 	)
@@ -423,3 +530,60 @@ def get_parent_fields(child_doctype, dimension_name):
 	)
 
 	return fields
+
+
+def create_dimension_custom_fields(custom_fields):
+	frappe.flags.in_create_custom_fields = True
+	try:
+		for doctype, fields in custom_fields.items():
+			for df in fields:
+				save_dimension_custom_field(doctype, df)
+	finally:
+		frappe.flags.in_create_custom_fields = False
+
+	for doctype in custom_fields:
+		frappe.clear_cache(doctype=doctype)
+		frappe.db.updatedb(doctype)
+
+
+def save_dimension_custom_field(doctype, df):
+	name = frappe.db.get_value("Custom Field", {"dt": doctype, "fieldname": df["fieldname"]})
+	if name:
+		custom_field = frappe.get_doc("Custom Field", name)
+		original_values = custom_field.as_dict()
+		custom_field.update(df)
+		if custom_field.as_dict() == original_values:
+			return
+	else:
+		custom_field = frappe.get_doc(
+			{
+				"doctype": "Custom Field",
+				"dt": doctype,
+				"permlevel": 0,
+				"fieldtype": "Data",
+				"hidden": 0,
+				"is_system_generated": 1,
+				**df,
+			}
+		)
+
+	custom_field.flags.ignore_permissions = True
+	custom_field.save()
+
+
+def delete_dimension_custom_field(name):
+	field = frappe.db.get_value("Custom Field", name, ["dt", "fieldname"], as_dict=True)
+	frappe.delete_doc("Custom Field", name, ignore_permissions=True, ignore_on_trash=True)
+	delete_property_setter(field.dt, field_name=field.fieldname)
+	remove_field_from_doctype_layouts(field.dt, field.fieldname)
+	frappe.clear_cache(doctype=field.dt)
+
+
+def remove_field_from_doctype_layouts(doctype, fieldname):
+	for layout in frappe.get_all("DocType Layout", filters={"document_type": doctype}, pluck="name"):
+		layout_doc = frappe.get_doc("DocType Layout", layout)
+		rows = [row for row in layout_doc.fields if row.fieldname == fieldname]
+		if rows:
+			layout_doc.remove(rows[0])
+			layout_doc.flags.ignore_permissions = True
+			layout_doc.save()

@@ -27,6 +27,7 @@ class ProductionPlanSubAssemblyItem(Document):
 		parent_item_code: DF.Link | None
 		parentfield: DF.Data
 		parenttype: DF.Data
+		process_loss_percentage: DF.Percent
 		production_item: DF.Link | None
 		production_plan_item: DF.Data | None
 		projected_qty: DF.Float
@@ -34,6 +35,8 @@ class ProductionPlanSubAssemblyItem(Document):
 		qty: DF.Float
 		received_qty: DF.Float
 		required_qty: DF.Float
+		sales_order: DF.Link | None
+		sales_order_item: DF.Data | None
 		schedule_date: DF.Datetime | None
 		stock_reserved_qty: DF.Float
 		stock_uom: DF.Link | None

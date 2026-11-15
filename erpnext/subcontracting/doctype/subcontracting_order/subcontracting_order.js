@@ -102,10 +102,9 @@ frappe.ui.form.on("Subcontracting Order", {
 		frm.set_query("bom", "items", (doc, cdt, cdn) => {
 			let d = locals[cdt][cdn];
 			return {
+				query: "erpnext.subcontracting.doctype.subcontracting_bom.subcontracting_bom.finished_good_bom_query",
 				filters: {
-					item: d.item_code,
-					is_active: 1,
-					docstatus: 1,
+					finished_good: d.item_code,
 					company: frm.doc.company,
 				},
 			};
@@ -305,7 +304,7 @@ frappe.ui.form.on("Subcontracting Order", {
 
 		frm.doc.supplied_items.forEach((item) => {
 			let unreserved_qty =
-				flt(item.required_qty) - flt(item.supplied_qty) - flt(item.stock_reserved_qty);
+				flt(item.required_qty) - flt(item.total_supplied_qty) - flt(item.stock_reserved_qty);
 
 			if (unreserved_qty > 0) {
 				dialog.fields_dict.items.df.data.push({
@@ -578,7 +577,7 @@ frappe.ui.form.on("Subcontracting Order", {
 	},
 
 	get_materials_from_supplier: function (frm) {
-		let sco_rm_details = [];
+		const sco_rm_details = [];
 
 		if (frm.doc.status != "Closed" && frm.doc.supplied_items) {
 			frm.doc.supplied_items.forEach((d) => {
@@ -592,21 +591,16 @@ frappe.ui.form.on("Subcontracting Order", {
 			frm.add_custom_button(
 				__("Return of Components"),
 				() => {
-					frm.call({
+					frappe.model.open_mapped_doc({
 						method: "erpnext.controllers.subcontracting_controller.get_materials_from_supplier",
-						freeze: true,
-						freeze_message: __("Creating Stock Entry"),
+						frm: frm,
 						args: {
 							subcontract_order: frm.doc.name,
 							rm_details: sco_rm_details,
-							order_doctype: cur_frm.doc.doctype,
+							order_doctype: frm.doc.doctype,
 						},
-						callback: function (r) {
-							if (r && r.message) {
-								const doc = frappe.model.sync(r.message);
-								frappe.set_route("Form", doc[0].doctype, doc[0].name);
-							}
-						},
+						freeze: true,
+						freeze_message: __("Creating Return of Components ..."),
 					});
 				},
 				__("Create")

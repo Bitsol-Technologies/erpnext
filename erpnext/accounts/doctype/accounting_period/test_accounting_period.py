@@ -3,19 +3,17 @@
 import unittest
 
 import frappe
-from frappe.tests import IntegrationTestCase
-from frappe.utils import add_months, nowdate
+from frappe.utils import nowdate
 
 from erpnext.accounts.doctype.accounting_period.accounting_period import (
 	ClosedAccountingPeriod,
 	OverlapError,
 )
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+from erpnext.tests.utils import ERPNextTestSuite
 
-EXTRA_TEST_RECORD_DEPENDENCIES = ["Item"]
 
-
-class TestAccountingPeriod(IntegrationTestCase):
+class TestAccountingPeriod(ERPNextTestSuite):
 	def test_overlap(self):
 		ap1 = create_accounting_period(
 			start_date="2018-04-01", end_date="2018-06-30", company="Wind Power LLC"
@@ -90,17 +88,13 @@ class TestAccountingPeriod(IntegrationTestCase):
 		doc.submit()  # Should not raise
 		self.assertEqual(doc.docstatus, 1)
 
-	def tearDown(self):
-		for d in frappe.get_all("Accounting Period"):
-			frappe.delete_doc("Accounting Period", d.name)
-
 
 def create_accounting_period(**args):
 	args = frappe._dict(args)
 
 	accounting_period = frappe.new_doc("Accounting Period")
 	accounting_period.start_date = args.start_date or nowdate()
-	accounting_period.end_date = args.end_date or add_months(nowdate(), 1)
+	accounting_period.end_date = args.end_date or nowdate()
 	accounting_period.company = args.company or "_Test Company"
 	accounting_period.period_name = args.period_name or "_Test_Period_Name_1"
 	accounting_period.append("closed_documents", {"document_type": "Sales Invoice", "closed": 1})

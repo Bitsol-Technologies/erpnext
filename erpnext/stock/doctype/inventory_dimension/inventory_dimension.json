@@ -2,15 +2,16 @@
  "actions": [],
  "autoname": "field:dimension_name",
  "creation": "2022-06-17 13:04:16.554051",
+ "description": "An extra way to tag stock, like a rack or bin.",
  "doctype": "DocType",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/inventory_dimension",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "dimension_details_tab",
   "dimension_name",
-  "reference_document",
   "column_break_4",
-  "disabled",
+  "reference_document",
   "field_mapping_section",
   "source_fieldname",
   "column_break_9",
@@ -28,7 +29,7 @@
   "condition",
   "conditional_mandatory_section",
   "reqd",
-  "mandatory_depends_on",
+  "mandatory_depends_on_backend",
   "conditional_rule_examples_section",
   "html_19"
  ],
@@ -94,12 +95,6 @@
    "label": "Apply to All Inventory Documents"
   },
   {
-   "default": "0",
-   "fieldname": "disabled",
-   "fieldtype": "Check",
-   "label": "Disabled"
-  },
-  {
    "fieldname": "target_fieldname",
    "fieldtype": "Data",
    "label": "Target Fieldname (Stock Ledger Entry)",
@@ -159,12 +154,6 @@
    "label": "Conditional Rule Examples"
   },
   {
-   "description": "To apply condition on parent field use parent.field_name and to apply condition on child table use doc.field_name. Here field_name could be based on the actual column name of the respective field.",
-   "fieldname": "mandatory_depends_on",
-   "fieldtype": "Small Text",
-   "label": "Mandatory Depends On"
-  },
-  {
    "fieldname": "conditional_mandatory_section",
    "fieldtype": "Section Break",
    "label": "Mandatory Section"
@@ -174,6 +163,13 @@
    "fieldname": "reqd",
    "fieldtype": "Check",
    "label": "Mandatory"
+  },
+  {
+   "depends_on": "eval:!doc.reqd",
+   "description": "Python expression evaluated on the server. Use doc.fieldname for the row and parent.fieldname for the parent document. When it evaluates to true the dimension becomes mandatory. Example: doc.t_warehouse and doc.qty > 0",
+   "fieldname": "mandatory_depends_on_backend",
+   "fieldtype": "Small Text",
+   "label": "Mandatory Depends On (Backend)"
   },
   {
    "fieldname": "column_break_niy2u",
@@ -186,9 +182,10 @@
    "label": "Validate Negative Stock"
   }
  ],
+ "icon": "layers",
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-07-07 15:51:29.329064",
+ "modified": "2026-06-25 11:30:00.000000",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Inventory Dimension",

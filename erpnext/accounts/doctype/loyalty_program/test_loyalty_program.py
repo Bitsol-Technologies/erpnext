@@ -1,25 +1,19 @@
 # Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
-import unittest
+from unittest.mock import patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
-from frappe.utils import cint, flt, getdate, today
+from frappe.utils import add_days, cint, flt, getdate, today
 
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import (
 	get_loyalty_details,
 	get_loyalty_program_details_with_points,
 )
 from erpnext.accounts.party import get_dashboard_info
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestLoyaltyProgram(IntegrationTestCase):
-	@classmethod
-	def setUpClass(cls):
-		super().setUpClass()
-		# create relevant item, customer, loyalty program, etc
-		create_records()
-
+class TestLoyaltyProgram(ERPNextTestSuite):
 	def test_loyalty_points_earned_single_tier(self):
 		frappe.db.set_value("Customer", "Test Loyalty Customer", "loyalty_program", "Test Single Loyalty")
 		# create a new sales invoice
@@ -201,7 +195,7 @@ class TestLoyaltyProgram(IntegrationTestCase):
 		for d in company_wise_info:
 			self.assertTrue(d.get("loyalty_points"))
 
-	@unittest.mock.patch("erpnext.accounts.doctype.loyalty_program.loyalty_program.get_loyalty_details")
+	@patch("erpnext.accounts.doctype.loyalty_program.loyalty_program.get_loyalty_details")
 	def test_tier_selection(self, mock_get_loyalty_details):
 		# Create a new loyalty program with multiple tiers
 		loyalty_program = frappe.get_doc(
@@ -265,6 +259,32 @@ class TestLoyaltyProgram(IntegrationTestCase):
 		# Clean up
 		loyalty_program.delete()
 
+	def test_points_never_expire_when_expiry_duration_is_zero(self):
+		frappe.db.set_value("Customer", "Test Loyalty Customer", "loyalty_program", "Test Single Loyalty")
+		frappe.db.set_value(
+			"Loyalty Program",
+			"Test Single Loyalty",
+			{"expiry_duration": 0, "from_date": add_days(today(), -30)},
+		)
+		before = get_loyalty_program_details_with_points(
+			"Test Loyalty Customer", company="_Test Company", loyalty_program="Test Single Loyalty"
+		)
+
+		si = create_sales_invoice_record()
+		si.set_posting_time = 1
+		si.posting_date = add_days(today(), -1)
+		si.insert()
+		si.submit()
+
+		after = get_loyalty_program_details_with_points(
+			"Test Loyalty Customer", company="_Test Company", loyalty_program="Test Single Loyalty"
+		)
+		self.assertEqual(after.loyalty_points, before.loyalty_points + 10)
+		self.assertEqual(
+			getdate(frappe.db.get_value("Loyalty Point Entry", {"invoice": si.name}, "expiry_date")),
+			getdate("9999-12-31"),
+		)
+
 
 def get_points_earned(self):
 	def get_returned_amount():
@@ -323,96 +343,3 @@ def create_sales_invoice_record(qty=1):
 			],
 		}
 	)
-
-
-def create_records():
-	# create a new loyalty Account
-	if not frappe.db.exists("Account", "Loyalty - _TC"):
-		frappe.get_doc(
-			{
-				"doctype": "Account",
-				"account_name": "Loyalty",
-				"parent_account": "Direct Expenses - _TC",
-				"company": "_Test Company",
-				"is_group": 0,
-				"account_type": "Expense Account",
-			}
-		).insert()
-
-	# create a new loyalty program Single tier
-	if not frappe.db.exists("Loyalty Program", "Test Single Loyalty"):
-		frappe.get_doc(
-			{
-				"doctype": "Loyalty Program",
-				"loyalty_program_name": "Test Single Loyalty",
-				"auto_opt_in": 1,
-				"from_date": today(),
-				"loyalty_program_type": "Single Tier Program",
-				"conversion_factor": 1,
-				"expiry_duration": 10,
-				"company": "_Test Company",
-				"cost_center": "Main - _TC",
-				"expense_account": "Loyalty - _TC",
-				"collection_rules": [{"tier_name": "Bronce", "collection_factor": 1000, "min_spent": 0}],
-			}
-		).insert()
-
-	# create a new customer
-	if not frappe.db.exists("Customer", "Test Loyalty Customer"):
-		frappe.get_doc(
-			{
-				"customer_group": "_Test Customer Group",
-				"customer_name": "Test Loyalty Customer",
-				"customer_type": "Individual",
-				"doctype": "Customer",
-				"territory": "_Test Territory",
-			}
-		).insert()
-
-	# create a new loyalty program Multiple tier
-	if not frappe.db.exists("Loyalty Program", "Test Multiple Loyalty"):
-		frappe.get_doc(
-			{
-				"doctype": "Loyalty Program",
-				"loyalty_program_name": "Test Multiple Loyalty",
-				"auto_opt_in": 1,
-				"from_date": today(),
-				"loyalty_program_type": "Multiple Tier Program",
-				"conversion_factor": 1,
-				"expiry_duration": 10,
-				"company": "_Test Company",
-				"cost_center": "Main - _TC",
-				"expense_account": "Loyalty - _TC",
-				"collection_rules": [
-					{"tier_name": "Bronze", "collection_factor": 1000, "min_spent": 0},
-					{"tier_name": "Silver", "collection_factor": 1000, "min_spent": 10000},
-					{"tier_name": "Gold", "collection_factor": 1000, "min_spent": 19000},
-				],
-			}
-		).insert()
-
-	# create an item
-	if not frappe.db.exists("Item", "Loyal Item"):
-		frappe.get_doc(
-			{
-				"doctype": "Item",
-				"item_code": "Loyal Item",
-				"item_name": "Loyal Item",
-				"item_group": "All Item Groups",
-				"company": "_Test Company",
-				"is_stock_item": 1,
-				"opening_stock": 100,
-				"valuation_rate": 10000,
-			}
-		).insert()
-
-	# create item price
-	if not frappe.db.exists("Item Price", {"price_list": "Standard Selling", "item_code": "Loyal Item"}):
-		frappe.get_doc(
-			{
-				"doctype": "Item Price",
-				"price_list": "Standard Selling",
-				"item_code": "Loyal Item",
-				"price_list_rate": 10000,
-			}
-		).insert()

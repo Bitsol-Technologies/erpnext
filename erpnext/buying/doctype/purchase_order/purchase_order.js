@@ -45,11 +45,7 @@ frappe.ui.form.on("Purchase Order", {
 
 		frm.set_query("fg_item", "items", function () {
 			return {
-				filters: {
-					is_stock_item: 1,
-					is_sub_contracted_item: 1,
-					default_bom: ["!=", ""],
-				},
+				query: "erpnext.controllers.queries.subcontracted_item_query",
 			};
 		});
 	},
@@ -67,7 +63,7 @@ frappe.ui.form.on("Purchase Order", {
 	},
 
 	transaction_date(frm) {
-		prevent_past_schedule_dates(frm);
+		erpnext.buying.prevent_past_schedule_dates(frm);
 		frm.set_value("schedule_date", "");
 	},
 
@@ -87,7 +83,7 @@ frappe.ui.form.on("Purchase Order", {
 		if (frm.doc.docstatus == 0) {
 			erpnext.set_unit_price_items_note(frm);
 		}
-		prevent_past_schedule_dates(frm);
+		erpnext.buying.prevent_past_schedule_dates(frm);
 	},
 
 	get_materials_from_supplier: function (frm) {
@@ -354,9 +350,9 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 					}
 				}
 
-				if (is_drop_ship && doc.status != "Delivered") {
+				if (is_drop_ship && !["Completed", "Delivered"].includes(doc.status)) {
 					this.frm.add_custom_button(
-						__("Delivered"),
+						__("Deliver (Dropship)"),
 						this.delivered_by_supplier.bind(this),
 						__("Status")
 					);
@@ -374,7 +370,12 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 			}
 			if (doc.status != "Closed") {
 				if (doc.status != "On Hold") {
-					if (flt(doc.per_received) < 100 && allow_receipt) {
+					if (
+						doc.items
+							.filter((item) => !item.delivered_by_supplier)
+							.some((item) => item.received_qty < item.qty) &&
+						allow_receipt
+					) {
 						this.frm.add_custom_button(
 							__("Purchase Receipt"),
 							() => {
@@ -416,7 +417,11 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 							__("Create")
 						);
 
-					if (flt(doc.per_billed) < 100 && doc.status != "Delivered") {
+					if (
+						frappe.model.can_create("Payment Entry") &&
+						flt(doc.per_billed) < 100 &&
+						doc.status != "Delivered"
+					) {
 						this.frm.add_custom_button(
 							__("Payment"),
 							() => this.make_payment_entry(),
@@ -424,11 +429,11 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 						);
 					}
 
-					if (flt(doc.per_billed) < 100) {
+					if (flt(doc.per_billed) < 100 && frappe.boot.user.in_create.includes("Payment Request")) {
 						this.frm.add_custom_button(
 							__("Payment Request"),
 							function () {
-								me.make_payment_request();
+								me.make_payment_request_with_schedule();
 							},
 							__("Create")
 						);
@@ -459,27 +464,6 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 		} else if (doc.docstatus === 0) {
 			this.frm.cscript.add_from_mappers();
 		}
-	}
-
-	get_items_from_open_material_requests() {
-		erpnext.utils.map_current_doc({
-			method: "erpnext.stock.doctype.material_request.material_request.make_purchase_order_based_on_supplier",
-			args: {
-				supplier: this.frm.doc.supplier,
-			},
-			source_doctype: "Material Request",
-			source_name: this.frm.doc.supplier,
-			target: this.frm,
-			setters: {
-				company: this.frm.doc.company,
-			},
-			get_query_filters: {
-				docstatus: ["!=", 2],
-				supplier: this.frm.doc.supplier,
-			},
-			get_query_method:
-				"erpnext.stock.doctype.material_request.material_request.get_material_requests_based_on_supplier",
-		});
 	}
 
 	validate() {
@@ -574,7 +558,7 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 					},
 					get_query_filters: {
 						docstatus: 1,
-						status: ["not in", ["Stopped", "Expired"]],
+						status: ["not in", ["Stopped", "Ordered", "Expired"]],
 					},
 					allow_child_item_selection: true,
 					child_fieldname: "items",
@@ -620,7 +604,7 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 						var item_length = me.frm.doc.items.length;
 						while (i < item_length) {
 							var qty = me.frm.doc.items[i].qty;
-							(r.message[0] || []).forEach(function (d) {
+							(r.message || []).forEach(function (d) {
 								if (
 									d.qty > 0 &&
 									qty > 0 &&
@@ -681,12 +665,20 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 	}
 
 	items_add(doc, cdt, cdn) {
-		var row = frappe.get_doc(cdt, cdn);
-		if (doc.schedule_date) {
-			row.schedule_date = doc.schedule_date;
-			refresh_field("schedule_date", cdn, "items");
+		const row = frappe.get_doc(cdt, cdn);
+		const field_copy = [];
+		if (doc.project) {
+			frappe.model.set_value(cdt, cdn, "project", doc.project);
 		} else {
-			this.frm.script_manager.copy_from_first_row("items", row, ["schedule_date"]);
+			field_copy.push("project");
+		}
+		if (doc.schedule_date) {
+			frappe.model.set_value(cdt, cdn, "schedule_date", doc.schedule_date);
+		} else {
+			field_copy.push("schedule_date");
+		}
+		if (field_copy.length) {
+			this.frm.script_manager.copy_from_first_row("items", row, field_copy);
 		}
 	}
 
@@ -705,8 +697,7 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 					reqd: 1,
 				},
 			],
-			primary_action: function () {
-				var data = d.get_values();
+			primary_action: function (data) {
 				let reason_for_hold = "Reason for hold: " + data.reason_for_hold;
 
 				frappe.call({
@@ -739,7 +730,108 @@ erpnext.buying.PurchaseOrderController = class PurchaseOrderController extends (
 	}
 
 	delivered_by_supplier() {
-		this.frm.cscript.update_status("Deliver", "Delivered");
+		const data = this.frm.doc.items
+			.filter((item) => item.delivered_by_supplier == 1)
+			.map((item) => {
+				return {
+					__checked: item.qty > item.received_qty,
+					name: item.name,
+					item_code: item.item_code,
+					item_name: item.item_name,
+					qty: item.qty,
+					uom: item.uom,
+					delivered_qty: item.received_qty || 0,
+					qty_change: item.qty - item.received_qty,
+				};
+			});
+		const dialog = new frappe.ui.Dialog({
+			title: __("Set Dropship Items Delivered Quantity"),
+			size: "extra-large",
+			fields: [
+				{
+					fieldname: "items",
+					fieldtype: "Table",
+					data: data,
+					cannot_add_rows: true,
+					cannot_delete_rows: true,
+					fields: [
+						{
+							fieldname: "name",
+							fieldtype: "Data",
+							read_only: true,
+							hidden: 1,
+						},
+						{
+							fieldname: "item_code",
+							fieldtype: "Link",
+							options: "Item",
+							label: __("Item Code"),
+							in_list_view: 1,
+							read_only: true,
+						},
+						{
+							fieldname: "item_name",
+							fieldtype: "Data",
+							label: __("Item Name"),
+							in_list_view: 1,
+							read_only: true,
+						},
+						{
+							fieldname: "qty",
+							fieldtype: "Float",
+							label: __("Quantity"),
+							in_list_view: 1,
+							read_only: true,
+						},
+						{
+							fieldname: "uom",
+							fieldtype: "Data",
+							label: __("UOM"),
+							in_list_view: 1,
+							read_only: true,
+						},
+						{
+							fieldname: "delivered_qty",
+							fieldtype: "Float",
+							label: __("Delivered Qty"),
+							read_only: true,
+							in_list_view: 1,
+						},
+						{
+							fieldname: "qty_change",
+							fieldtype: "Float",
+							label: __("Qty Change"),
+							in_list_view: 1,
+							reqd: 1,
+						},
+					],
+				},
+			],
+			primary_action: (values) => {
+				const frm = this.frm;
+				frappe.call({
+					doc: frm.doc,
+					method: "update_dropship_received_qty",
+					args: {
+						data: values.items
+							.filter((item) => item.__checked)
+							.map((item) => ({
+								name: item.name,
+								current_qty: item.delivered_qty,
+								qty_change: item.qty_change,
+							})),
+					},
+					callback: function (r) {
+						if (!r.exc) {
+							frm.reload_doc();
+							frappe.toast(__("Quantities updated successfully."));
+							dialog.hide();
+						}
+					},
+				});
+			},
+		});
+		dialog.show();
 	}
 
 	items_on_form_rendered() {
@@ -759,12 +851,6 @@ cur_frm.cscript.update_status = function (label, status) {
 			cur_frm.reload_doc();
 		},
 	});
-};
-
-cur_frm.fields_dict["items"].grid.get_field("project").get_query = function (doc, cdt, cdn) {
-	return {
-		filters: [["Project", "status", "not in", "Completed, Cancelled"]],
-	};
 };
 
 if (cur_frm.doc.is_old_subcontracting_flow) {
@@ -800,11 +886,3 @@ frappe.ui.form.on("Purchase Order", "is_subcontracted", function (frm) {
 		erpnext.buying.get_default_bom(frm);
 	}
 });
-
-function prevent_past_schedule_dates(frm) {
-	if (frm.doc.transaction_date) {
-		frm.fields_dict["schedule_date"].datepicker?.update({
-			minDate: new Date(frm.doc.transaction_date),
-		});
-	}
-}

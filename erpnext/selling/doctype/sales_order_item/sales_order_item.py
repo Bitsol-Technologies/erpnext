@@ -54,6 +54,7 @@ class SalesOrderItem(Document):
 		item_name: DF.Data
 		item_tax_rate: DF.Code | None
 		item_tax_template: DF.Link | None
+		mapped_additional_discount_amount: DF.Currency
 		margin_rate_or_amount: DF.Float
 		margin_type: DF.Literal["", "Percentage", "Amount"]
 		material_request: DF.Link | None
@@ -80,6 +81,7 @@ class SalesOrderItem(Document):
 		quotation_item: DF.Data | None
 		rate: DF.Currency
 		rate_with_margin: DF.Currency
+		requested_qty: DF.Float
 		reserve_stock: DF.Check
 		returned_qty: DF.Float
 		stock_qty: DF.Float

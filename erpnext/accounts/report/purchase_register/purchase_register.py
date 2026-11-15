@@ -4,9 +4,10 @@
 
 import frappe
 from frappe import _, msgprint
+from frappe.model.meta import get_field_precision
 from frappe.query_builder.custom import ConstantColumn
 from frappe.utils import flt, getdate
-from pypika import Order
+from pypika.terms import Bracket, LiteralValue, Order
 
 from erpnext.accounts.party import get_party_account
 from erpnext.accounts.report.utils import (
@@ -19,10 +20,14 @@ from erpnext.accounts.report.utils import (
 	get_query_columns,
 	get_taxes_query,
 	get_values_for_columns,
+	get_with_descendants,
+	validate_date_range,
 )
 
 
 def execute(filters=None):
+	validate_date_range(filters)
+
 	return _execute(filters)
 
 
@@ -100,7 +105,7 @@ def _execute(filters=None, additional_table_columns=None):
 		# map expense values
 		base_net_total = 0
 		for expense_acc in expense_accounts:
-			if inv.is_internal_supplier and inv.company == inv.represents_company:
+			if is_internal_transfer(inv):
 				expense_amount = 0
 			else:
 				expense_amount = flt(invoice_expense_map.get(inv.name, {}).get(expense_acc))
@@ -125,19 +130,34 @@ def _execute(filters=None, additional_table_columns=None):
 				row.update({frappe.scrub(tax_acc): tax_amount})
 
 		# total tax, grand total, rounded total & outstanding amount
+
+		outstanding_precision = (
+			get_field_precision(
+				frappe.get_meta("Purchase Invoice").get_field("outstanding_amount"),
+				currency=company_currency,
+			)
+			or 2
+		)
 		row.update(
 			{
 				"total_tax": total_tax,
 				"grand_total": inv.base_grand_total,
 				"rounded_total": inv.base_rounded_total,
-				"outstanding_amount": inv.outstanding_amount,
 			}
 		)
 
 		if inv.doctype == "Purchase Invoice":
-			row.update({"debit": inv.base_grand_total, "credit": 0.0})
+			row.update(
+				{
+					"debit": get_in_invoice_payable_debit(inv),
+					"credit": get_payable_credit(inv),
+					"outstanding_amount": flt(
+						get_outstanding_in_company_currency(inv, company_currency), outstanding_precision
+					),
+				}
+			)
 		else:
-			row.update({"debit": 0.0, "credit": inv.base_grand_total})
+			row.update({"debit": inv.debit, "credit": inv.credit})
 		data.append(row)
 
 	res += sorted(data, key=lambda x: x["posting_date"])
@@ -151,12 +171,47 @@ def _execute(filters=None, additional_table_columns=None):
 	return columns, res, None, None, None, include_payments
 
 
+def get_outstanding_in_company_currency(inv, company_currency):
+	"""Outstanding is in the party account currency."""
+	if inv.party_account_currency == company_currency:
+		return flt(inv.outstanding_amount)
+
+	return flt(inv.outstanding_amount) * (inv.conversion_rate or 1)
+
+
+def get_payable_credit(inv):
+	"""Amount the invoice credits to its payable, rounded like its GL entry."""
+	if is_internal_transfer(inv):
+		return 0
+
+	if inv.base_rounding_adjustment and inv.base_rounded_total:
+		return inv.base_rounded_total
+
+	return inv.base_grand_total
+
+
+def is_internal_transfer(inv) -> bool:
+	"""Transfers within the company post nothing to the payable or to expenses."""
+	return bool(inv.is_internal_supplier and inv.company == inv.represents_company)
+
+
+def get_in_invoice_payable_debit(inv):
+	"""Amount the invoice settles against its own payable, as in its GL entries."""
+	debit = flt(inv.base_write_off_amount)
+	if inv.is_paid:
+		debit += flt(inv.base_paid_amount)
+
+	return debit
+
+
 def get_columns(invoice_list, additional_table_columns, include_payments=False):
 	"""return columns based on filters"""
 	columns = [
 		{
 			"label": _("Voucher Type"),
 			"fieldname": "voucher_type",
+			"fieldtype": "Link",
+			"options": "DocType",
 			"width": 120,
 		},
 		{
@@ -330,6 +385,7 @@ def get_account_columns(invoice_list, include_payments):
 			"""SELECT distinct unrealized_profit_loss_account
 			from `tabPurchase Invoice` where docstatus = 1 and name in (%s)
 			and ifnull(unrealized_profit_loss_account, '') != ''
+			and is_internal_supplier = 1
 			order by unrealized_profit_loss_account"""
 			% ", ".join(["%s"] * len(invoice_list)),
 			tuple(inv.name for inv in invoice_list),
@@ -362,7 +418,7 @@ def get_account_columns(invoice_list, include_payments):
 		unrealized_profit_loss_account_columns.append(
 			{
 				"label": account,
-				"fieldname": frappe.scrub(account),
+				"fieldname": frappe.scrub(account + "_unrealized"),
 				"fieldtype": "Currency",
 				"options": "currency",
 				"width": 120,
@@ -395,6 +451,15 @@ def get_invoices(filters, additional_query_columns):
 			pi.base_rounded_total,
 			pi.outstanding_amount,
 			pi.mode_of_payment,
+			pi.conversion_rate,
+			pi.party_account_currency,
+			pi.is_internal_supplier,
+			pi.represents_company,
+			pi.company,
+			pi.is_paid,
+			pi.base_paid_amount,
+			pi.base_write_off_amount,
+			pi.base_rounding_adjustment,
 		)
 		.where(pi.docstatus == 1)
 	)
@@ -406,7 +471,19 @@ def get_invoices(filters, additional_query_columns):
 	if filters.get("supplier"):
 		query = query.where(pi.supplier == filters.supplier)
 	if filters.get("supplier_group"):
-		query = query.where(pi.supplier_group == filters.supplier_group)
+		# read the group from the supplier master, to match the Supplier Group column
+		supplier = frappe.qb.DocType("Supplier")
+		query = query.where(
+			pi.supplier.isin(
+				frappe.qb.from_(supplier)
+				.select(supplier.name)
+				.where(
+					supplier.supplier_group.isin(
+						get_with_descendants("Supplier Group", filters.supplier_group)
+					)
+				)
+			)
+		)
 
 	query = get_conditions(filters, query, "Purchase Invoice")
 
@@ -422,15 +499,13 @@ def get_invoices(filters, additional_query_columns):
 
 	from frappe.desk.reportview import build_match_conditions
 
-	query, params = query.walk()
-	match_conditions = build_match_conditions("Purchase Invoice")
+	if match_conditions := build_match_conditions("Purchase Invoice"):
+		query = query.where(Bracket(LiteralValue(match_conditions)))
 
-	if match_conditions:
-		query += " and " + match_conditions
+	query = query.orderby("posting_date", order=Order.desc)
+	query = query.orderby("name", order=Order.desc)
 
-	query += " order by posting_date desc, name desc"
-
-	return frappe.db.sql(query, params, as_dict=True)
+	return query.run(as_dict=True)
 
 
 def get_conditions(filters, query, doctype):
@@ -445,7 +520,6 @@ def get_conditions(filters, query, doctype):
 def get_payments(filters):
 	args = frappe._dict(
 		account="credit_to",
-		account_fieldname="paid_to",
 		party="supplier",
 		party_name="supplier_name",
 		party_account=get_party_account("Supplier", filters.supplier, filters.company, include_advance=True),
@@ -501,7 +575,7 @@ def get_invoice_tax_map(invoice_list, invoice_expense_map, expense_accounts, inc
 		else sum(base_tax_amount_after_discount_amount) * -1 end as tax_amount
 		from `tabPurchase Taxes and Charges`
 		where parent in (%s) and category in ('Total', 'Valuation and Total')
-			and base_tax_amount_after_discount_amount != 0
+			and base_tax_amount_after_discount_amount != 0 and parenttype='Purchase Invoice'
 		group by parent, account_head, add_deduct_tax
 	"""
 		% ", ".join(["%s"] * len(invoice_list)),

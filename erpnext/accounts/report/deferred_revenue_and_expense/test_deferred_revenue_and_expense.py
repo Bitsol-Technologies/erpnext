@@ -1,19 +1,20 @@
 import frappe
 from frappe import qb
-from frappe.tests import IntegrationTestCase
-from frappe.utils import nowdate
+from frappe.utils import add_days, add_months, flt, getdate, nowdate
 
 from erpnext.accounts.doctype.account.test_account import create_account
 from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make_purchase_invoice
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from erpnext.accounts.report.deferred_revenue_and_expense.deferred_revenue_and_expense import (
 	Deferred_Revenue_and_Expense_Report,
+	execute,
 )
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
 from erpnext.accounts.utils import get_fiscal_year
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestDeferredRevenueAndExpense(IntegrationTestCase, AccountsTestMixin):
+class TestDeferredRevenueAndExpense(ERPNextTestSuite, AccountsTestMixin):
 	maxDiff = None
 
 	def clear_old_entries(self):
@@ -61,16 +62,18 @@ class TestDeferredRevenueAndExpense(IntegrationTestCase, AccountsTestMixin):
 		)
 
 	def setUp(self):
-		self.create_company()
-		self.create_customer("_Test Customer")
-		self.create_supplier("_Test Furniture Supplier")
+		self.company = "_Test Company"
+		self.company_abbr = "_TC"
+		self.customer = "_Test Customer"
+		self.supplier = "_Test Supplier"
+		self.warehouse = "Stores - _TC"
+		self.debit_to = "Debtors - _TC"
+		self.cost_center = "Main - _TC"
+		self.income_account = "Sales - _TC"
+		self.expense_account = "Cost of Goods Sold - _TC"
 		self.setup_deferred_accounts_and_items()
-		self.clear_old_entries()
 
-	def tearDown(self):
-		frappe.db.rollback()
-
-	@IntegrationTestCase.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
+	@ERPNextTestSuite.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
 	def test_deferred_revenue(self):
 		self.create_item("_Test Internet Subscription", 0, self.warehouse, self.company)
 		item = frappe.get_doc("Item", self.item)
@@ -137,7 +140,7 @@ class TestDeferredRevenueAndExpense(IntegrationTestCase, AccountsTestMixin):
 		]
 		self.assertEqual(report.period_total, expected)
 
-	@IntegrationTestCase.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
+	@ERPNextTestSuite.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
 	def test_deferred_expense(self):
 		self.create_item("_Test Office Desk", 0, self.warehouse, self.company)
 		item = frappe.get_doc("Item", self.item)
@@ -207,7 +210,7 @@ class TestDeferredRevenueAndExpense(IntegrationTestCase, AccountsTestMixin):
 		]
 		self.assertEqual(report.period_total, expected)
 
-	@IntegrationTestCase.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
+	@ERPNextTestSuite.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
 	def test_zero_months(self):
 		self.create_item("_Test Internet Subscription", 0, self.warehouse, self.company)
 		item = frappe.get_doc("Item", self.item)
@@ -272,7 +275,7 @@ class TestDeferredRevenueAndExpense(IntegrationTestCase, AccountsTestMixin):
 		]
 		self.assertEqual(report.period_total, expected)
 
-	@IntegrationTestCase.change_settings(
+	@ERPNextTestSuite.change_settings(
 		"Accounts Settings",
 		{"book_deferred_entries_based_on": "Months", "book_deferred_entries_via_journal_entry": 0},
 	)
@@ -347,3 +350,96 @@ class TestDeferredRevenueAndExpense(IntegrationTestCase, AccountsTestMixin):
 		deferred_exp = sum([inv[idx].actual for idx in range(len(report.period_list))])
 		# make sure the total deferred expense is greater than 0
 		self.assertLess(deferred_exp, 0)
+
+	@ERPNextTestSuite.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Days"})
+	def test_forecast_beyond_last_fiscal_year(self):
+		last_year_end = frappe.get_all(
+			"Fiscal Year", order_by="year_end_date desc", limit=1, pluck="year_end_date"
+		)[0]
+		service_start = add_months(last_year_end, -2)
+		si = self.make_deferred_sales_invoice(add_days(service_start, 1), add_months(last_year_end, 2), 1200)
+
+		data = self.get_report_rows(add_days(service_start, 1), last_year_end)
+
+		self.assertIn(si.name, [row.get("name") for row in data])
+
+	def test_customer_user_permission(self):
+		allowed = self.make_deferred_sales_invoice("2021-04-01", "2022-03-31", 1200)
+		restricted = self.make_deferred_sales_invoice(
+			"2021-04-01", "2022-03-31", 1200, customer="_Test Customer 1"
+		)
+		user = "test_deferred_report_user@example.com"
+		if not frappe.db.exists("User", user):
+			frappe.get_doc(
+				doctype="User", email=user, first_name="Deferred", roles=[{"role": "Accounts User"}]
+			).insert()
+		frappe.permissions.add_user_permission("Customer", self.customer, user)
+
+		frappe.set_user(user)
+		try:
+			names = [row.get("name") for row in self.get_report_rows("2021-04-01", "2022-03-31")]
+		finally:
+			frappe.set_user("Administrator")
+
+		self.assertIn(allowed.name, names)
+		self.assertNotIn(restricted.name, names)
+
+	@ERPNextTestSuite.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Days"})
+	def test_forecast_includes_first_service_day(self):
+		si = self.make_deferred_sales_invoice("2021-04-01", "2022-03-31", 36500)
+
+		row = next(
+			row for row in self.get_report_rows("2021-04-01", "2022-03-31") if row.get("name") == si.name
+		)
+
+		self.assertEqual(row["apr_2021"], 3000)
+		self.assertEqual(flt(sum(v for k, v in row.items() if k.endswith(("_2021", "_2022"))), 2), 36500)
+
+	def test_forecast_one_day_service(self):
+		for booking_basis in ("Days", "Months"):
+			with (
+				self.subTest(booking_basis=booking_basis),
+				self.change_settings("Accounts Settings", {"book_deferred_entries_based_on": booking_basis}),
+			):
+				si = self.make_deferred_sales_invoice("2021-04-15", "2021-04-15", 500)
+
+				row = next(
+					row
+					for row in self.get_report_rows("2021-04-01", "2021-06-30")
+					if row.get("name") == si.name
+				)
+
+				self.assertEqual(row["apr_2021"], 500)
+				self.assertEqual(row["may_2021"], 0)
+
+	def make_deferred_sales_invoice(self, service_start_date, service_end_date, rate, customer=None):
+		si = create_sales_invoice(
+			company=self.company,
+			customer=customer or self.customer,
+			debit_to=self.debit_to,
+			posting_date=service_start_date,
+			cost_center=self.cost_center,
+			income_account=self.income_account,
+			item="_Test Non Stock Item",
+			rate=rate,
+			do_not_save=True,
+		)
+		si.items[0].enable_deferred_revenue = 1
+		si.items[0].service_start_date = service_start_date
+		si.items[0].service_end_date = service_end_date
+		si.items[0].deferred_revenue_account = self.deferred_revenue_account
+		si.insert()
+		si.submit()
+		return si
+
+	def get_report_rows(self, period_start_date, period_end_date):
+		filters = frappe._dict(
+			company=self.company,
+			filter_based_on="Date Range",
+			period_start_date=getdate(period_start_date),
+			period_end_date=getdate(period_end_date),
+			periodicity="Monthly",
+			type="Revenue",
+			with_upcoming_postings=True,
+		)
+		return execute(filters)[1]

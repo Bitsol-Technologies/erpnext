@@ -10,6 +10,24 @@ from frappe.custom.doctype.property_setter.property_setter import make_property_
 from frappe.model.document import Document
 from frappe.utils import cint
 
+UTM_DOCTYPES = [
+	"Lead",
+	"Quotation",
+	"POS Invoice",
+	"POS Profile",
+	"Opportunity",
+	"Sales Order",
+	"Sales Invoice",
+	"Delivery Note",
+]
+
+COMMISSION_SECTIONS = {
+	"Sales Invoice": ("commission_section", "sales_team_section"),
+	"Sales Order": ("sales_team_section_break", "section_break1"),
+	"Delivery Note": ("sales_team_section_break", "section_break1"),
+	"POS Invoice": ("sales_team_section_break", "section_break2"),
+}
+
 
 class SellingSettings(Document):
 	# begin: auto-generated types
@@ -30,17 +48,22 @@ class SellingSettings(Document):
 		blanket_order_allowance: DF.Float
 		cust_master_name: DF.Literal["Customer Name", "Naming Series", "Auto Name"]
 		customer_group: DF.Link | None
-		deliver_scrap_items: DF.Check
+		default_proforma_print_format: DF.Link | None
+		deliver_secondary_items: DF.Check
 		dn_required: DF.Literal["No", "Yes"]
 		dont_reserve_sales_order_qty_on_sales_return: DF.Check
 		editable_bundle_item_rates: DF.Check
 		editable_price_list_rate: DF.Check
 		enable_cutoff_date_on_bulk_delivery_note_creation: DF.Check
 		enable_discount_accounting: DF.Check
+		enable_proforma_invoice: DF.Check
+		enable_tracking_sales_commissions: DF.Check
+		enable_utm: DF.Check
 		fallback_to_default_price_list: DF.Check
 		hide_tax_id: DF.Check
 		maintain_same_rate_action: DF.Literal["Stop", "Warn"]
 		maintain_same_sales_rate: DF.Check
+		proforma_email_template: DF.Link | None
 		role_to_override_stop_action: DF.Link | None
 		sales_update_frequency: DF.Literal["Monthly", "Each Transaction", "Daily"]
 		selling_price_list: DF.Link | None
@@ -57,6 +80,8 @@ class SellingSettings(Document):
 		self.toggle_discount_accounting_fields()
 
 	def validate(self):
+		old_doc = self.get_doc_before_save()
+
 		for key in [
 			"cust_master_name",
 			"customer_group",
@@ -77,6 +102,12 @@ class SellingSettings(Document):
 		)
 
 		self.validate_fallback_to_default_price_list()
+
+		if old_doc and old_doc.enable_tracking_sales_commissions != self.enable_tracking_sales_commissions:
+			toggle_tracking_sales_commissions_section(not self.enable_tracking_sales_commissions)
+
+		if old_doc and old_doc.enable_utm != self.enable_utm:
+			toggle_utm_analytics_section(not self.enable_utm)
 
 	def validate_fallback_to_default_price_list(self):
 		if (
@@ -99,7 +130,7 @@ class SellingSettings(Document):
 		_hide_tax_id = cint(self.hide_tax_id)
 
 		# Make property setters to hide tax_id fields
-		for doctype in ("Sales Order", "Sales Invoice", "Delivery Note"):
+		for doctype in ("Sales Order", "Sales Invoice", "Delivery Note", "POS Invoice"):
 			make_property_setter(
 				doctype, "tax_id", "hidden", _hide_tax_id, "Check", validate_fields_for_doctype=False
 			)
@@ -175,3 +206,24 @@ class SellingSettings(Document):
 				"Code",
 				validate_fields_for_doctype=False,
 			)
+
+
+def toggle_tracking_sales_commissions_section(hide):
+	from erpnext.accounts.doctype.accounts_settings.accounts_settings import (
+		create_property_setter_for_hiding_field,
+	)
+
+	for doctype, sections in COMMISSION_SECTIONS.items():
+		for section in sections:
+			create_property_setter_for_hiding_field(doctype, section, hide)
+
+
+def toggle_utm_analytics_section(hide):
+	from erpnext.accounts.doctype.accounts_settings.accounts_settings import (
+		create_property_setter_for_hiding_field,
+	)
+
+	for doctype in UTM_DOCTYPES:
+		meta = frappe.get_meta(doctype)
+		if meta.has_field("utm_analytics_section"):
+			create_property_setter_for_hiding_field(doctype, "utm_analytics_section", hide)

@@ -7,6 +7,7 @@
  "creation": "2022-02-21 11:54:09.632218",
  "doctype": "DocType",
  "document_type": "Setup",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/employee",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
@@ -28,8 +29,9 @@
   "status",
   "erpnext_user",
   "user_id",
-  "create_user",
   "create_user_permission",
+  "column_break_xwnm",
+  "create_user_automatically",
   "company_details_section",
   "company",
   "department",
@@ -39,19 +41,11 @@
   "reports_to",
   "column_break_18",
   "branch",
-  "employment_details",
-  "scheduled_confirmation_date",
-  "column_break_32",
-  "final_confirmation_date",
-  "contract_end_date",
-  "col_break_22",
-  "notice_number_of_days",
-  "date_of_retirement",
   "contact_details",
   "cell_number",
   "column_break_40",
-  "personal_email",
   "company_email",
+  "personal_email",
   "column_break4",
   "prefered_contact_email",
   "prefered_email",
@@ -101,6 +95,14 @@
   "external_work_history",
   "history_in_company",
   "internal_work_history",
+  "employment_details",
+  "scheduled_confirmation_date",
+  "column_break_32",
+  "final_confirmation_date",
+  "contract_end_date",
+  "col_break_22",
+  "notice_number_of_days",
+  "date_of_retirement",
   "exit",
   "resignation_letter_date",
   "relieving_date",
@@ -168,6 +170,7 @@
    "allow_in_quick_entry": 1,
    "fieldname": "last_name",
    "fieldtype": "Data",
+   "in_import_template": 1,
    "label": "Last Name"
   },
   {
@@ -273,6 +276,7 @@
   },
   {
    "collapsible": 1,
+   "collapsible_depends_on": "eval:doc.__islocal",
    "fieldname": "erpnext_user",
    "fieldtype": "Section Break",
    "label": "User Details"
@@ -286,18 +290,21 @@
    "options": "User"
   },
   {
-   "depends_on": "eval:(!doc.user_id)",
-   "fieldname": "create_user",
-   "fieldtype": "Button",
-   "label": "Create User"
-  },
-  {
    "default": "1",
-   "depends_on": "user_id",
+   "depends_on": "eval:doc.user_id || doc.create_user_automatically",
    "description": "This will restrict user access to other employee records",
    "fieldname": "create_user_permission",
    "fieldtype": "Check",
    "label": "Create User Permission"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.__islocal && !doc.user_id",
+   "description": "Creates a User account for this employee using the Preferred, Company, or Personal email.",
+   "fieldname": "create_user_automatically",
+   "fieldtype": "Check",
+   "label": "Create User Automatically",
+   "set_only_once": 1
   },
   {
    "allow_in_quick_entry": 1,
@@ -348,6 +355,8 @@
   {
    "fieldname": "department",
    "fieldtype": "Link",
+   "in_import_template": 1,
+   "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Department",
    "oldfieldname": "department",
@@ -357,7 +366,7 @@
   {
    "fieldname": "designation",
    "fieldtype": "Link",
-   "in_global_search": 1,
+   "in_import_template": 1,
    "in_list_view": 1,
    "label": "Designation",
    "oldfieldname": "designation",
@@ -369,6 +378,7 @@
    "fieldname": "reports_to",
    "fieldtype": "Link",
    "ignore_user_permissions": 1,
+   "in_import_template": 1,
    "label": "Reports to",
    "oldfieldname": "reports_to",
    "oldfieldtype": "Link",
@@ -377,6 +387,8 @@
   {
    "fieldname": "branch",
    "fieldtype": "Link",
+   "in_import_template": 1,
+   "in_list_view": 1,
    "label": "Branch",
    "oldfieldname": "branch",
    "oldfieldtype": "Link",
@@ -387,6 +399,7 @@
    "fieldname": "holiday_list",
    "fieldtype": "Link",
    "ignore_user_permissions": 1,
+   "in_import_template": 1,
    "label": "Holiday List",
    "oldfieldname": "holiday_list",
    "oldfieldtype": "Link",
@@ -433,6 +446,8 @@
   {
    "fieldname": "cell_number",
    "fieldtype": "Data",
+   "in_global_search": 1,
+   "in_import_template": 1,
    "label": "Mobile",
    "options": "Phone"
   },
@@ -453,6 +468,8 @@
    "description": "Provide Email Address registered in company",
    "fieldname": "company_email",
    "fieldtype": "Data",
+   "in_global_search": 1,
+   "in_import_template": 1,
    "label": "Company Email",
    "oldfieldname": "company_email",
    "oldfieldtype": "Data",
@@ -461,6 +478,8 @@
   {
    "fieldname": "personal_email",
    "fieldtype": "Data",
+   "in_global_search": 1,
+   "in_import_template": 1,
    "label": "Personal Email",
    "options": "Email"
   },
@@ -600,7 +619,7 @@
    "collapsible": 1,
    "fieldname": "exit",
    "fieldtype": "Tab Break",
-   "label": "Employee Exit",
+   "label": "Exit",
    "oldfieldtype": "Section Break"
   },
   {
@@ -816,14 +835,18 @@
    "fieldtype": "Data",
    "label": "IBAN",
    "options": "IBAN"
+  },
+  {
+   "fieldname": "column_break_xwnm",
+   "fieldtype": "Column Break"
   }
  ],
- "icon": "fa fa-user",
+ "icon": "user",
  "idx": 24,
  "image_field": "image",
  "is_tree": 1,
  "links": [],
- "modified": "2025-08-29 11:52:12.819878",
+ "modified": "2026-09-30 23:24:44.044604",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee",
@@ -863,6 +886,46 @@
    "role": "HR Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "select": 1
+  },
+  {
+   "role": "Accounts User",
+   "select": 1
+  },
+  {
+   "role": "Delivery Manager",
+   "select": 1
+  },
+  {
+   "role": "Fleet Manager",
+   "select": 1
+  },
+  {
+   "role": "Manufacturing Manager",
+   "select": 1
+  },
+  {
+   "role": "Manufacturing User",
+   "select": 1
+  },
+  {
+   "role": "Projects User",
+   "select": 1
+  },
+  {
+   "role": "Quality Manager",
+   "select": 1
+  },
+  {
+   "role": "Sales Master Manager",
+   "select": 1
+  },
+  {
+   "role": "Stock Manager",
+   "select": 1
   }
  ],
  "row_format": "Dynamic",

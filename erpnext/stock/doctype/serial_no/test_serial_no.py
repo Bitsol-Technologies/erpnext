@@ -7,7 +7,6 @@
 
 import frappe
 from frappe import _dict
-from frappe.tests import IntegrationTestCase
 
 from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
 from erpnext.stock.doctype.item.test_item import make_item
@@ -20,13 +19,12 @@ from erpnext.stock.doctype.serial_no.serial_no import *
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from erpnext.stock.doctype.stock_entry.test_stock_entry import make_serialized_item
 from erpnext.stock.doctype.warehouse.test_warehouse import create_warehouse
+from erpnext.tests.utils import ERPNextTestSuite
 
-EXTRA_TEST_RECORD_DEPENDENCIES = ["Item"]
 
-
-class TestSerialNo(IntegrationTestCase):
-	def tearDown(self):
-		frappe.db.rollback()
+class TestSerialNo(ERPNextTestSuite):
+	def setUp(self):
+		self.load_test_records("Stock Entry")
 
 	def test_cannot_create_direct(self):
 		frappe.delete_doc_if_exists("Serial No", "_TCSER0001")
@@ -36,6 +34,7 @@ class TestSerialNo(IntegrationTestCase):
 		sr.warehouse = "_Test Warehouse - _TC"
 		sr.serial_no = "_TCSER0001"
 		sr.purchase_rate = 10
+		sr.company = "_Test Company"
 		self.assertRaises(SerialNoCannotCreateDirectError, sr.insert)
 
 		sr.warehouse = None
@@ -44,6 +43,64 @@ class TestSerialNo(IntegrationTestCase):
 
 		sr.warehouse = "_Test Warehouse - _TC"
 		self.assertTrue(SerialNoCannotCannotChangeError, sr.save)
+
+	def test_cancelled_stock_reconciliation_marks_serials_inactive(self):
+		from erpnext.stock.doctype.stock_reconciliation.test_stock_reconciliation import (
+			create_stock_reconciliation,
+		)
+		from erpnext.stock.serial_batch_bundle import get_serial_nos_from_bundle
+
+		item_code = make_item(
+			properties={"has_serial_no": 1, "is_stock_item": 1, "serial_no_series": "SNRECO-.#####"}
+		).name
+		reco = create_stock_reconciliation(
+			item_code=item_code, warehouse="_Test Warehouse - _TC", qty=2, rate=100
+		)
+		serial_nos = get_serial_nos_from_bundle(reco.items[0].serial_and_batch_bundle)
+		reco.cancel()
+
+		for serial_no in serial_nos:
+			self.assertEqual(frappe.db.get_value("Serial No", serial_no, "status"), "Inactive")
+
+	def test_purchase_return_marks_serial_inactive(self):
+		from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_return
+		from erpnext.stock.serial_batch_bundle import get_serial_nos_from_bundle
+
+		item_code = make_item(
+			properties={
+				"has_serial_no": 1,
+				"is_stock_item": 1,
+				"serial_no_series": "SNPRET-.#####",
+				"warranty_period": 365,
+			}
+		).name
+		receipt = make_purchase_receipt(item_code=item_code, qty=1)
+		serial_no = get_serial_nos_from_bundle(receipt.items[0].serial_and_batch_bundle)[0]
+
+		make_purchase_return(receipt.name).submit()
+
+		status, warranty_expiry_date = frappe.db.get_value(
+			"Serial No", serial_no, ["status", "warranty_expiry_date"]
+		)
+		self.assertEqual((status, warranty_expiry_date), ("Inactive", None))
+
+	def test_stock_managed_fields_cannot_be_edited(self):
+		from erpnext.stock.serial_batch_bundle import get_serial_nos_from_bundle
+
+		item_code = make_item(
+			properties={"has_serial_no": 1, "is_stock_item": 1, "serial_no_series": "SNEDIT-.#####"}
+		).name
+		receipt = make_purchase_receipt(item_code=item_code, qty=1)
+		serial_no = get_serial_nos_from_bundle(receipt.items[0].serial_and_batch_bundle)[0]
+
+		for fieldname, value in (
+			("status", "Inactive"),
+			("purchase_rate", 1),
+			("customer", "_Test Customer"),
+		):
+			doc = frappe.get_doc("Serial No", serial_no)
+			doc.set(fieldname, value)
+			self.assertRaises(SerialNoCannotCannotChangeError, doc.save)
 
 	def test_inter_company_transfer(self):
 		se = make_serialized_item(self, target_warehouse="_Test Warehouse - _TC")
@@ -195,7 +252,12 @@ class TestSerialNo(IntegrationTestCase):
 		for serial_no in serial_nos:
 			if not frappe.db.exists("Serial No", serial_no):
 				frappe.get_doc(
-					{"doctype": "Serial No", "item_code": item_code, "serial_no": serial_no}
+					{
+						"doctype": "Serial No",
+						"item_code": item_code,
+						"serial_no": serial_no,
+						"company": "_Test Company",
+					}
 				).insert()
 
 		make_stock_entry(
@@ -221,6 +283,18 @@ class TestSerialNo(IntegrationTestCase):
 			"stock_value_difference",
 		)
 		self.assertEqual(value_diff, -113)
+
+	def test_serial_no_series_with_fieldname(self):
+		item_code = make_item(
+			"_Test Serial Item Fieldname Series",
+			{"has_serial_no": 1, "serial_no_series": "SNF-.{reference_name}.-.#####"},
+		).name
+		pr = make_purchase_receipt(item_code=item_code, qty=2)
+
+		serial_nos = frappe.get_all(
+			"Serial No", {"item_code": item_code}, pluck="serial_no", order_by="serial_no"
+		)
+		self.assertEqual(serial_nos, [f"SNF-{pr.name}-00001", f"SNF-{pr.name}-00002"])
 
 	def test_auto_fetch(self):
 		item_code = make_item(

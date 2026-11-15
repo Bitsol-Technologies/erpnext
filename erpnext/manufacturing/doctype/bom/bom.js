@@ -19,6 +19,21 @@ frappe.ui.form.on("BOM", {
 			};
 		});
 
+		frm.set_query("workstation", "operations", function (doc, cdt, cdn) {
+			let row = locals[cdt][cdn];
+			let filters = {
+				disabled: 0,
+			};
+
+			if (row.workstation_type) {
+				filters.workstation_type = row.workstation_type;
+			}
+
+			return {
+				filters: filters,
+			};
+		});
+
 		frm.set_query("operation", "items", function () {
 			if (!frm.doc.operations?.length) {
 				frappe.throw(__("Please add Operations first."));
@@ -106,6 +121,27 @@ frappe.ui.form.on("BOM", {
 				title: __("Mandatory"),
 			});
 		}
+
+		frm.events.set_default_last_step(frm);
+	},
+
+	set_default_last_step(frm) {
+		const steps = frm.doc.operations || [];
+		if (!frm.doc.track_semi_finished_goods || !steps.length) return;
+
+		if (!steps.some((row) => row.is_final_finished_good)) {
+			const makes_bom_item = steps.filter((row) => row.finished_good === frm.doc.item);
+			const last_step = steps[steps.length - 1];
+			if (makes_bom_item.length === 1) {
+				makes_bom_item[0].is_final_finished_good = 1;
+			} else if (!makes_bom_item.length && !last_step.finished_good) {
+				last_step.is_final_finished_good = 1;
+			}
+		}
+
+		steps
+			.filter((row) => row.is_final_finished_good && !row.finished_good)
+			.forEach((row) => (row.finished_good = frm.doc.item));
 	},
 
 	set_company_filters: function (frm, fieldname) {
@@ -123,7 +159,16 @@ frappe.ui.form.on("BOM", {
 	},
 
 	toggle_fields_for_semi_finished_goods(frm) {
-		let fields = ["finished_good", "finished_good_qty", "bom_no"];
+		let fields = [
+			"finished_good",
+			"finished_good_qty",
+			"bom_no",
+			"skip_material_transfer",
+			"wip_warehouse",
+			"fg_warehouse",
+			"is_subcontracted",
+			"is_final_finished_good",
+		];
 
 		fields.forEach((field) => {
 			frm.fields_dict["operations"].grid.update_docfield_property(
@@ -131,14 +176,89 @@ frappe.ui.form.on("BOM", {
 				"read_only",
 				!frm.doc.track_semi_finished_goods
 			);
+
+			frm.fields_dict["operations"].grid.update_docfield_property(
+				field,
+				"in_list_view",
+				frm.doc.track_semi_finished_goods
+			);
+
+			frm.fields_dict["operations"].grid.update_docfield_property(
+				field,
+				"hidden",
+				!frm.doc.track_semi_finished_goods
+			);
 		});
 
-		refresh_field("operations");
+		frm.fields_dict["operations"].grid.reset_grid();
+		frm.events.render_stage_summary(frm);
+	},
+
+	render_stage_summary(frm) {
+		const wrapper = frm.get_field("stage_summary")?.$wrapper;
+		if (!wrapper) return;
+
+		wrapper.empty();
+		if (!frm.doc.track_semi_finished_goods || !frm.doc.operations?.length) return;
+
+		const can_add = !frm.is_new() && frm.doc.docstatus === 0;
+		const rows = frm.doc.operations.map((row) => frm.events.get_stage_summary_row(frm, row, can_add));
+
+		wrapper.html(`
+			<div style="border:1px solid var(--border-color);border-radius:var(--border-radius-md);margin-bottom:var(--margin-lg);">
+				${rows.join("")}
+			</div>`);
+
+		wrapper.find(".stage-add-materials").on("click", (event) => {
+			const row = frm.doc.operations.find((d) => d.name === $(event.currentTarget).attr("data-row"));
+			frm.events._prompt_for_raw_materials(frm, row);
+		});
+	},
+
+	get_stage_summary_row(frm, row, can_add) {
+		const escape = frappe.utils.escape_html;
+		const count = (frm.doc.items || []).filter(
+			(item) => item.item_code && cint(item.operation_row_id) === cint(row.idx)
+		).length;
+
+		let [color, status] = ["red", __("No raw materials")];
+		if (count) {
+			[color, status] = [
+				"green",
+				count === 1 ? __("1 raw material") : __("{0} raw materials", [count]),
+			];
+		} else if (row.bom_no) {
+			[color, status] = ["blue", __("From BOM")];
+		}
+
+		const makes = row.finished_good ? escape(row.finished_good) : __("Output Item not set");
+		const last = row.is_final_finished_good
+			? ` <span class="text-muted">(${__("Last Step")})</span>`
+			: "";
+		const add_button =
+			can_add && !count && !row.bom_no
+				? `<button class="btn btn-xs btn-default stage-add-materials" data-row="${row.name}">${__(
+						"Add Raw Materials"
+				  )}</button>`
+				: "";
+
+		const border =
+			row.idx < frm.doc.operations.length ? "border-bottom:1px solid var(--border-color);" : "";
+
+		return `<div style="display:flex;align-items:center;gap:12px;height:40px;padding:0 12px;${border}">
+			<span class="ellipsis" style="flex:2;">${row.idx}. ${escape(row.operation || "")}</span>
+			<span class="ellipsis" style="flex:3;">${__("Makes")} ${makes}${last}</span>
+			<span style="flex:2;"><span class="indicator-pill no-indicator-dot ${color}">${status}</span></span>
+			<span style="flex:0 0 140px;text-align:right;white-space:nowrap;">${add_button}</span>
+		</div>`;
 	},
 
 	with_operations: function (frm) {
 		frm.set_df_property("fg_based_operating_cost", "hidden", frm.doc.with_operations ? 1 : 0);
 		frm.trigger("toggle_fields_for_semi_finished_goods");
+		if (frm.doc.routing && frm.doc.with_operations && !frm.doc.operations.length) {
+			frm.trigger("routing");
+		}
 	},
 
 	fg_based_operating_cost: function (frm) {
@@ -172,6 +292,8 @@ frappe.ui.form.on("BOM", {
 
 	refresh(frm) {
 		frm.toggle_enable("item", frm.doc.__islocal);
+
+		frm.trigger("toggle_fields_for_semi_finished_goods");
 
 		frm.set_indicator_formatter("item_code", function (doc) {
 			if (doc.original_item) {
@@ -268,7 +390,9 @@ frappe.ui.form.on("BOM", {
 			frm.set_intro(
 				__("This is a Template BOM and will be used to make the work order for {0} of the item {1}", [
 					`<a class="variants-intro">variants</a>`,
-					`<a href="/app/item/${frm.doc.item}">${frm.doc.item}</a>`,
+					`<a href="${frappe.utils.get_form_link("Item", frm.doc.item)}">${frappe.utils.escape_html(
+						frm.doc.item
+					)}</a>`,
 				]),
 				true
 			);
@@ -297,6 +421,7 @@ frappe.ui.form.on("BOM", {
 						bom_no: frm.doc.name,
 						item: item,
 						qty: data.qty || 0.0,
+						company: frm.doc.company,
 						project: frm.doc.project,
 						variant_items: variant_items,
 						use_multi_level_bom: frm.doc?.track_semi_finished_goods ? 0 : use_multi_level_bom,
@@ -368,6 +493,7 @@ frappe.ui.form.on("BOM", {
 				reqd: 1,
 				default: 1,
 				onchange: () => {
+					if (!cur_dialog) return;
 					const { quantity, items: rm } = frm.doc;
 					const variant_items_map = rm.reduce((acc, item) => {
 						acc[item.item_code] = item.qty;
@@ -456,6 +582,14 @@ frappe.ui.form.on("BOM", {
 						reqd: 1,
 					},
 					{
+						fieldname: "uom",
+						label: __("UOM"),
+						fieldtype: "Link",
+						options: "UOM",
+						in_list_view: 1,
+						read_only: 1,
+					},
+					{
 						fieldname: "source_warehouse",
 						label: __("Source Warehouse"),
 						fieldtype: "Link",
@@ -502,6 +636,7 @@ frappe.ui.form.on("BOM", {
 				item_code: d.item_code,
 				variant_item_code: "",
 				qty: flt(d.qty / frm.doc.quantity) * flt(bom_qty),
+				uom: d.uom,
 				source_warehouse: d.source_warehouse,
 				operation: d.operation,
 			});
@@ -543,7 +678,11 @@ frappe.ui.form.on("BOM", {
 	},
 
 	routing(frm) {
-		if (frm.doc.routing) {
+		// Refetch operations whenever the routing is (re)selected, so that
+		// changing the routing - e.g. on a new BOM version copied from another
+		// BOM - replaces the operations with those of the newly selected routing
+		// instead of keeping the old ones.
+		if (frm.doc.routing && frm.doc.with_operations) {
 			frappe.call({
 				doc: frm.doc,
 				method: "get_routing",
@@ -580,29 +719,50 @@ frappe.ui.form.on("BOM", {
 frappe.ui.form.on("BOM Operation", {
 	finished_good(frm, cdt, cdn) {
 		let row = locals[cdt][cdn];
-		if (row.finished_good === frm.doc.item) {
-			frappe.model.set_value(row.doctype, row.name, "is_final_finished_good", 1);
-		}
+		frappe.model.set_value(
+			row.doctype,
+			row.name,
+			"is_final_finished_good",
+			row.finished_good === frm.doc.item
+		);
 	},
 
-	bom_no(frm, cdt, cdn) {
-		let row = locals[cdt][cdn];
+	is_final_finished_good(frm) {
+		frm.events.render_stage_summary(frm);
+	},
 
-		if (row.bom_no && row.finished_good) {
-			frappe.call({
-				method: "add_materials_from_bom",
-				doc: frm.doc,
-				args: {
-					finished_good: row.finished_good,
-					bom_no: row.bom_no,
-					operation_row_id: row.idx,
-					qty: row.finished_good_qty,
-				},
-				callback(r) {
-					refresh_field("items");
-				},
-			});
+	operations_add(frm) {
+		frm.events.render_stage_summary(frm);
+	},
+
+	operations_remove(frm) {
+		frm.events.render_stage_summary(frm);
+	},
+
+	async bom_no(frm, cdt, cdn) {
+		let row = locals[cdt][cdn];
+		if (!row.bom_no) return;
+
+		if (!row.finished_good) {
+			const { message } = await frappe.db.get_value("BOM", row.bom_no, "item");
+			await frappe.model.set_value(cdt, cdn, "finished_good", message?.item);
 		}
+
+		frappe.call({
+			method: "add_materials_from_bom",
+			doc: frm.doc,
+			args: {
+				finished_good: row.finished_good,
+				bom_no: row.bom_no,
+				operation_row_id: row.idx,
+				qty: row.finished_good_qty,
+				replace: 1,
+			},
+			callback() {
+				refresh_field("items");
+				frm.events.render_stage_summary(frm);
+			},
+		});
 	},
 });
 
@@ -616,10 +776,10 @@ erpnext.bom.BomController = class BomController extends erpnext.TransactionContr
 	}
 
 	item_code(doc, cdt, cdn) {
-		var scrap_items = false;
+		let secondary_items = false;
 		var child = locals[cdt][cdn];
-		if (child.doctype == "BOM Scrap Item") {
-			scrap_items = true;
+		if (child.doctype == "BOM Secondary Item") {
+			secondary_items = true;
 		}
 
 		if (child.bom_no) {
@@ -630,15 +790,24 @@ erpnext.bom.BomController = class BomController extends erpnext.TransactionContr
 			child.do_not_explode = 1;
 		}
 
-		get_bom_material_detail(doc, cdt, cdn, scrap_items);
+		get_bom_material_detail(doc, cdt, cdn, secondary_items);
 	}
 
-	buying_price_list(doc) {
-		this.apply_price_list();
+	buying_price_list() {
+		const doc = this.frm.doc;
+
+		if (doc.rm_cost_as_per !== "Price List" && doc.buying_price_list) {
+			this.frm.set_value("buying_price_list", "");
+			return;
+		}
+
+		if (doc.buying_price_list) {
+			this.apply_price_list();
+		}
 	}
 
-	plc_conversion_rate(doc) {
-		if (!this.in_apply_price_list) {
+	plc_conversion_rate() {
+		if (!this.in_apply_price_list && this.frm.doc.rm_cost_as_per === "Price List") {
 			this.apply_price_list(null, true);
 		}
 	}
@@ -672,7 +841,7 @@ cur_frm.cscript.is_default = function (doc) {
 	if (doc.is_default) cur_frm.set_value("is_active", 1);
 };
 
-var get_bom_material_detail = function (doc, cdt, cdn, scrap_items) {
+var get_bom_material_detail = function (doc, cdt, cdn, secondary_items) {
 	if (!doc.company) {
 		frappe.throw({ message: __("Please select a Company first."), title: __("Mandatory") });
 	}
@@ -686,7 +855,6 @@ var get_bom_material_detail = function (doc, cdt, cdn, scrap_items) {
 				company: doc.company,
 				item_code: d.item_code,
 				bom_no: d.bom_no != null ? d.bom_no : "",
-				scrap_items: scrap_items,
 				qty: d.qty,
 				stock_qty: d.stock_qty,
 				include_item_in_manufacturing: d.include_item_in_manufacturing,
@@ -695,16 +863,21 @@ var get_bom_material_detail = function (doc, cdt, cdn, scrap_items) {
 				conversion_factor: d.conversion_factor,
 				sourced_by_supplier: d.sourced_by_supplier,
 				do_not_explode: d.do_not_explode,
+				source_warehouse: d.source_warehouse || doc.default_source_warehouse,
+				fetch_rate: !secondary_items,
 			},
 			callback: function (r) {
 				$.extend(d, r.message);
 				refresh_field("items");
-				refresh_field("scrap_items");
+				refresh_field("secondary_items");
 
 				doc = locals[doc.doctype][doc.name];
 				erpnext.bom.calculate_rm_cost(doc);
-				erpnext.bom.calculate_scrap_materials_cost(doc);
 				erpnext.bom.calculate_total(doc);
+
+				if (secondary_items && d.valuation_type === "Valuation Rate") {
+					erpnext.bom.fetch_secondary_item_cost(doc, cdt, cdn);
+				}
 			},
 			freeze: true,
 		});
@@ -713,20 +886,17 @@ var get_bom_material_detail = function (doc, cdt, cdn, scrap_items) {
 
 cur_frm.cscript.qty = function (doc) {
 	erpnext.bom.calculate_rm_cost(doc);
-	erpnext.bom.calculate_scrap_materials_cost(doc);
 	erpnext.bom.calculate_total(doc);
 };
 
 cur_frm.cscript.rate = function (doc, cdt, cdn) {
 	var d = locals[cdt][cdn];
-	const is_scrap_item = cdt == "BOM Scrap Item";
 
 	if (d.bom_no) {
 		frappe.msgprint(__("You cannot change the rate if BOM is mentioned against any Item."));
-		get_bom_material_detail(doc, cdt, cdn, is_scrap_item);
+		get_bom_material_detail(doc, cdt, cdn, false);
 	} else {
 		erpnext.bom.calculate_rm_cost(doc);
-		erpnext.bom.calculate_scrap_materials_cost(doc);
 		erpnext.bom.calculate_total(doc);
 	}
 };
@@ -734,7 +904,6 @@ cur_frm.cscript.rate = function (doc, cdt, cdn) {
 erpnext.bom.update_cost = function (doc) {
 	erpnext.bom.calculate_op_cost(doc);
 	erpnext.bom.calculate_rm_cost(doc);
-	erpnext.bom.calculate_scrap_materials_cost(doc);
 	erpnext.bom.calculate_total(doc);
 };
 
@@ -793,34 +962,11 @@ erpnext.bom.calculate_rm_cost = function (doc) {
 	cur_frm.set_value("base_raw_material_cost", base_total_rm_cost);
 };
 
-// sm : scrap material
-erpnext.bom.calculate_scrap_materials_cost = function (doc) {
-	var sm = doc.scrap_items || [];
-	var total_sm_cost = 0;
-	var base_total_sm_cost = 0;
-
-	for (var i = 0; i < sm.length; i++) {
-		var base_rate = flt(sm[i].rate) * flt(doc.conversion_rate);
-		var amount = flt(sm[i].rate) * flt(sm[i].stock_qty);
-		var base_amount = amount * flt(doc.conversion_rate);
-
-		frappe.model.set_value("BOM Scrap Item", sm[i].name, "base_rate", base_rate);
-		frappe.model.set_value("BOM Scrap Item", sm[i].name, "amount", amount);
-		frappe.model.set_value("BOM Scrap Item", sm[i].name, "base_amount", base_amount);
-
-		total_sm_cost += amount;
-		base_total_sm_cost += base_amount;
-	}
-
-	cur_frm.set_value("scrap_material_cost", total_sm_cost);
-	cur_frm.set_value("base_scrap_material_cost", base_total_sm_cost);
-};
-
 // Calculate Total Cost
 erpnext.bom.calculate_total = function (doc) {
-	var total_cost = flt(doc.operating_cost) + flt(doc.raw_material_cost) - flt(doc.scrap_material_cost);
+	var total_cost = flt(doc.operating_cost) + flt(doc.raw_material_cost) - flt(doc.secondary_items_cost);
 	var base_total_cost =
-		flt(doc.base_operating_cost) + flt(doc.base_raw_material_cost) - flt(doc.base_scrap_material_cost);
+		flt(doc.base_operating_cost) + flt(doc.base_raw_material_cost) - flt(doc.base_secondary_items_cost);
 
 	cur_frm.set_value("total_cost", total_cost);
 	cur_frm.set_value("base_total_cost", base_total_cost);
@@ -880,6 +1026,11 @@ frappe.ui.form.on("BOM Operation", "workstation", function (frm, cdt, cdn) {
 frappe.ui.form.on("BOM Operation", "workstation_type", function (frm, cdt, cdn) {
 	var d = locals[cdt][cdn];
 	if (!d.workstation_type) return;
+
+	if (d.workstation) {
+		frappe.model.set_value(cdt, cdn, "workstation", "");
+	}
+
 	frappe.call({
 		method: "frappe.client.get",
 		args: {
@@ -906,6 +1057,9 @@ frappe.ui.form.on("BOM Item", {
 	do_not_explode: function (frm, cdt, cdn) {
 		get_bom_material_detail(frm.doc, cdt, cdn, false);
 	},
+	source_warehouse: function (frm, cdt, cdn) {
+		get_bom_material_detail(frm.doc, cdt, cdn, false);
+	},
 });
 
 frappe.ui.form.on("BOM Item", "qty", function (frm, cdt, cdn) {
@@ -927,6 +1081,8 @@ frappe.ui.form.on("BOM Item", "sourced_by_supplier", function (frm, cdt, cdn) {
 	if (d.sourced_by_supplier) {
 		d.rate = 0;
 		refresh_field("rate", d.name, d.parentfield);
+	} else {
+		get_bom_material_detail(frm.doc, cdt, cdn, false);
 	}
 });
 
@@ -943,9 +1099,24 @@ frappe.ui.form.on("BOM Operation", "operations_remove", function (frm) {
 	erpnext.bom.calculate_total(frm.doc);
 });
 
+frappe.ui.form.on("BOM Item", {
+	items_add(frm) {
+		frm.events.render_stage_summary(frm);
+	},
+
+	item_code(frm) {
+		frm.events.render_stage_summary(frm);
+	},
+
+	operation_row_id(frm) {
+		frm.events.render_stage_summary(frm);
+	},
+});
+
 frappe.ui.form.on("BOM Item", "items_remove", function (frm) {
 	erpnext.bom.calculate_rm_cost(frm.doc);
 	erpnext.bom.calculate_total(frm.doc);
+	frm.events.render_stage_summary(frm);
 });
 
 frappe.tour["BOM"] = [
@@ -975,11 +1146,48 @@ frappe.tour["BOM"] = [
 	},
 ];
 
-frappe.ui.form.on("BOM Scrap Item", {
-	item_code(frm, cdt, cdn) {
-		const { item_code } = locals[cdt][cdn];
+frappe.ui.form.on("BOM Secondary Item", {
+	valuation_type(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (row.valuation_type !== "% of Component Cost") {
+			frappe.model.set_value(cdt, cdn, "cost_allocation_per", 0);
+		}
+		if (row.valuation_type === "Valuation Rate") {
+			erpnext.bom.fetch_secondary_item_cost(frm.doc, cdt, cdn);
+		} else if (row.valuation_type !== "Manual") {
+			frappe.model.set_value(cdt, cdn, { cost: 0, base_cost: 0 });
+		}
 	},
 });
+
+erpnext.bom.fetch_secondary_item_cost = function (doc, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row.item_code) return;
+
+	frappe.call({
+		doc: doc,
+		method: "get_bom_material_detail",
+		args: {
+			company: doc.company,
+			item_code: row.item_code,
+			uom: row.uom,
+			stock_uom: row.stock_uom,
+			conversion_factor: row.conversion_factor,
+			warehouse: doc.default_target_warehouse,
+			set_rate_based_on_warehouse: 1,
+			force_valuation_rate: 1,
+			fetch_rate: 1,
+			bom_no: "",
+		},
+		callback(r) {
+			const cost = flt(r.message.rate) * flt(row.stock_qty);
+			frappe.model.set_value(cdt, cdn, {
+				cost: cost,
+				base_cost: cost * flt(doc.conversion_rate || 1),
+			});
+		},
+	});
+};
 
 function trigger_process_loss_qty_prompt(frm, cdt, cdn, item_code) {
 	frappe.prompt(
@@ -996,7 +1204,7 @@ function trigger_process_loss_qty_prompt(frm, cdt, cdn, item_code) {
 			const row = locals[cdt][cdn];
 			row.stock_qty = (frm.doc.quantity * data.percent) / 100;
 			row.qty = row.stock_qty / (row.conversion_factor || 1);
-			refresh_field("scrap_items");
+			refresh_field("secondary_items");
 		},
 		__("Set Process Loss Item Quantity"),
 		__("Set Quantity")
@@ -1017,8 +1225,7 @@ frappe.ui.form.on("BOM", {
 			title: __("Add Raw Materials"),
 			fields: fields,
 			primary_action_label: __("Add"),
-			primary_action: () => {
-				let values = frm._bom_rm_dialog.get_values();
+			primary_action: (values) => {
 				if (values) {
 					frm.events._add_raw_materials(frm, values);
 					frm._bom_rm_dialog.hide();
@@ -1098,6 +1305,6 @@ frappe.ui.form.on("BOM", {
 				operation_row_id: values.operation_row_id,
 				items: values.items,
 			},
-		});
+		}).then(() => frm.events.render_stage_summary(frm));
 	},
 });

@@ -4,8 +4,12 @@
 # Decompiled by https://python-decompiler.com
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.utils import getdate
 
+from erpnext.buying.report.subcontracted_item_to_be_received.test_subcontracted_item_to_be_received import (
+	get_report_filters,
+	make_subcontracting_order,
+)
 from erpnext.buying.report.subcontracted_raw_materials_to_be_transferred.subcontracted_raw_materials_to_be_transferred import (
 	execute,
 )
@@ -15,9 +19,10 @@ from erpnext.controllers.tests.test_subcontracting_controller import (
 	make_service_item,
 )
 from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestSubcontractedItemToBeTransferred(IntegrationTestCase):
+class TestSubcontractedItemToBeTransferred(ERPNextTestSuite):
 	def test_pending_and_transferred_qty(self):
 		make_service_item("Subcontracted Service Item 1")
 		service_items = [
@@ -70,6 +75,27 @@ class TestSubcontractedItemToBeTransferred(IntegrationTestCase):
 		self.assertEqual(sco_data[1]["rm_item_code"], "_Test Item Home Desktop 100")
 		self.assertEqual(sco_data[1]["p_qty"], 19)
 		self.assertEqual(sco_data[1]["transferred_qty"], 1)
+
+	def test_closed_order_is_not_listed(self):
+		sco = make_subcontracting_order()
+		sco.update_status("Closed")
+
+		data = execute(get_report_filters(sco))[1]
+		self.assertNotIn(sco.name, {row["subcontract_order"] for row in data})
+
+	def test_one_day_range_is_accepted(self):
+		frappe.clear_messages()
+		execute(
+			frappe._dict(
+				{
+					"order_type": "Subcontracting Order",
+					"supplier": "_Test Supplier",
+					"from_date": getdate(),
+					"to_date": getdate(),
+				}
+			)
+		)
+		self.assertFalse(frappe.get_message_log())
 
 
 def transfer_subcontracted_raw_materials(sco):

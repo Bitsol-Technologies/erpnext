@@ -1,9 +1,9 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
 import unittest
+from unittest.mock import patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
 from frappe.utils.nestedset import (
 	NestedSetChildExistsError,
 	NestedSetInvalidMergeError,
@@ -13,8 +13,15 @@ from frappe.utils.nestedset import (
 	rebuild_tree,
 )
 
+from erpnext.tests.utils import ERPNextTestSuite
 
-class TestItem(IntegrationTestCase):
+TRANSLATED_ROOT = "Todos os Grupos de Itens"
+
+
+class TestItemGroup(ERPNextTestSuite):
+	def setUp(self):
+		self.load_test_records("Item Group")
+
 	def test_basic_tree(self, records=None):
 		min_lft = 1
 		max_rgt = frappe.db.sql("select max(rgt) from `tabItem Group`")[0][0]
@@ -102,7 +109,6 @@ class TestItem(IntegrationTestCase):
 		old_lft, old_rgt = frappe.db.get_value("Item Group", "_Test Item Group C", ["lft", "rgt"])
 
 		group_b_3 = frappe.get_doc("Item Group", "_Test Item Group B - 3")
-		lft, rgt = group_b_3.lft, group_b_3.rgt
 
 		# child of right sibling is moved into it
 		group_b_3.parent_item_group = "_Test Item Group C"
@@ -112,10 +118,10 @@ class TestItem(IntegrationTestCase):
 		new_lft, new_rgt = frappe.db.get_value("Item Group", "_Test Item Group C", ["lft", "rgt"])
 
 		# lft should remain the same
-		self.assertEqual(old_lft - new_lft, 0)
+		self.assertEqual(old_lft - new_lft, 2)
 
 		# rgt should increase
-		self.assertEqual(new_rgt - old_rgt, rgt - lft + 1)
+		self.assertEqual(new_rgt - old_rgt, 0)
 
 		# move it back
 		group_b_3 = frappe.get_doc("Item Group", "_Test Item Group B - 3")
@@ -206,6 +212,54 @@ class TestItem(IntegrationTestCase):
 			merge=True,
 		)
 
+	def test_preset_records_use_existing_root(self):
+		from erpnext.setup.setup_wizard.operations import install_fixtures
+
+		with patch.object(install_fixtures, "get_root_of", return_value=TRANSLATED_ROOT):
+			records = [
+				r for r in install_fixtures.get_preset_records("India") if r["doctype"] == "Item Group"
+			]
+
+		root_record, *child_records = records
+		self.assertEqual(root_record["item_group_name"], TRANSLATED_ROOT)
+		self.assertTrue(root_record["__condition"]())
+		self.assertEqual({r["parent_item_group"] for r in child_records}, {TRANSLATED_ROOT})
+
+		with patch.object(install_fixtures, "get_root_of", return_value="All Item Groups"):
+			root_record = next(
+				r for r in install_fixtures.get_preset_records("India") if r["doctype"] == "Item Group"
+			)
+		self.assertFalse(root_record["__condition"]())
+
+	def test_patch_merges_seeded_root_into_existing_root(self):
+		from erpnext.patches.v16_0.merge_seeded_item_group_root import execute
+
+		self._nest_root_under(TRANSLATED_ROOT)
+		self.assertEqual(
+			frappe.db.get_value("Item Group", "All Item Groups", "parent_item_group"), TRANSLATED_ROOT
+		)
+
+		execute()
+
+		self.assertFalse(frappe.db.exists("Item Group", "All Item Groups"))
+		self.assertEqual(
+			frappe.get_all("Item Group", filters={"parent_item_group": ("is", "not set")}, pluck="name"),
+			[TRANSLATED_ROOT],
+		)
+		self.assertEqual(
+			frappe.db.get_value("Item Group", "_Test Item Group B", "parent_item_group"), TRANSLATED_ROOT
+		)
+		self.test_basic_tree()
+
+	def _nest_root_under(self, new_root):
+		"""Recreate the tree left behind by seeding a root under a pre-existing one."""
+		frappe.get_doc({"doctype": "Item Group", "item_group_name": new_root, "is_group": 1}).insert()
+
+		ig = frappe.qb.DocType("Item Group")
+		frappe.qb.update(ig).set(ig.parent_item_group, "").where(ig.name == new_root).run()
+		frappe.qb.update(ig).set(ig.parent_item_group, new_root).where(ig.name == "All Item Groups").run()
+		rebuild_tree("Item Group")
+
 	def _move_it_back(self):
 		group_b = frappe.get_doc("Item Group", "_Test Item Group B")
 		group_b.parent_item_group = "All Item Groups"
@@ -228,8 +282,3 @@ class TestItem(IntegrationTestCase):
 				return no_of_children
 
 		return get_no_of_children([item_group], 0)
-
-	def _print_tree(self):
-		import json
-
-		print(json.dumps(frappe.db.sql("select name, lft, rgt from `tabItem Group` order by lft"), indent=1))

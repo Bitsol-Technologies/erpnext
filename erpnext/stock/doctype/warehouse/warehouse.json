@@ -3,21 +3,24 @@
  "allow_import": 1,
  "creation": "2023-05-29 13:02:17.121296",
  "default_view": "Tree",
- "description": "A logical Warehouse against which stock entries are made.",
+ "description": "A place where you keep stock.",
  "doctype": "DocType",
  "document_type": "Setup",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/warehouse",
  "engine": "InnoDB",
  "field_order": [
   "warehouse_detail",
   "disabled",
   "warehouse_name",
   "column_break_3",
-  "is_group",
-  "parent_warehouse",
+  "company",
   "is_rejected_warehouse",
   "column_break_4",
   "account",
-  "company",
+  "section_break_ujhu",
+  "parent_warehouse",
+  "is_group",
+  "column_break_qhdh",
   "customer",
   "address_and_contact",
   "address_html",
@@ -62,6 +65,7 @@
    "default": "0",
    "fieldname": "is_group",
    "fieldtype": "Check",
+   "in_import_template": 1,
    "in_list_view": 1,
    "label": "Is Group Warehouse"
   },
@@ -94,6 +98,7 @@
    "description": "If blank, parent Warehouse Account or company default will be considered in transactions",
    "fieldname": "account",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Account",
    "options": "Account"
   },
@@ -198,6 +203,7 @@
    "fieldname": "parent_warehouse",
    "fieldtype": "Link",
    "ignore_user_permissions": 1,
+   "in_import_template": 1,
    "label": "Parent Warehouse",
    "options": "Warehouse",
    "search_index": 1
@@ -229,6 +235,7 @@
    "depends_on": "eval:(!doc.is_group);",
    "fieldname": "warehouse_type",
    "fieldtype": "Link",
+   "in_import_template": 1,
    "label": "Warehouse Type",
    "options": "Warehouse Type"
   },
@@ -240,6 +247,7 @@
    "depends_on": "eval: doc.warehouse_type !== 'Transit';",
    "fieldname": "default_in_transit_warehouse",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Default In-Transit Warehouse",
    "options": "Warehouse"
   },
@@ -268,14 +276,22 @@
    "fieldtype": "Link",
    "label": "Customer",
    "options": "Customer"
+  },
+  {
+   "fieldname": "section_break_ujhu",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_qhdh",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
- "icon": "fa fa-building",
+ "icon": "warehouse",
  "idx": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2025-09-05 14:47:17.140099",
+ "modified": "2026-10-12 18:30:00.000000",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Warehouse",
@@ -307,6 +323,13 @@
    "print": 1,
    "read": 1,
    "report": 1,
+   "role": "Stock Manager"
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
    "role": "Sales User"
   },
   {
@@ -326,6 +349,34 @@
   {
    "read": 1,
    "role": "Manufacturing User"
+  },
+  {
+   "role": "Delivery Manager",
+   "select": 1
+  },
+  {
+   "role": "Delivery User",
+   "select": 1
+  },
+  {
+   "role": "HR Manager",
+   "select": 1
+  },
+  {
+   "role": "Maintenance Manager",
+   "select": 1
+  },
+  {
+   "role": "Maintenance User",
+   "select": 1
+  },
+  {
+   "role": "Quality Manager",
+   "select": 1
+  },
+  {
+   "role": "Website Manager",
+   "select": 1
   }
  ],
  "row_format": "Dynamic",

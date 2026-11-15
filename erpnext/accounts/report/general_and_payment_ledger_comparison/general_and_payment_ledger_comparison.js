@@ -31,11 +31,25 @@ function get_filters() {
 			fieldtype: "MultiSelectList",
 			options: "Account",
 			get_data: function (txt) {
-				return frappe.db.get_link_options("Account", txt, {
+				return erpnext.utils.get_link_options("Account", txt, {
 					company: frappe.query_report.get_filter_value("company"),
 					account_type: ["in", ["Receivable", "Payable"]],
 				});
 			},
+		},
+		{
+			fieldname: "party_type",
+			label: __("Party Type"),
+			fieldtype: "Link",
+			options: "Party Type",
+			width: 100,
+		},
+		{
+			fieldname: "party",
+			label: __("Party"),
+			fieldtype: "Dynamic Link",
+			options: "party_type",
+			width: 100,
 		},
 		{
 			fieldname: "voucher_no",

@@ -7,6 +7,9 @@ from frappe.utils import flt, getdate, now_datetime, nowdate
 
 import erpnext
 from erpnext.accounts.doctype.account.account import get_root_company
+from erpnext.accounts.report.consolidated_financial_statement.consolidated_financial_statement import (
+	get_subsidiary_companies,
+)
 from erpnext.accounts.report.financial_statements import (
 	filter_accounts,
 	filter_out_zero_value_rows,
@@ -14,6 +17,7 @@ from erpnext.accounts.report.financial_statements import (
 )
 from erpnext.accounts.report.trial_balance.trial_balance import (
 	accumulate_values_into_parents,
+	calculate_total_row,
 	calculate_values,
 	get_opening_balances,
 	hide_group_accounts,
@@ -44,7 +48,6 @@ def execute(filters: dict | None = None):
 
 def validate_filters(filters):
 	validate_companies(filters)
-	filters.show_net_values = True
 	tb_validate_filters(filters)
 
 
@@ -52,6 +55,7 @@ def validate_companies(filters):
 	if not filters.company:
 		return
 
+	filters.company = expand_group_companies(filters.company)
 	root_company = get_root_company(filters.company[0])
 	root_company = root_company[0] if root_company else filters.company[0]
 
@@ -66,12 +70,24 @@ def validate_companies(filters):
 	)
 
 	for company in filters.company:
+		frappe.has_permission("Company", "read", company, throw=True)
 		if company not in company_subtree:
 			frappe.throw(
 				_("Consolidated Trial Balance can be generated for Companies having same root Company.")
 			)
 
 	sort_companies(filters)
+
+
+def expand_group_companies(selected_companies: list[str]) -> list[str]:
+	"""Selected companies, a group company standing for the companies under it."""
+	companies = []
+	for selected in selected_companies:
+		for company in get_subsidiary_companies(selected):
+			if company not in companies:
+				companies.append(company)
+
+	return companies
 
 
 def sort_companies(filters):
@@ -99,15 +115,19 @@ def get_data(filters) -> list[list]:
 		tb_data = get_company_wise_tb_data(company_filter, reporting_currency, ignore_reporting_currency)
 		consolidate_trial_balance_data(data, tb_data)
 
-	for d in data:
-		prepare_opening_closing(d)
-
-	total_row = calculate_total_row(data, reporting_currency)
-
-	data.extend([{}, total_row])
+	if filters.get("show_net_values"):
+		prepare_opening_closing_for_ctb(data)
 
 	if not filters.get("show_group_accounts"):
 		data = hide_group_accounts(data)
+
+	total_row = calculate_total_row(
+		data, reporting_currency, show_group_accounts=filters.get("show_group_accounts")
+	)
+
+	calculate_foreign_currency_translation_reserve(total_row, data, filters=filters)
+
+	data.extend([total_row])
 
 	if filters.get("presentation_currency"):
 		update_to_presentation_currency(
@@ -134,11 +154,6 @@ def get_company_wise_tb_data(filters, reporting_currency, ignore_reporting_curre
 
 	default_currency = erpnext.get_company_currency(filters.company)
 
-	opening_exchange_rate = get_exchange_rate(
-		default_currency,
-		reporting_currency,
-		filters.get("from_date"),
-	)
 	current_date = (
 		filters.get("to_date") if getdate(filters.get("to_date")) <= now_datetime().date() else nowdate()
 	)
@@ -148,7 +163,7 @@ def get_company_wise_tb_data(filters, reporting_currency, ignore_reporting_curre
 		current_date,
 	)
 
-	if not (opening_exchange_rate and closing_exchange_rate):
+	if not closing_exchange_rate:
 		frappe.throw(
 			_(
 				"Consolidated Trial balance could not be generated as Exchange Rate from {0} to {1} is not available for {2}.",
@@ -162,10 +177,11 @@ def get_company_wise_tb_data(filters, reporting_currency, ignore_reporting_curre
 
 	gl_entries_by_account = {}
 
+	# balance sheet openings are restated at the closing rate, the difference goes to the FCTR
 	opening_balances = get_opening_balances(
 		filters,
 		ignore_is_opening,
-		exchange_rate=opening_exchange_rate,
+		exchange_rate=closing_exchange_rate,
 		ignore_reporting_currency=ignore_reporting_currency,
 	)
 
@@ -207,10 +223,6 @@ def prepare_companywise_tb_data(accounts, filters, parent_children_map, reportin
 	data = []
 
 	for d in accounts:
-		# Prepare opening closing for group account
-		if parent_children_map.get(d.account) and filters.get("show_net_values"):
-			prepare_opening_closing(d)
-
 		has_value = False
 		row = {
 			"account": d.name,
@@ -242,35 +254,9 @@ def prepare_companywise_tb_data(accounts, filters, parent_children_map, reportin
 	return data
 
 
-def calculate_total_row(data, reporting_currency):
-	total_row = {
-		"account": "'" + _("Total") + "'",
-		"account_name": "'" + _("Total") + "'",
-		"warn_if_negative": True,
-		"opening_debit": 0.0,
-		"opening_credit": 0.0,
-		"debit": 0.0,
-		"credit": 0.0,
-		"closing_debit": 0.0,
-		"closing_credit": 0.0,
-		"parent_account": None,
-		"indent": 0,
-		"has_value": True,
-		"currency": reporting_currency,
-	}
-
-	for d in data:
-		if not d.get("parent_account"):
-			for field in value_fields:
-				total_row[field] += d[field]
-
-	if data:
-		calculate_foreign_currency_translation_reserve(total_row, data)
-
-	return total_row
-
-
-def calculate_foreign_currency_translation_reserve(total_row, data):
+def calculate_foreign_currency_translation_reserve(total_row, data, filters):
+	if not data or not total_row:
+		return
 	opening_dr_cr_diff = total_row["opening_debit"] - total_row["opening_credit"]
 	dr_cr_diff = total_row["debit"] - total_row["credit"]
 
@@ -289,7 +275,7 @@ def calculate_foreign_currency_translation_reserve(total_row, data):
 		"root_type": data[idx].get("root_type"),
 		"account_type": "Equity",
 		"parent_account": data[idx].get("account"),
-		"indent": data[idx].get("indent") + 1,
+		"indent": data[idx].get("indent") + 1 if filters.get("show_group_accounts") else 0,
 		"has_value": True,
 		"currency": total_row.get("currency"),
 	}
@@ -297,7 +283,8 @@ def calculate_foreign_currency_translation_reserve(total_row, data):
 	fctr_row["closing_debit"] = fctr_row["opening_debit"] + fctr_row["debit"]
 	fctr_row["closing_credit"] = fctr_row["opening_credit"] + fctr_row["credit"]
 
-	prepare_opening_closing(fctr_row)
+	if filters.get("show_net_values"):
+		prepare_opening_closing(fctr_row)
 
 	data.insert(idx + 1, fctr_row)
 
@@ -394,6 +381,11 @@ def update_to_presentation_currency(data, from_currency, to_currency, date, igno
 				if d.get(field):
 					d[field] = d[field] * flt(exchange_rate)
 		d.update(currency=to_currency)
+
+
+def prepare_opening_closing_for_ctb(data):
+	for d in data:
+		prepare_opening_closing(d)
 
 
 def get_columns():

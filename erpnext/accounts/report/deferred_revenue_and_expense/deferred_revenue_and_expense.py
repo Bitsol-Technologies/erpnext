@@ -3,8 +3,10 @@
 
 import frappe
 from frappe import _, qb
+from frappe.desk.reportview import build_match_conditions
 from frappe.query_builder import Column, functions
 from frappe.utils import add_days, date_diff, flt, get_first_day, get_last_day, getdate, rounded
+from pypika.terms import Bracket, LiteralValue
 
 from erpnext.accounts.report.financial_statements import get_period_list
 from erpnext.accounts.utils import get_fiscal_year
@@ -35,7 +37,7 @@ class Deferred_Item:
 		self.gle_entries = []
 		# holds period wise total for item
 		self.period_total = []
-		self.last_entry_date = self.service_start_date
+		self.last_entry_date = None
 
 		if gle_entries:
 			self.gle_entries = gle_entries
@@ -48,6 +50,9 @@ class Deferred_Item:
 		Generate report data for output
 		"""
 		ret_data = frappe._dict({"name": self.item_name})
+		ret_data.service_start_date = self.service_start_date
+		ret_data.service_end_date = self.service_end_date
+		ret_data.amount = self.base_net_amount
 		for period in self.period_total:
 			ret_data[period.key] = period.total
 			ret_data.indent = 1
@@ -100,6 +105,9 @@ class Deferred_Item:
 		actual_months = rounded(total_months * prorate, 1)
 
 		already_booked_amount = self.get_item_total()
+		if not actual_months:
+			return self.base_net_amount - already_booked_amount
+
 		base_amount = self.base_net_amount / actual_months
 
 		if base_amount + already_booked_amount > self.base_net_amount:
@@ -143,18 +151,19 @@ class Deferred_Item:
 		"""
 		simulate future posting by creating dummy gl entries. starts from the last posting date.
 		"""
-		if (
-			self.service_start_date != self.service_end_date
-			and add_days(self.last_entry_date, 1) < self.service_end_date
-		):
+		forecast_start_date = (
+			add_days(self.last_entry_date, 1) if self.last_entry_date else self.service_start_date
+		)
+		if forecast_start_date <= self.service_end_date:
 			self.estimate_for_period_list = get_period_list(
 				self.filters.from_fiscal_year,
 				self.filters.to_fiscal_year,
-				add_days(self.last_entry_date, 1),
+				forecast_start_date,
 				self.service_end_date,
 				"Date Range",
 				"Monthly",
 				company=self.filters.company,
+				ignore_fiscal_year=True,
 			)
 
 			for period in self.estimate_for_period_list:
@@ -205,6 +214,9 @@ class Deferred_Invoice:
 		for item in self.uniq_items:
 			self.items.append(Deferred_Item(item, self, [x for x in items if x.item == item]))
 
+		# roll-up amount from all deferred items
+		self.amount_total = sum(item.base_net_amount for item in self.items)
+
 	def calculate_invoice_revenue_expense_for_period(self):
 		"""
 		calculate deferred revenue/expense for all items in invoice
@@ -232,7 +244,7 @@ class Deferred_Invoice:
 		generate report data for invoice, includes invoice total
 		"""
 		ret_data = []
-		inv_total = frappe._dict({"name": self.name})
+		inv_total = frappe._dict({"name": self.name, "amount": self.amount_total})
 		for x in self.period_total:
 			inv_total[x.key] = x.total
 			inv_total.indent = 0
@@ -298,13 +310,15 @@ class Deferred_Revenue_and_Expense_Report:
 		posted = Column("posted")
 
 		if self.filters.type == "Revenue":
-			inv = qb.DocType("Sales Invoice")
+			invoice_doctype = "Sales Invoice"
+			inv = qb.DocType(invoice_doctype)
 			inv_item = qb.DocType("Sales Invoice Item")
 			deferred_flag_field = inv_item["enable_deferred_revenue"]
 			deferred_account_field = inv_item["deferred_revenue_account"]
 
 		elif self.filters.type == "Expense":
-			inv = qb.DocType("Purchase Invoice")
+			invoice_doctype = "Purchase Invoice"
+			inv = qb.DocType(invoice_doctype)
 			inv_item = qb.DocType("Purchase Invoice Item")
 			deferred_flag_field = inv_item["enable_deferred_expense"]
 			deferred_account_field = inv_item["deferred_expense_account"]
@@ -351,6 +365,9 @@ class Deferred_Revenue_and_Expense_Report:
 			.groupby(inv.name, inv_item.name, gle.posting_date)
 			.orderby(gle.posting_date)
 		)
+		if match_conditions := build_match_conditions(invoice_doctype):
+			query = query.where(Bracket(LiteralValue(match_conditions)))
+
 		self.invoices = query.run(as_dict=True)
 
 		uniq_invoice = set([x.doc for x in self.invoices])
@@ -386,6 +403,24 @@ class Deferred_Revenue_and_Expense_Report:
 	def get_columns(self):
 		columns = []
 		columns.append({"label": _("Name"), "fieldname": "name", "fieldtype": "Data", "read_only": 1})
+		columns.append(
+			{
+				"label": _("Service Start Date"),
+				"fieldname": "service_start_date",
+				"fieldtype": "Date",
+				"read_only": 1,
+			}
+		)
+		columns.append(
+			{
+				"label": _("Service End Date"),
+				"fieldname": "service_end_date",
+				"fieldtype": "Date",
+				"read_only": 1,
+			}
+		)
+		columns.append({"label": _("Amount"), "fieldname": "amount", "fieldtype": "Currency", "read_only": 1})
+
 		for period in self.period_list:
 			columns.append(
 				{
@@ -414,6 +449,8 @@ class Deferred_Revenue_and_Expense_Report:
 			total_row = frappe._dict({"name": "Total Deferred Income"})
 		elif self.filters.type == "Expense":
 			total_row = frappe._dict({"name": "Total Deferred Expense"})
+
+		total_row["amount"] = sum(inv.amount_total for inv in self.deferred_invoices)
 
 		for idx, period in enumerate(self.period_list, 0):
 			total_row[period.key] = self.period_total[idx].total

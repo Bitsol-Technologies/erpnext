@@ -4,8 +4,10 @@
  "allow_import": 1,
  "autoname": "naming_series:",
  "creation": "2026-01-29 21:18:32.391385",
+ "description": "Prices you offer a customer or lead.",
  "doctype": "DocType",
  "document_type": "Document",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/quotation",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
@@ -109,7 +111,7 @@
   "tc_name",
   "terms",
   "more_info_tab",
-  "subscription_section",
+  "auto_repeat_section",
   "auto_repeat",
   "update_auto_repeat_reference",
   "print_settings",
@@ -123,19 +125,21 @@
   "competitors",
   "column_break_117",
   "order_lost_reason",
+  "utm_analytics_section",
+  "utm_source",
+  "utm_medium",
+  "column_break_fozg",
+  "utm_campaign",
+  "utm_content",
   "additional_info_section",
   "status",
   "customer_group",
   "territory",
+  "title",
   "column_break_108",
-  "utm_source",
-  "utm_campaign",
-  "utm_medium",
-  "utm_content",
-  "column_break4",
   "opportunity",
-  "supplier_quotation",
   "enq_det",
+  "supplier_quotation",
   "connections_tab"
  ],
  "fields": [
@@ -172,7 +176,7 @@
    "bold": 1,
    "fieldname": "party_name",
    "fieldtype": "Dynamic Link",
-   "in_global_search": 1,
+   "in_import_template": 1,
    "in_standard_filter": 1,
    "label": "Party",
    "oldfieldname": "customer",
@@ -212,6 +216,7 @@
   {
    "fieldname": "company",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Company",
    "oldfieldname": "company",
    "oldfieldtype": "Link",
@@ -238,6 +243,7 @@
   {
    "fieldname": "valid_till",
    "fieldtype": "Date",
+   "in_import_template": 1,
    "label": "Valid Till"
   },
   {
@@ -279,7 +285,6 @@
   {
    "fieldname": "contact_display",
    "fieldtype": "Small Text",
-   "in_global_search": 1,
    "label": "Contact",
    "read_only": 1
   },
@@ -300,7 +305,6 @@
    "read_only": 1
   },
   {
-   "depends_on": "eval:(doc.quotation_to=='Customer' && doc.party_name)",
    "fieldname": "col_break98",
    "fieldtype": "Column Break",
    "width": "50%"
@@ -339,6 +343,7 @@
   },
   {
    "collapsible": 1,
+   "collapsible_depends_on": "eval:doc.currency && doc.currency != erpnext.get_currency(doc.company)",
    "fieldname": "currency_and_price_list",
    "fieldtype": "Section Break",
    "label": "Currency and Price List",
@@ -831,11 +836,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "subscription_section",
-   "fieldtype": "Section Break",
-   "label": "Auto Repeat"
-  },
-  {
    "fieldname": "auto_repeat",
    "fieldtype": "Link",
    "label": "Auto Repeat",
@@ -861,13 +861,6 @@
    "oldfieldname": "order_lost_reason",
    "oldfieldtype": "Small Text",
    "print_hide": 1
-  },
-  {
-   "fieldname": "column_break4",
-   "fieldtype": "Column Break",
-   "oldfieldtype": "Column Break",
-   "print_hide": 1,
-   "width": "50%"
   },
   {
    "default": "Draft",
@@ -1117,13 +1110,36 @@
    "no_copy": 1,
    "options": "Item Wise Tax Detail",
    "print_hide": 1
+  },
+  {
+   "fieldname": "column_break_fozg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "utm_analytics_section",
+   "fieldtype": "Section Break",
+   "label": "UTM Analytics"
+  },
+  {
+   "fieldname": "auto_repeat_section",
+   "fieldtype": "Section Break",
+   "label": "Auto Repeat"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "no_copy": 1,
+   "print_hide": 1
   }
  ],
- "icon": "fa fa-shopping-cart",
+ "icon": "file-text",
  "idx": 82,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-01-29 21:18:48.836168",
+ "modified": "2026-09-30 23:24:44.044604",
  "modified_by": "Administrator",
  "module": "Selling",
  "name": "Quotation",

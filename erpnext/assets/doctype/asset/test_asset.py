@@ -1,9 +1,9 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 import unittest
+from itertools import product
 
 import frappe
-from frappe.tests import IntegrationTestCase
 from frappe.utils import (
 	add_days,
 	add_months,
@@ -20,6 +20,8 @@ from frappe.utils.data import add_to_date
 from erpnext.accounts.doctype.journal_entry.test_journal_entry import make_journal_entry
 from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make_purchase_invoice
 from erpnext.assets.doctype.asset.asset import (
+	get_values_from_purchase_doc,
+	make_asset_movement,
 	make_sales_invoice,
 	split_asset,
 	update_maintenance_status,
@@ -33,25 +35,26 @@ from erpnext.assets.doctype.asset_depreciation_schedule.asset_depreciation_sched
 	get_asset_depr_schedule_doc,
 	get_depr_schedule,
 )
+from erpnext.controllers.sales_and_purchase_return import make_return_doc
 from erpnext.stock.doctype.purchase_receipt.purchase_receipt import (
 	make_purchase_invoice as make_invoice,
 )
 from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
+from erpnext.tests.permission_test_utils import (
+	as_user,
+	assert_refused_for_names,
+	assert_refused_without,
+	make_company_fenced_user,
+	make_fenced_user,
+)
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class AssetSetup(IntegrationTestCase):
-	@classmethod
-	def setUpClass(cls):
-		super().setUpClass()
+class AssetSetup(ERPNextTestSuite):
+	def setUp(self):
 		set_depreciation_settings_in_company()
-		create_asset_data()
 		enable_cwip_accounting("Computers")
 		make_purchase_receipt(item_code="Macbook Pro", qty=1, rate=100000.0, location="Test Location")
-		frappe.db.sql("delete from `tabTax Rule`")
-
-	@classmethod
-	def tearDownClass(cls):
-		frappe.db.rollback()
 
 
 class TestAsset(AssetSetup):
@@ -71,16 +74,16 @@ class TestAsset(AssetSetup):
 		self.assertRaises(frappe.MandatoryError, asset.save)
 
 	def test_pr_or_pi_mandatory_if_not_existing_asset(self):
-		"""Tests if either PI or PR is present if CWIP is enabled and is_existing_asset=0."""
+		"""Tests if either PI or PR is present if CWIP is enabled and asset_type == Existing Asset."""
 
 		asset = create_asset(item_code="Macbook Pro", do_not_save=1)
-		asset.is_existing_asset = 0
+		asset.asset_type = ""
 
 		self.assertRaises(frappe.ValidationError, asset.save)
 
 	def test_available_for_use_date_is_after_purchase_date(self):
 		asset = create_asset(item_code="Macbook Pro", calculate_depreciation=1, do_not_save=1)
-		asset.is_existing_asset = 0
+		asset.asset_type = ""
 		asset.purchase_date = getdate("2021-10-10")
 		asset.available_for_use_date = getdate("2021-10-1")
 
@@ -182,8 +185,143 @@ class TestAsset(AssetSetup):
 		)
 		asset.submit()
 
+	def test_purchase_row_is_preserved_when_saving_assets(self):
+		create_fixed_asset_item("_Test Other Asset Purchase")
+		for doctype in ("Purchase Receipt", "Purchase Invoice"):
+			with self.subTest(doctype=doctype):
+				purchase_doc = self.make_asset_purchase(
+					doctype, [("Macbook Pro", 1, 100000)] * 2 + [("_Test Other Asset Purchase", 1, 100000)]
+				)
+				fieldname = frappe.scrub(doctype)
+				assets = frappe.get_all("Asset", filters={fieldname: purchase_doc.name}, pluck="name")
+				self.assertEqual(len(assets), 3)
+				rows = []
+				for name in assets:
+					asset = frappe.get_doc("Asset", name)
+					row = asset.get(fieldname + "_item")
+					asset.available_for_use_date = purchase_doc.posting_date
+					asset.save()
+					asset.submit()
+					self.assertEqual(asset.get(fieldname + "_item"), row)
+					rows.append(row)
+				self.assertCountEqual(rows, [item.name for item in purchase_doc.items])
+
+	def test_partial_purchase_return_keeps_other_submitted_assets(self):
+		for doctype, separate_rows, cancel_asset in product(
+			("Purchase Receipt", "Purchase Invoice"), (False, True), (False, True)
+		):
+			with self.subTest(doctype=doctype, separate_rows=separate_rows, cancel_asset=cancel_asset):
+				items = (
+					[("Macbook Pro", 1, 100000), ("Macbook Pro", 2, 120000)]
+					if separate_rows
+					else [("Macbook Pro", 3, 100000)]
+				)
+				purchase = self.make_asset_purchase(doctype, items)
+				fieldname = frappe.scrub(doctype)
+				assets = frappe.get_all(
+					"Asset", filters={fieldname: purchase.name}, pluck="name", order_by="creation, name"
+				)
+				kept_asset = frappe.get_doc("Asset", assets[0])
+				kept_asset.available_for_use_date = purchase.posting_date
+				kept_asset.submit()
+				returned_asset = frappe.get_doc("Asset", assets[-1])
+				if cancel_asset:
+					returned_asset.available_for_use_date = purchase.posting_date
+					returned_asset.submit().cancel()
+				else:
+					returned_asset.delete()
+
+				purchase_return = make_return_doc(doctype, purchase.name)
+				if separate_rows:
+					purchase_return.remove(purchase_return.items[0])
+				purchase_return.items[0].update({"qty": -1, "received_qty": -1})
+				purchase_return.insert().submit()
+				self.assertEqual(kept_asset.reload().docstatus, 1)
+				self.assertEqual(purchase_return.docstatus, 1)
+				remaining_return = make_return_doc(doctype, purchase.name)
+				if separate_rows:
+					remaining_return.remove(remaining_return.items[0])
+				remaining_return.items[0].update({"qty": -1, "received_qty": -1})
+				with self.assertRaisesRegex(frappe.ValidationError, "assets of"):
+					remaining_return.insert()
+				remaining_return.items[0].set(fieldname + "_item", None)
+				with self.assertRaisesRegex(frappe.ValidationError, "submitted assets"):
+					remaining_return.insert()
+				purchase_return.cancel()
+				self.assertEqual(kept_asset.reload().docstatus, 1)
+
+	def test_manual_assets_use_remaining_purchase_row_quantities(self):
+		item = create_fixed_asset_item("_Test Manual Asset Purchase", auto_create_assets=0)
+		for doctype in ("Purchase Receipt", "Purchase Invoice"):
+			with self.subTest(doctype=doctype):
+				purchase_doc = self.make_asset_purchase(
+					doctype, [(item.name, 2, 100000), (item.name, 1, 120000)]
+				)
+				fieldname = frappe.scrub(doctype)
+				for row, remaining_qty in [
+					(purchase_doc.items[0], 2),
+					(purchase_doc.items[0], 1),
+					(purchase_doc.items[1], 1),
+				]:
+					values = get_values_from_purchase_doc(purchase_doc.name, item.name, doctype)
+					self.assertEqual(values[fieldname + "_item"], row.name)
+					self.assertEqual(values["asset_quantity"], remaining_qty)
+					self.assertEqual(values["net_purchase_amount"], row.valuation_rate * remaining_qty)
+					asset = create_asset(item_code=item.name, do_not_save=True)
+					asset.update(values)
+					asset.update({"asset_type": "", fieldname: purchase_doc.name, "asset_quantity": 1})
+					asset.set(fieldname + "_item", None)
+					asset.net_purchase_amount = row.valuation_rate
+					asset.available_for_use_date = purchase_doc.posting_date
+					asset.insert()
+					self.assertEqual(asset.get(fieldname + "_item"), row.name)
+
+				with self.assertRaisesRegex(frappe.ValidationError, "already linked to Assets"):
+					get_values_from_purchase_doc(purchase_doc.name, item.name, doctype)
+				values = get_values_from_purchase_doc(purchase_doc.name, item.name, doctype, asset.name)
+				self.assertEqual(values[fieldname + "_item"], purchase_doc.items[1].name)
+
+				purchase_doc = self.make_asset_purchase(doctype, [(item.name, 1, 100000)] * 2)
+				values = get_values_from_purchase_doc(purchase_doc.name, item.name, doctype)
+				for row in purchase_doc.items:
+					asset = create_asset(item_code=item.name, do_not_save=True)
+					asset.update(values)
+					asset.update({"asset_type": "", fieldname: purchase_doc.name})
+					asset.available_for_use_date = purchase_doc.posting_date
+					asset.insert()
+					self.assertEqual(asset.get(fieldname + "_item"), row.name)
+
+	def test_assets_spanning_purchase_rows_can_be_saved_and_split(self):
+		item = create_fixed_asset_item("_Test Grouped Manual Asset", auto_create_assets=0, is_grouped_asset=1)
+		for doctype in ("Purchase Receipt", "Purchase Invoice"):
+			with self.subTest(doctype=doctype):
+				purchase_doc = self.make_asset_purchase(doctype, [(item.name, 3, 100000)] * 2)
+				fieldname = frappe.scrub(doctype)
+				asset = create_asset(
+					item_code=item.name,
+					asset_quantity=4,
+					net_purchase_amount=400000,
+					purchase_date=purchase_doc.posting_date,
+					available_for_use_date=purchase_doc.posting_date,
+					do_not_save=True,
+				)
+				asset.update({"asset_type": "", fieldname: purchase_doc.name})
+				asset.insert()
+				self.assertFalse(asset.get(fieldname + "_item"))
+
+				asset.asset_quantity = 6
+				asset.net_purchase_amount = 600000
+				asset.save()
+				asset.submit()
+				self.assertFalse(asset.get(fieldname + "_item"))
+
+				new_asset = split_asset(asset.name, 4)
+				self.assertFalse(new_asset.get(fieldname + "_item"))
+				self.assertEqual(new_asset.asset_quantity, 4)
+				self.assertEqual(asset.reload().asset_quantity, 2)
+
 	def test_is_fixed_asset_set(self):
-		asset = create_asset(is_existing_asset=1)
+		asset = create_asset(asset_type="Existing Asset")
 		doc = frappe.new_doc("Purchase Invoice")
 		doc.company = "_Test Company"
 		doc.supplier = "_Test Supplier"
@@ -256,7 +394,7 @@ class TestAsset(AssetSetup):
 			asset.precision("net_purchase_amount"),
 		)
 
-		second_asset_depr_schedule.depreciation_amount = 9006.17
+		second_asset_depr_schedule.depreciation_amount = 9000
 		second_asset_depr_schedule.asset_doc = asset
 		second_asset_depr_schedule.get_finance_book_row()
 		second_asset_depr_schedule.fetch_asset_details()
@@ -330,7 +468,9 @@ class TestAsset(AssetSetup):
 
 		post_depreciation_entries(date=add_months(purchase_date, 2))
 
-		si = make_sales_invoice(asset=asset.name, item_code="Macbook Pro", company="_Test Company")
+		si = make_sales_invoice(
+			asset=asset.name, item_code="Macbook Pro", company="_Test Company", sell_qty=asset.asset_quantity
+		)
 		si.customer = "_Test Customer"
 		si.due_date = date
 		si.get("items")[0].rate = 25000
@@ -443,6 +583,37 @@ class TestAsset(AssetSetup):
 		gle = get_gl_entries("Sales Invoice", si.name)
 		self.assertSequenceEqual(gle, expected_gle)
 
+	def test_sale_and_return_gl_unchanged_on_repost(self):
+		from erpnext.accounts.doctype.repost_accounting_ledger.test_repost_accounting_ledger import (
+			update_repost_settings,
+		)
+		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+
+		asset = create_monthly_depreciating_asset()
+		post_depreciation_entries(date="2025-08-31")
+		sale_args = {"item_code": "Macbook Pro", "asset": asset.name, "rate": 50000}
+		sale = create_sales_invoice(qty=1, posting_date="2025-09-15", **sale_args)
+		sale_return = create_sales_invoice(
+			qty=-1, posting_date="2025-09-20", is_return=1, return_against=sale.name, **sale_args
+		)
+		# the restored asset depreciates further, so its current values differ from the sale's
+		post_depreciation_entries(date="2025-10-31")
+		posted_entries = {
+			name: get_gl_entries("Sales Invoice", name) for name in (sale.name, sale_return.name)
+		}
+
+		update_repost_settings()
+		repost = frappe.new_doc("Repost Accounting Ledger")
+		repost.company = sale.company
+		repost.delete_cancelled_entries = 1
+		for name in posted_entries:
+			repost.append("vouchers", {"voucher_type": "Sales Invoice", "voucher_no": name})
+		repost.submit()
+
+		self.assertEqual(frappe.db.get_value(repost.doctype, repost.name, "status"), "Completed")
+		for name, entries in posted_entries.items():
+			self.assertCountEqual(get_gl_entries("Sales Invoice", name), entries)
+
 	def test_asset_with_maintenance_required_status_after_sale(self):
 		asset = create_asset(
 			calculate_depreciation=1,
@@ -458,7 +629,9 @@ class TestAsset(AssetSetup):
 
 		post_depreciation_entries(date="2021-01-01")
 
-		si = make_sales_invoice(asset=asset.name, item_code="Macbook Pro", company="_Test Company")
+		si = make_sales_invoice(
+			asset=asset.name, item_code="Macbook Pro", company="_Test Company", sell_qty=asset.asset_quantity
+		)
 		si.customer = "_Test Customer"
 		si.due_date = nowdate()
 		si.get("items")[0].rate = 25000
@@ -470,6 +643,36 @@ class TestAsset(AssetSetup):
 		update_maintenance_status()
 
 		self.assertEqual(frappe.db.get_value("Asset", asset.name, "status"), "Sold")
+
+	def test_asset_under_due_maintenance_keeps_depreciating(self):
+		from unittest.mock import patch
+
+		asset = create_asset(
+			calculate_depreciation=1,
+			available_for_use_date="2020-06-06",
+			purchase_date="2020-01-01",
+			expected_value_after_useful_life=10000,
+			total_number_of_depreciations=3,
+			frequency_of_depreciation=10,
+			maintenance_required=1,
+			depreciation_start_date="2020-12-31",
+			submit=1,
+		)
+		# an overdue maintenance log stays open
+		with patch("erpnext.assets.doctype.asset.asset.has_due_maintenance", return_value=True):
+			update_maintenance_status()
+			self.assertEqual(frappe.db.get_value("Asset", asset.name, "status"), "In Maintenance")
+
+			post_depreciation_entries(date="2021-01-01")
+
+		self.assertTrue(
+			frappe.db.get_value(
+				"Depreciation Schedule",
+				{"parent": get_asset_depr_schedule_doc(asset.name, "Active").name, "idx": 1},
+				"journal_entry",
+			)
+		)
+		self.assertEqual(frappe.db.get_value("Asset", asset.name, "status"), "In Maintenance")
 
 	def test_asset_splitting(self):
 		asset = create_asset(
@@ -511,16 +714,20 @@ class TestAsset(AssetSetup):
 
 		self.assertEqual(new_asset.asset_quantity, 2)
 		self.assertEqual(new_asset.net_purchase_amount, 2400)
+		self.assertEqual(new_asset.purchase_amount, 2400)
 		self.assertEqual(new_asset.opening_accumulated_depreciation, 98.63)
 		self.assertEqual(new_asset.split_from, asset.name)
 		self.assertEqual(depr_schedule_of_new_asset[0].depreciation_amount, 400)
 		self.assertEqual(depr_schedule_of_new_asset[1].depreciation_amount, 400)
+		self.assertEqual(depr_schedule_of_new_asset[0].accumulated_depreciation_amount, 498.63)
 
 		self.assertEqual(asset.asset_quantity, 8)
 		self.assertEqual(asset.net_purchase_amount, 9600)
+		self.assertEqual(asset.purchase_amount, 9600)
 		self.assertEqual(asset.opening_accumulated_depreciation, 394.52)
 		self.assertEqual(depr_schedule_of_asset[0].depreciation_amount, 1600)
 		self.assertEqual(depr_schedule_of_asset[1].depreciation_amount, 1600)
+		self.assertEqual(depr_schedule_of_asset[0].accumulated_depreciation_amount, 1994.52)
 
 		journal_entry = depr_schedule_of_asset[0].journal_entry
 
@@ -698,8 +905,480 @@ class TestAsset(AssetSetup):
 		frappe.db.set_value("Asset Category Account", name, "capital_work_in_progress_account", cwip_acc)
 		frappe.db.get_value("Company", "_Test Company", "capital_work_in_progress_account", cwip_acc)
 
+	def test_partial_asset_sale(self):
+		date = nowdate()
+		purchase_date = add_months(get_first_day(date), -2)
+		depreciation_start_date = add_months(get_last_day(date), -2)
+
+		# create an asset
+		asset = create_asset(
+			item_code="Macbook Pro",
+			asset_type="Existing Asset",
+			calculate_depreciation=1,
+			available_for_use_date=purchase_date,
+			purchase_date=purchase_date,
+			depreciation_start_date=depreciation_start_date,
+			net_purchase_amount=1000000.0,
+			purchase_amount=1000000.0,
+			asset_quantity=10,
+			total_number_of_depreciations=12,
+			frequency_of_depreciation=1,
+			submit=1,
+		)
+		asset_depr_schedule_before_sale = get_asset_depr_schedule_doc(asset.name, "Active")
+		post_depreciation_entries(date)
+		asset.reload()
+
+		# check asset values before sale
+		self.assertEqual(asset.asset_quantity, 10)
+		self.assertEqual(asset.net_purchase_amount, 1000000)
+		self.assertEqual(asset.status, "Partially Depreciated")
+		self.assertEqual(
+			asset_depr_schedule_before_sale.depreciation_schedule[0].get("depreciation_amount"), 83333.33
+		)
+
+		# make a partial sales against the asset
+		si = make_sales_invoice(
+			asset=asset.name, item_code="Macbook Pro", company="_Test Company", sell_qty=5
+		)
+		si.customer = "_Test Customer"
+		si.due_date = date
+		si.get("items")[0].rate = 25000
+		si.insert()
+		si.submit()
+
+		asset.reload()
+		asset_depr_schedule_after_sale = get_asset_depr_schedule_doc(asset.name, "Active")
+
+		# check asset values after sales
+		self.assertEqual(asset.asset_quantity, 5)
+		self.assertEqual(asset.net_purchase_amount, 500000)
+		self.assertEqual(asset.status, "Sold")
+		self.assertEqual(
+			asset_depr_schedule_after_sale.depreciation_schedule[0].get("depreciation_amount"), 41666.66
+		)
+
+	def test_asset_splitting_for_non_existing_asset(self):
+		date = nowdate()
+		purchase_date = add_months(get_first_day(date), -2)
+		depreciation_start_date = add_months(get_last_day(date), -2)
+
+		asset_qty = 10
+		asset_rate = 100000.0
+		asset_item = "Macbook Pro"
+		asset_location = "Test Location"
+
+		frappe.db.set_value("Item", asset_item, "is_grouped_asset", 1)
+		other_item = create_fixed_asset_item("_Test Other Split Asset", is_grouped_asset=1)
+
+		# Inward asset via Purchase Receipt
+		pr = make_purchase_receipt(
+			item_code="Macbook Pro",
+			posting_date=purchase_date,
+			qty=asset_qty,
+			rate=asset_rate,
+			location=asset_location,
+			supplier="_Test Supplier",
+			do_not_submit=True,
+		)
+		pr.append(
+			"items",
+			{"item_code": other_item.name, "qty": 5, "rate": asset_rate, "asset_location": asset_location},
+		)
+		pr.save()
+		pr.submit()
+
+		asset = frappe.db.get_value("Asset", {"purchase_receipt": pr.name, "item_code": asset_item}, "name")
+		asset_doc = frappe.get_doc("Asset", asset)
+		asset_doc.calculate_depreciation = 1
+		asset_doc.available_for_use_date = purchase_date
+		asset_doc.location = asset_location
+		asset_doc.append(
+			"finance_books",
+			{
+				"expected_value_after_useful_life": 0,
+				"depreciation_method": "Straight Line",
+				"total_number_of_depreciations": 12,
+				"frequency_of_depreciation": 1,
+				"depreciation_start_date": depreciation_start_date,
+			},
+		)
+		asset_doc.submit()
+
+		# check asset values before splitting
+		asset_depr_schedule_before_splitting = get_asset_depr_schedule_doc(asset_doc.name, "Active")
+		self.assertEqual(asset_doc.asset_quantity, 10)
+		self.assertEqual(asset_doc.net_purchase_amount, 1000000)
+		self.assertEqual(
+			asset_depr_schedule_before_splitting.depreciation_schedule[0].get("depreciation_amount"), 83333.33
+		)
+
+		# initate asset split
+		new_asset = split_asset(asset_doc.name, 5)
+		asset_doc.reload()
+		self.assertEqual(asset_doc.purchase_receipt_item, pr.items[0].name)
+		self.assertEqual(new_asset.purchase_receipt_item, pr.items[0].name)
+		asset_depr_schedule_after_sale = get_asset_depr_schedule_doc(asset_doc.name, "Active")
+		new_asset_depr_schedule = get_asset_depr_schedule_doc(new_asset.name, "Active")
+
+		# check asset values after splitting
+		self.assertEqual(asset_doc.asset_quantity, 5)
+		self.assertEqual(asset_doc.net_purchase_amount, 500000)
+		self.assertEqual(
+			asset_depr_schedule_after_sale.depreciation_schedule[0].get("depreciation_amount"), 41666.66
+		)
+
+		# check new asset values after splitting
+		self.assertEqual(new_asset.asset_quantity, 5)
+		self.assertEqual(new_asset.net_purchase_amount, 500000)
+		self.assertEqual(
+			new_asset_depr_schedule.depreciation_schedule[0].get("depreciation_amount"), 41666.66
+		)
+
+		frappe.db.set_value("Item", asset_item, "is_grouped_asset", 0)
+
+	def test_make_asset_movement_respects_location_user_permission(self):
+		inside = create_asset(asset_name="Asset Inside Location Fence", location="Test Location")
+		outside = create_asset(asset_name="Asset Outside Location Fence", location="Test Location 2")
+		fenced_user = make_fenced_user(
+			"asset_movement_fenced@example.com", ["Accounts User"], [("Location", "Test Location")]
+		)
+		unfenced_user = make_fenced_user("asset_movement_unfenced@example.com", ["Stock Manager"])
+
+		hidden = [outside.location, outside.asset_name]
+
+		with as_user(fenced_user):
+			assert_refused_without(self, hidden, make_asset_movement, [{"name": outside.name}], "Transfer")
+			assert_refused_without(
+				self,
+				hidden,
+				make_asset_movement,
+				[{"name": inside.name}, {"name": outside.name}],
+				"Transfer",
+			)
+			movement = make_asset_movement([{"name": inside.name}], "Transfer")
+
+		self.assertEqual(movement["assets"][0]["asset"], inside.name)
+		self.assertEqual(movement["assets"][0]["source_location"], "Test Location")
+
+		with as_user(unfenced_user):
+			movement = make_asset_movement([{"name": outside.name}], "Transfer")
+
+		self.assertEqual(movement["assets"][0]["asset"], outside.name)
+		self.assertEqual(movement["assets"][0]["source_location"], "Test Location 2")
+
+	def test_make_asset_movement_refuses_forbidden_missing_and_malformed_names(self):
+		inside = create_asset(asset_name="Asset Inside Location Fence", location="Test Location")
+		outside = create_asset(asset_name="Asset Outside Location Fence", location="Test Location 2")
+		fenced_user = make_fenced_user(
+			"asset_movement_fenced@example.com", ["Accounts User"], [("Location", "Test Location")]
+		)
+
+		def build_kwargs(name):
+			return {"assets": [{"name": name}], "purpose": "Transfer"}
+
+		with as_user(fenced_user):
+			assert_refused_without(
+				self,
+				[outside.location, outside.asset_name],
+				make_asset_movement,
+				**build_kwargs(outside.name),
+			)
+			assert_refused_for_names(
+				self, make_asset_movement, build_kwargs, [[inside.name, outside.name]], caller_supplied=True
+			)
+
+	def test_is_fully_depreciated_asset_status(self):
+		asset = create_asset(item_code="Macbook Pro", do_not_save=1)
+		asset.is_fully_depreciated = 1
+		asset.save().submit()
+		self.assertEqual(asset.status, "Fully Depreciated")
+
+	def test_disposal_credits_revalued_asset_value(self):
+		from erpnext.assets.doctype.asset_value_adjustment.test_asset_value_adjustment import (
+			make_asset_value_adjustment,
+		)
+
+		for new_value in (120000, 80000):
+			asset = create_asset(purchase_date="2025-04-01", available_for_use_date="2025-04-01", submit=1)
+			make_asset_value_adjustment(
+				asset=asset.name, date="2025-06-15", current_asset_value=100000, new_asset_value=new_value
+			).submit()
+
+			scrap_asset(asset.name, "2025-09-01")
+			asset.load_from_db()
+
+			self.assertCountEqual(
+				get_gl_entries("Journal Entry", asset.journal_entry_for_scrap),
+				(
+					("_Test Fixed Asset - _TC", 0.0, new_value),
+					("_Test Gain/Loss on Asset Disposal - _TC", new_value, 0.0),
+				),
+			)
+
+	def test_split_shares_value_adjustment(self):
+		from erpnext.assets.doctype.asset.depreciation import get_gross_asset_value
+		from erpnext.assets.doctype.asset_value_adjustment.test_asset_value_adjustment import (
+			make_asset_value_adjustment,
+		)
+
+		for calculate_depreciation in (0, 1):
+			asset = create_asset(
+				calculate_depreciation=calculate_depreciation,
+				asset_quantity=2,
+				purchase_date="2025-04-01",
+				available_for_use_date="2025-04-01",
+				depreciation_start_date="2026-03-31",
+				submit=1,
+			)
+			make_asset_value_adjustment(
+				asset=asset.name, date="2025-06-15", current_asset_value=100000, new_asset_value=120000
+			).submit()
+
+			new_asset = split_asset(asset.name, 1)
+			asset.load_from_db()
+
+			self.assertEqual(get_gross_asset_value(asset), 60000)
+			self.assertEqual(get_gross_asset_value(new_asset), 60000)
+			if calculate_depreciation:
+				continue
+
+			scrap_asset(new_asset.name, "2025-09-01")
+			new_asset.load_from_db()
+			self.assertCountEqual(
+				get_gl_entries("Journal Entry", new_asset.journal_entry_for_scrap),
+				(
+					("_Test Fixed Asset - _TC", 0.0, 60000.0),
+					("_Test Gain/Loss on Asset Disposal - _TC", 60000.0, 0.0),
+				),
+			)
+
+	def test_value_adjustment_before_split_cannot_be_cancelled(self):
+		from erpnext.assets.doctype.asset_value_adjustment.test_asset_value_adjustment import (
+			make_asset_value_adjustment,
+		)
+
+		asset = create_asset(
+			asset_quantity=2, purchase_date="2025-04-01", available_for_use_date="2025-04-01", submit=1
+		)
+		adjustment_before_split = make_asset_value_adjustment(
+			asset=asset.name, date="2025-06-15", current_asset_value=100000, new_asset_value=120000
+		)
+		adjustment_before_split.submit()
+		split_asset(asset.name, 1)
+
+		adjustment_after_split = make_asset_value_adjustment(
+			asset=asset.name, date="2025-07-15", current_asset_value=60000, new_asset_value=70000
+		)
+		adjustment_after_split.submit()
+
+		self.assertRaises(frappe.ValidationError, adjustment_before_split.cancel)
+		adjustment_after_split.cancel()
+		asset.load_from_db()
+		self.assertEqual(asset.value_adjustment_amount, 10000)
+
+	def test_sold_status_survives_status_recompute(self):
+		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+
+		asset = create_monthly_depreciating_asset()
+		post_depreciation_entries(date="2025-08-31")
+		create_sales_invoice(
+			item_code="Macbook Pro", asset=asset.name, qty=1, rate=50000, posting_date="2025-09-15"
+		)
+
+		self.assertRaises(frappe.ValidationError, restore_asset, asset.name)
+
+		first_depreciation_entry = get_depr_schedule(asset.name, "Active")[0].journal_entry
+		frappe.get_doc("Journal Entry", first_depreciation_entry).cancel()
+		self.assertEqual(frappe.db.get_value("Asset", asset.name, "status"), "Sold")
+
+	def test_sale_return_reverses_sale_gl(self):
+		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+
+		asset = create_monthly_depreciating_asset()
+		post_depreciation_entries(date="2025-08-31")
+		sale_args = {"item_code": "Macbook Pro", "asset": asset.name, "rate": 50000}
+		sale = create_sales_invoice(qty=1, posting_date="2025-09-15", **sale_args)
+		sale_return = create_sales_invoice(
+			qty=-1, posting_date="2025-09-20", is_return=1, return_against=sale.name, **sale_args
+		)
+
+		self.assertCountEqual(
+			get_gl_entries("Sales Invoice", sale_return.name),
+			[
+				(account, credit, debit)
+				for account, debit, credit in get_gl_entries("Sales Invoice", sale.name)
+			],
+		)
+
+	def test_split_asset_validations(self):
+		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+
+		asset = create_asset(asset_quantity=2, submit=1)
+		self.assertRaises(frappe.ValidationError, split_asset, asset.name, -3)
+		self.assertRaises(frappe.ValidationError, split_asset, asset.name, 0)
+
+		create_sales_invoice(item_code="Macbook Pro", asset=asset.name, qty=2, rate=60000)
+		self.assertRaises(frappe.ValidationError, split_asset, asset.name, 1)
+
+	def test_opening_accumulated_depreciation_without_depreciation(self):
+		asset = create_asset(opening_accumulated_depreciation=150000, do_not_save=1)
+		self.assertRaises(frappe.ValidationError, asset.save)
+
+		pr = make_purchase_receipt(item_code="Macbook Pro", qty=1, rate=100000.0, location="Test Location")
+		asset = frappe.get_doc("Asset", {"purchase_receipt": pr.name})
+		asset.opening_accumulated_depreciation = 30000
+		asset.save()
+
+		self.assertEqual(asset.opening_accumulated_depreciation, 0)
+		self.assertEqual(asset.value_after_depreciation, 100000)
+
+	def test_asset_mappers_need_asset_read_permission(self):
+		from erpnext.assets.doctype.asset.asset import make_journal_entry
+		from erpnext.assets.doctype.asset.depreciation import get_value_after_depreciation_on_disposal_date
+
+		asset = create_asset(submit=1)
+		stock_user = make_fenced_user("asset-stock-user@example.com", ["Stock User"])
+		with as_user(stock_user):
+			for method, args in (
+				(get_value_after_depreciation_on_disposal_date, (asset.name, nowdate())),
+				(make_journal_entry, (asset.name,)),
+			):
+				self.assertRaises(frappe.PermissionError, method, *args)
+
+	def test_scrap_asset_needs_journal_entry_permission(self):
+		asset = create_asset(submit=1)
+		quality_manager = make_fenced_user("asset-qm@example.com", ["Quality Manager"])
+		with as_user(quality_manager):
+			self.assertRaises(frappe.PermissionError, scrap_asset, asset.name)
+
+		self.assertFalse(frappe.db.get_value("Asset", asset.name, "journal_entry_for_scrap"))
+
+	def test_cwip_asset_is_capitalised_after_a_missed_daily_run(self):
+		from erpnext.assets.doctype.asset.asset import make_post_gl_entry
+
+		pr = make_purchase_receipt(item_code="Macbook Pro", qty=1, rate=5000, location="Test Location")
+		asset = frappe.get_doc("Asset", {"purchase_receipt": pr.name})
+		asset.available_for_use_date = add_days(nowdate(), 5)
+		asset.submit()
+		self.assertFalse(asset.booked_fixed_asset)
+
+		# the available-for-use date has passed without a daily run on that date
+		asset.db_set("available_for_use_date", add_days(nowdate(), -1))
+		make_post_gl_entry()
+
+		self.assertTrue(frappe.db.get_value("Asset", asset.name, "booked_fixed_asset"))
+
+	def test_cwip_daily_run_continues_after_a_failing_asset(self):
+		from unittest.mock import patch
+
+		from erpnext.assets.doctype.asset.asset import Asset, make_post_gl_entry
+
+		assets = []
+		for _i in range(2):
+			pr = make_purchase_receipt(item_code="Macbook Pro", qty=1, rate=5000, location="Test Location")
+			asset = frappe.get_doc("Asset", {"purchase_receipt": pr.name})
+			asset.available_for_use_date = add_days(nowdate(), 5)
+			asset.submit()
+			asset.db_set("available_for_use_date", add_days(nowdate(), -1))
+			assets.append(asset.name)
+
+		original_make_gl_entries = Asset.make_gl_entries
+
+		def fail_for_first_asset(doc):
+			if doc.name == assets[0]:
+				raise frappe.ValidationError("Posting date is in a closed accounting period")
+			return original_make_gl_entries(doc)
+
+		with patch.object(Asset, "make_gl_entries", fail_for_first_asset):
+			make_post_gl_entry()
+
+		self.assertFalse(frappe.db.get_value("Asset", assets[0], "booked_fixed_asset"))
+		self.assertTrue(frappe.db.get_value("Asset", assets[1], "booked_fixed_asset"))
+		self.assertTrue(frappe.db.exists("Error Log", {"reference_name": assets[0]}))
+
+	def test_value_after_depreciation_is_stored_for_draft(self):
+		for calculate_depreciation in (0, 1):
+			draft_asset = create_asset(
+				calculate_depreciation=calculate_depreciation,
+				opening_accumulated_depreciation=10000,
+				opening_number_of_booked_depreciations=1,
+				depreciation_start_date="2025-04-30",
+			)
+			frappe.get_doc("Asset", draft_asset.name).submit()
+
+			self.assertEqual(
+				frappe.db.get_value("Asset", draft_asset.name, "value_after_depreciation"), 90000
+			)
+
+	def test_asset_sale_validations(self):
+		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+
+		draft_asset = create_asset()
+		self.assertRaises(
+			frappe.ValidationError,
+			create_sales_invoice,
+			item_code="Macbook Pro",
+			asset=draft_asset.name,
+			qty=1,
+			rate=50000,
+		)
+
+		depreciated_asset = create_monthly_depreciating_asset()
+		post_depreciation_entries(date="2025-09-30")
+		self.assertRaises(
+			frappe.ValidationError,
+			create_sales_invoice,
+			item_code="Macbook Pro",
+			asset=depreciated_asset.name,
+			qty=1,
+			rate=80000,
+			posting_date="2025-06-15",
+		)
+
+	def make_asset_purchase(self, doctype, items):
+		make_purchase = make_purchase_receipt if doctype == "Purchase Receipt" else make_purchase_invoice
+		purchase_doc = make_purchase(
+			item_code=items[0][0],
+			qty=items[0][1],
+			rate=items[0][2],
+			location="Test Location",
+			update_stock=1,
+			do_not_save=True,
+		)
+		for item_code, qty, rate in items[1:]:
+			purchase_doc.append(
+				"items", {"item_code": item_code, "qty": qty, "rate": rate, "asset_location": "Test Location"}
+			)
+		purchase_doc.insert()
+		purchase_doc.submit()
+		return purchase_doc
+
+	def test_get_values_from_purchase_doc_needs_read_on_the_purchase_doc(self):
+		item = create_fixed_asset_item("_Test Manual Asset Permissions", auto_create_assets=0)
+		pr = make_purchase_receipt(item_code=item.name, qty=1, rate=100000.0, location="Test Location")
+		pi = make_purchase_invoice(item_code=item.name, qty=1, rate=100000.0)
+		other_company_asset = create_asset(company="_Test Company 1")
+
+		quality_manager = make_fenced_user("asset-qm@example.com", ["Quality Manager"])
+		accounts_user = make_company_fenced_user("asset-au@example.com", ["Accounts User"], "_Test Company")
+		for doctype, name in (("Purchase Receipt", pr.name), ("Purchase Invoice", pi.name)):
+			for user in (quality_manager, "Guest"):
+				with as_user(user):
+					with self.assertRaises(frappe.PermissionError):
+						get_values_from_purchase_doc(name, item.name, doctype)
+			with as_user(accounts_user):
+				values = get_values_from_purchase_doc(name, item.name, doctype)
+				with self.assertRaises(frappe.PermissionError):
+					get_values_from_purchase_doc(name, item.name, doctype, other_company_asset.name)
+			self.assertEqual(values["company"], "_Test Company")
+			self.assertEqual(values["asset_quantity"], 1)
+
 
 class TestDepreciationMethods(AssetSetup):
+	def setUp(self):
+		frappe.db.set_single_value("System Settings", "float_precision", 2)
+
 	def test_schedule_for_straight_line_method(self):
 		asset = create_asset(
 			calculate_depreciation=1,
@@ -764,7 +1443,7 @@ class TestDepreciationMethods(AssetSetup):
 		asset = create_asset(
 			calculate_depreciation=1,
 			available_for_use_date="2030-06-06",
-			is_existing_asset=1,
+			asset_type="Existing Asset",
 			opening_number_of_booked_depreciations=2,
 			opening_accumulated_depreciation=47178.08,
 			expected_value_after_useful_life=10000,
@@ -797,9 +1476,9 @@ class TestDepreciationMethods(AssetSetup):
 		self.assertEqual(asset.status, "Draft")
 
 		expected_schedules = [
-			["2030-12-31", 66667.00, 66667.00],
-			["2031-12-31", 22222.11, 88889.11],
-			["2032-12-31", 1110.89, 90000.0],
+			["2030-12-31", 66670.0, 66670.0],
+			["2031-12-31", 22221.11, 88891.11],
+			["2032-12-31", 1108.89, 90000.0],
 		]
 
 		schedules = [
@@ -813,7 +1492,7 @@ class TestDepreciationMethods(AssetSetup):
 		asset = create_asset(
 			calculate_depreciation=1,
 			available_for_use_date="2030-01-01",
-			is_existing_asset=1,
+			asset_type="Existing Asset",
 			depreciation_method="Double Declining Balance",
 			opening_number_of_booked_depreciations=1,
 			opening_accumulated_depreciation=50000,
@@ -825,7 +1504,7 @@ class TestDepreciationMethods(AssetSetup):
 
 		self.assertEqual(asset.status, "Draft")
 
-		expected_schedules = [["2031-12-31", 33333.50, 83333.50], ["2032-12-31", 6666.50, 90000.0]]
+		expected_schedules = [["2031-12-31", 33335.0, 83335.0], ["2032-12-31", 6665.0, 90000.0]]
 
 		schedules = [
 			[cstr(d.schedule_date), d.depreciation_amount, d.accumulated_depreciation_amount]
@@ -943,12 +1622,12 @@ class TestDepreciationMethods(AssetSetup):
 		)
 
 		expected_schedules = [
-			["2022-02-28", 337.72, 337.72],
-			["2022-03-31", 675.45, 1013.17],
-			["2022-04-30", 675.45, 1688.62],
-			["2022-05-31", 675.45, 2364.07],
-			["2022-06-30", 675.45, 3039.52],
-			["2022-07-15", 1960.48, 5000.0],
+			["2022-02-28", 337.71, 337.71],
+			["2022-03-31", 675.42, 1013.13],
+			["2022-04-30", 675.42, 1688.55],
+			["2022-05-31", 675.42, 2363.97],
+			["2022-06-30", 675.42, 3039.39],
+			["2022-07-15", 1960.61, 5000.0],
 		]
 
 		schedules = [
@@ -1247,6 +1926,31 @@ class TestDepreciationBasics(AssetSetup):
 
 		self.assertRaises(frappe.ValidationError, asset.save)
 
+	def test_depreciation_ignores_dimension_defaults_of_other_companies(self):
+		"""A dimension default that is mandatory for another company must not be stamped on this
+		company's depreciation entry, or every scheduled posting fails company validation."""
+		other_company_department = set_mandatory_dimension_default_for_other_company()
+
+		asset = create_asset(
+			item_code="Macbook Pro",
+			calculate_depreciation=1,
+			available_for_use_date="2019-12-31",
+			depreciation_start_date="2020-12-31",
+			frequency_of_depreciation=12,
+			total_number_of_depreciations=3,
+			expected_value_after_useful_life=10000,
+			submit=1,
+		)
+
+		post_depreciation_entries(date="2021-06-01")
+		asset.load_from_db()
+
+		journal_entry = get_depr_schedule(asset.name, "Active")[0].journal_entry
+		self.assertNotEqual(asset.depr_entry_posting_status, "Failed")
+		self.assertTrue(journal_entry)
+		departments = frappe.get_all("Journal Entry Account", {"parent": journal_entry}, pluck="department")
+		self.assertNotIn(other_company_department, departments)
+
 	def test_post_depreciation_entries(self):
 		"""Tests if post_depreciation_entries() works as expected."""
 
@@ -1269,6 +1973,47 @@ class TestDepreciationBasics(AssetSetup):
 		self.assertTrue(depr_schedule[0].journal_entry)
 		self.assertFalse(depr_schedule[1].journal_entry)
 		self.assertFalse(depr_schedule[2].journal_entry)
+
+	def test_depr_schedule_link_matches_at_currency_precision(self):
+		"""A Depreciation Schedule row whose amount carries more decimals than the
+		company currency (e.g. 25701.202 vs a JE debit of 25701.20) must still be
+		matched and stamped with the Journal Entry. Comparing at exact float
+		equality left the link NULL, so the scheduler treated the row as unposted
+		and created a duplicate Journal Entry on every run. Regression test for
+		JournalEntry.update_journal_entry_link_on_depr_schedule()."""
+		from unittest.mock import MagicMock, patch
+
+		from erpnext.accounts.doctype.journal_entry import journal_entry as journal_entry_module
+
+		posting_date = getdate("2021-06-01")
+		je = frappe.new_doc("Journal Entry")
+		je.name = "JE-DEPR-TEST"
+		je.finance_book = None
+		je.posting_date = posting_date
+
+		# JE debit is stored at company currency precision (2 dp)...
+		je_row = MagicMock()
+		je_row.debit = 25701.20
+		je_row.precision.return_value = 2
+
+		# ...while the schedule row amount carries a third decimal.
+		schedule_row = frappe._dict(
+			name="DS-ROW-1",
+			schedule_date=posting_date,
+			journal_entry=None,
+			depreciation_amount=25701.202,
+		)
+		asset = frappe._dict(name="ASSET-TEST")
+
+		with (
+			patch.object(journal_entry_module, "get_depr_schedule", return_value=[schedule_row]),
+			patch.object(frappe.db, "set_value") as mock_set_value,
+		):
+			je.update_journal_entry_link_on_depr_schedule(asset, je_row)
+
+		mock_set_value.assert_called_once_with(
+			"Depreciation Schedule", "DS-ROW-1", "journal_entry", "JE-DEPR-TEST"
+		)
 
 	def test_depr_entry_posting_when_depr_expense_account_is_an_expense_account(self):
 		"""Tests if the Depreciation Expense Account gets debited and the Accumulated Depreciation Account gets credited when the former's an Expense Account."""
@@ -1554,7 +2299,7 @@ class TestDepreciationBasics(AssetSetup):
 		self.assertEqual(asset.finance_books[0].value_after_depreciation, 100000.0)
 
 	def test_asset_cost_center(self):
-		asset = create_asset(is_existing_asset=1, do_not_save=1)
+		asset = create_asset(asset_type="Existing Asset", do_not_save=1)
 		asset.cost_center = "Main - WP"
 
 		self.assertRaises(frappe.ValidationError, asset.submit)
@@ -1591,7 +2336,7 @@ class TestDepreciationBasics(AssetSetup):
 	def test_manual_depreciation_for_existing_asset(self):
 		asset = create_asset(
 			item_code="Macbook Pro",
-			is_existing_asset=1,
+			asset_type="Existing Asset",
 			purchase_date="2020-01-30",
 			available_for_use_date="2020-01-30",
 			submit=1,
@@ -1717,7 +2462,7 @@ class TestDepreciationBasics(AssetSetup):
 		# Create composite asset
 		wip_composite_asset = create_asset(
 			asset_name="Asset Capitalization WIP Composite Asset for Split",
-			is_composite_asset=1,
+			asset_type="Composite Asset",
 			warehouse="Stores - TCP1",
 			company=company,
 			asset_quantity=2,  # Set quantity > 1 to allow splitting
@@ -1768,30 +2513,8 @@ def get_gl_entries(doctype, docname):
 	)
 
 
-def create_asset_data():
-	if not frappe.db.exists("Asset Category", "Computers"):
-		create_asset_category()
-
-	if not frappe.db.exists("Item", "Macbook Pro"):
-		create_fixed_asset_item()
-
-	if not frappe.db.exists("Location", "Test Location"):
-		frappe.get_doc({"doctype": "Location", "location_name": "Test Location"}).insert()
-
-	if not frappe.db.exists("Finance Book", "Test Finance Book 1"):
-		frappe.get_doc({"doctype": "Finance Book", "finance_book_name": "Test Finance Book 1"}).insert()
-
-	if not frappe.db.exists("Finance Book", "Test Finance Book 2"):
-		frappe.get_doc({"doctype": "Finance Book", "finance_book_name": "Test Finance Book 2"}).insert()
-
-	if not frappe.db.exists("Finance Book", "Test Finance Book 3"):
-		frappe.get_doc({"doctype": "Finance Book", "finance_book_name": "Test Finance Book 3"}).insert()
-
-
 def create_asset(**args):
 	args = frappe._dict(args)
-
-	create_asset_data()
 
 	asset = frappe.get_doc(
 		{
@@ -1811,9 +2534,7 @@ def create_asset(**args):
 			"available_for_use_date": args.available_for_use_date or "2020-06-06",
 			"location": args.location or "Test Location",
 			"asset_owner": args.asset_owner or "Company",
-			"is_existing_asset": args.is_existing_asset or 1,
-			"is_composite_asset": args.is_composite_asset or 0,
-			"is_composite_component": args.is_composite_component or 0,
+			"asset_type": args.asset_type or "Existing Asset",
 			"asset_quantity": args.get("asset_quantity") or 1,
 			"depr_entry_posting_status": args.depr_entry_posting_status or "",
 		}
@@ -1828,6 +2549,7 @@ def create_asset(**args):
 				"frequency_of_depreciation": args.frequency_of_depreciation or 12,
 				"total_number_of_depreciations": args.total_number_of_depreciations or 5,
 				"expected_value_after_useful_life": args.expected_value_after_useful_life or 0,
+				"salvage_value_percentage": args.salvage_value_percentage or 0,
 				"depreciation_start_date": args.depreciation_start_date,
 				"daily_prorata_based": args.daily_prorata_based or 0,
 				"shift_based": args.shift_based or 0,
@@ -1835,7 +2557,7 @@ def create_asset(**args):
 			},
 		)
 
-	if asset.is_composite_asset:
+	if asset.asset_type == "Composite Asset":
 		asset.net_purchase_amount = 0
 		asset.purchase_amount = 0
 
@@ -1849,6 +2571,44 @@ def create_asset(**args):
 		asset.submit()
 
 	return asset
+
+
+def set_mandatory_dimension_default_for_other_company():
+	"""Make Department mandatory for P&L in _Test Company 1 with a default that belongs to it."""
+	department = frappe.get_doc(
+		{
+			"doctype": "Department",
+			"department_name": "_Test Asset Dimension Department",
+			"company": "_Test Company 1",
+			"parent_department": "All Departments",
+		}
+	).insert(ignore_if_duplicate=True)
+
+	dimension = frappe.get_doc("Accounting Dimension", "Department")
+	dimension.append(
+		"dimension_defaults",
+		{
+			"company": "_Test Company 1",
+			"reference_document": "Department",
+			"default_dimension": department.name,
+			"mandatory_for_pl": 1,
+		},
+	)
+	dimension.save()
+	return department.name
+
+
+def create_monthly_depreciating_asset(**args):
+	return create_asset(
+		calculate_depreciation=1,
+		purchase_date="2025-04-01",
+		available_for_use_date="2025-04-01",
+		depreciation_start_date="2025-04-30",
+		total_number_of_depreciations=12,
+		frequency_of_depreciation=1,
+		submit=1,
+		**args,
+	)
 
 
 def create_asset_category(enable_cwip=1):
@@ -1880,7 +2640,7 @@ def create_asset_category(enable_cwip=1):
 	asset_category.insert()
 
 
-def create_fixed_asset_item(item_code=None, auto_create_assets=1, is_grouped_asset=0):
+def create_fixed_asset_item(item_code=None, auto_create_assets=1, is_grouped_asset=0, asset_category=None):
 	meta = frappe.get_meta("Asset")
 	naming_series = meta.get_field("naming_series").options.splitlines()[0] or "ACC-ASS-.YYYY.-"
 	try:
@@ -1890,7 +2650,7 @@ def create_fixed_asset_item(item_code=None, auto_create_assets=1, is_grouped_ass
 				"item_code": item_code or "Macbook Pro",
 				"item_name": "Macbook Pro",
 				"description": "Macbook Pro Retina Display",
-				"asset_category": "Computers",
+				"asset_category": asset_category or "Computers",
 				"item_group": "All Item Groups",
 				"stock_uom": "Nos",
 				"is_stock_item": 0,

@@ -3,6 +3,7 @@
  "autoname": "field:employee_group_name",
  "creation": "2018-11-19 12:33:31.351364",
  "doctype": "DocType",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/employee-group",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
@@ -31,8 +32,9 @@
    "options": "Employee Group Table"
   }
  ],
+ "icon": "users",
  "links": [],
- "modified": "2024-03-27 13:09:39.303885",
+ "modified": "2026-03-26 17:22:45.737955",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Employee Group",
@@ -49,9 +51,26 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR User",
+   "write": 1
   }
  ],
  "quick_entry": 1,
+ "row_format": "Dynamic",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],

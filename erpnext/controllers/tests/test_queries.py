@@ -7,6 +7,11 @@ from frappe.core.doctype.user_permission.user_permission import add_user_permiss
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 from erpnext.controllers import queries
+from erpnext.stock.doctype.item.test_item import make_item
+from erpnext.subcontracting.doctype.subcontracting_order.test_subcontracting_order import (
+	make_subcontracted_variant,
+)
+from erpnext.tests.permission_test_utils import as_user, make_company_fenced_user
 from erpnext.tests.utils import ERPNextTestSuite
 
 
@@ -14,19 +19,7 @@ def add_default_params(func, doctype):
 	return partial(func, doctype=doctype, txt="", searchfield="name", start=0, page_len=20, filters=None)
 
 
-EXTRA_TEST_RECORD_DEPENDENCIES = ["Item", "BOM", "Account"]
-
-
 class TestQueries(ERPNextTestSuite):
-	# All tests are based on self.globalTestRecords[doctype]
-
-	@classmethod
-	def setUpClass(cls):
-		super().setUpClass()
-		cls.make_employees()
-		cls.make_leads()
-		cls.make_projects()
-
 	def assert_nested_in(self, item, container):
 		self.assertIn(item, [vals for tuples in container for vals in tuples])
 
@@ -61,6 +54,42 @@ class TestQueries(ERPNextTestSuite):
 		query(txt="", filters={"supplier": None})
 		query(txt="", filters={"supplier": ""})
 
+	def test_item_query_with_percent_in_permitted_company(self):
+		company = frappe.get_doc(
+			{
+				"doctype": "Company",
+				"company_name": "_Test 100% Company",
+				"abbr": "_T100",
+				"default_currency": "INR",
+				"country": "India",
+			}
+		).insert()
+		item = make_item(
+			properties={
+				"is_stock_item": 0,
+				"restrict_to_companies": 1,
+				"allowed_companies": [{"company": company.name}],
+			}
+		)
+		user = make_company_fenced_user("item-query-percent@example.com", ["Stock User"], company.name)
+
+		with as_user(user):
+			items = queries.item_query("Item", item.name, "name", 0, 20, {})
+
+		self.assertIn(item.name, [row[0] for row in items])
+
+	def test_subcontracted_item_query(self):
+		variant, _ = make_subcontracted_variant()
+		item_without_bom = make_item(
+			"Subcontracted Item Without BOM", {"is_stock_item": 1, "is_sub_contracted_item": 1}
+		)
+		query = add_default_params(queries.subcontracted_item_query, "Item")
+
+		items = query(txt="Subcontracted", page_len=100)
+
+		self.assert_nested_in(variant.name, items)
+		self.assertNotIn(item_without_bom.name, [row[0] for row in items])
+
 	def test_bom_qury(self):
 		query = add_default_params(queries.bom, "BOM")
 
@@ -93,10 +122,32 @@ class TestQueries(ERPNextTestSuite):
 		wh = query(filters=[["Bin", "item_code", "=", "_Test Item"]])
 		self.assertGreaterEqual(len(wh), 1)
 
+	def test_get_delivery_notes_to_be_billed_skips_fully_returned(self):
+		from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_return
+		from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
+
+		returned_dn = create_delivery_note(qty=2)
+		dn_return = make_sales_return(returned_dn.name)
+		dn_return.submit()
+		# a new doc misses the is_return part of status_updater, so update the original DN explicitly
+		frappe.get_doc("Delivery Note", dn_return.name).update_prevdoc_status()
+		returned_dn.reload()
+		self.assertEqual(returned_dn.status, "Return Issued")
+
+		open_dn = create_delivery_note(qty=2)
+
+		query = add_default_params(queries.get_delivery_notes_to_be_billed, "Delivery Note")
+		result = query(filters={"name": ["in", [returned_dn.name, open_dn.name]]})
+
+		self.assert_nested_in(open_dn.name, result)
+		self.assertNotIn(returned_dn.name, [row[0] for row in result])
+
 	def test_default_uoms(self):
 		self.assertGreaterEqual(frappe.db.count("UOM", {"enabled": 1}), 10)
 
 	def test_employee_query_with_user_permissions(self):
+		employee = frappe.db.get_all("Employee", {"first_name": "_Test Employee"})[0].name
+
 		# party field is a dynamic link field in Payment Entry doctype with ignore_user_permissions=0
 		ps = make_property_setter(
 			doctype="Payment Entry",
@@ -111,7 +162,7 @@ class TestQueries(ERPNextTestSuite):
 			{
 				"user": user.name,
 				"doctype": "Employee",
-				"docname": self.employees[0].name,
+				"docname": employee,
 				"is_default": 1,
 				"apply_to_all_doctypes": 1,
 				"applicable_doctypes": [],
@@ -119,7 +170,7 @@ class TestQueries(ERPNextTestSuite):
 			}
 		)
 
-		with self.set_user(user.name):
+		with ERPNextTestSuite.set_user(self, user.name):
 			params = {
 				"doctype": "Employee",
 				"txt": "",

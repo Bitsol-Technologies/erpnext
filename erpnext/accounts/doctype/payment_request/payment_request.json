@@ -2,7 +2,9 @@
  "actions": [],
  "autoname": "naming_series:",
  "creation": "2015-12-15 22:23:24.745065",
+ "description": "Ask a customer to pay, by email with a payment link.",
  "doctype": "DocType",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/payment-request",
  "engine": "InnoDB",
  "field_order": [
   "payment_request_type",
@@ -19,6 +21,8 @@
   "column_break_4",
   "reference_doctype",
   "reference_name",
+  "payment_reference_section",
+  "payment_reference",
   "transaction_details",
   "grand_total",
   "currency",
@@ -157,6 +161,7 @@
    "label": "Amount",
    "non_negative": 1,
    "options": "currency",
+   "read_only_depends_on": "eval:doc.payment_reference.length>0",
    "reqd": 1
   },
   {
@@ -180,7 +185,7 @@
    "depends_on": "eval:doc.is_a_subscription",
    "fieldname": "subscription_section",
    "fieldtype": "Section Break",
-   "label": "Subscription Section"
+   "label": "Subscription"
   },
   {
    "fieldname": "subscription_plans",
@@ -457,14 +462,26 @@
    "fieldname": "phone_number",
    "fieldtype": "Data",
    "label": "Phone Number"
+  },
+  {
+   "fieldname": "payment_reference_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "payment_reference",
+   "fieldtype": "Table",
+   "label": "Payment Reference",
+   "options": "Payment Reference",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
+ "icon": "hand-coins",
  "in_create": 1,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-08-29 11:52:48.555415",
+ "modified": "2026-02-27 19:11:03.308896",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Payment Request",

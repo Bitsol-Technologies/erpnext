@@ -2,29 +2,41 @@
 # See license.txt
 
 import frappe
-from frappe.tests import IntegrationTestCase
 from frappe.utils import today
 
 from erpnext.accounts.doctype.payment_entry.test_payment_entry import create_payment_entry
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+from erpnext.accounts.doctype.unreconcile_payment.unreconcile_payment import (
+	create_unreconcile_doc_for_selection,
+)
 from erpnext.accounts.party import get_party_account
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
 from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
 from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
+from erpnext.tests.permission_test_utils import (
+	MISSING_NAME,
+	as_user,
+	assert_not_found,
+	assert_refused,
+	assert_refused_for_names,
+	assert_refused_without,
+	make_company_fenced_user,
+	make_fenced_user,
+)
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestUnreconcilePayment(AccountsTestMixin, IntegrationTestCase):
+class TestUnreconcilePayment(ERPNextTestSuite, AccountsTestMixin):
 	def setUp(self):
-		self.create_company()
-		self.create_customer()
-		self.create_supplier()
-		self.create_usd_receivable_account()
-		self.create_item()
-		self.clear_old_entries()
-
-	def tearDown(self):
-		frappe.db.rollback()
+		self.company = "_Test Company"
+		self.customer = "_Test Customer"
+		self.supplier = "_Test Supplier"
+		self.item = "_Test Item"
+		self.debit_to = "Debtors - _TC"
+		self.cost_center = "Main - _TC"
+		self.cash = "Cash - _TC"
+		self.debtors_usd = "_Test Receivable USD - _TC"
 
 	def create_sales_invoice(self, do_not_submit=False):
 		si = create_sales_invoice(
@@ -375,7 +387,6 @@ class TestUnreconcilePayment(AccountsTestMixin, IntegrationTestCase):
 		self.assertEqual(so.advance_paid, 0)
 
 	def test_06_unreconcile_advance_from_payment_entry(self):
-		self.enable_advance_as_liability()
 		so1 = self.create_sales_order()
 		so2 = self.create_sales_order()
 
@@ -426,7 +437,11 @@ class TestUnreconcilePayment(AccountsTestMixin, IntegrationTestCase):
 		self.disable_advance_as_liability()
 
 	def test_07_adv_from_so_to_invoice(self):
-		self.enable_advance_as_liability()
+		frappe.db.set_value("Company", self.company, "book_advance_payments_in_separate_party_account", True)
+		frappe.db.set_value(
+			"Company", self.company, "default_advance_received_account", "Advance Received - _TC"
+		)
+
 		so = self.create_sales_order()
 		pe = self.create_payment_entry()
 		pe.paid_amount = 1000
@@ -487,6 +502,64 @@ class TestUnreconcilePayment(AccountsTestMixin, IntegrationTestCase):
 
 		self.disable_advance_as_liability()
 
+	def test_08_adv_from_so_to_invoice_without_advance_account(self):
+		so = self.create_sales_order()
+		pe = self.create_payment_entry()
+		pe.paid_amount = 1000
+		pe.append(
+			"references",
+			{"reference_doctype": so.doctype, "reference_name": so.name, "allocated_amount": 1000},
+		)
+		pe.save().submit()
+
+		so.reload()
+		self.assertEqual(so.advance_paid, 1000)
+
+		si = make_sales_invoice(so.name)
+		si.insert().submit()
+
+		pr = frappe.get_doc(
+			{
+				"doctype": "Payment Reconciliation",
+				"company": self.company,
+				"party_type": "Customer",
+				"party": so.customer,
+				"receivable_payable_account": get_party_account("Customer", so.customer, so.company),
+			}
+		)
+		pr.get_unreconciled_entries()
+		invoices = [x.as_dict() for x in pr.get("invoices")]
+		payments = [x.as_dict() for x in pr.get("payments")]
+		pr.allocate_entries(frappe._dict({"invoices": invoices, "payments": payments}))
+		pr.reconcile()
+
+		so.reload()
+		self.assertEqual(so.advance_paid, 1000)
+
+		unreconcile = frappe.get_doc(
+			{
+				"doctype": "Unreconcile Payment",
+				"company": self.company,
+				"voucher_type": pe.doctype,
+				"voucher_no": pe.name,
+			}
+		)
+		unreconcile.add_references()
+		unreconcile.allocations = [x for x in unreconcile.allocations if x.reference_name == si.name]
+		unreconcile.save().submit()
+
+		pe.reload()
+		so.reload()
+		self.assertEqual(len(pe.references), 0)
+		self.assertEqual(pe.unallocated_amount, 1000)
+		self.assertEqual(so.advance_paid, 0)
+		self.assertFalse(
+			frappe.db.exists(
+				"Advance Payment Ledger Entry",
+				{"voucher_no": pe.name, "against_voucher_no": so.name, "delinked": 0},
+			)
+		)
+
 	def test_unreconcile_advance_from_journal_entry(self):
 		po = create_purchase_order(
 			company=self.company,
@@ -539,3 +612,114 @@ class TestUnreconcilePayment(AccountsTestMixin, IntegrationTestCase):
 
 		po.reload()
 		self.assertEqual(po.advance_paid, 0)
+
+	def test_reference_count_needs_voucher_read(self):
+		from erpnext.accounts.doctype.unreconcile_payment.unreconcile_payment import doc_has_references
+
+		si = self.create_sales_invoice()
+		pe = self.create_payment_entry()
+		pe.append(
+			"references",
+			{"reference_doctype": si.doctype, "reference_name": si.name, "allocated_amount": 100},
+		)
+		pe.save().submit()
+
+		inside = make_company_fenced_user("unrec-count@example.com", ["Accounts User"], self.company)
+		with as_user(inside):
+			self.assertEqual(doc_has_references(si.doctype, si.name), 1)
+			self.assertRaises(frappe.ValidationError, doc_has_references, si.doctype, "")
+
+		outside = make_company_fenced_user("unrec-count@example.com", ["Accounts User"], "_Test Company 1")
+		with as_user(outside):
+			self.assertRaises(frappe.PermissionError, doc_has_references, si.doctype, si.name)
+
+	def create_allocated_payment(self, cost_center):
+		si = self.create_sales_invoice()
+		pe = self.create_payment_entry()
+		pe.cost_center = cost_center
+		pe.append(
+			"references",
+			{"reference_doctype": si.doctype, "reference_name": si.name, "allocated_amount": 100},
+		)
+		pe.save().submit()
+		return si, pe
+
+	def get_selection(self, si, voucher_no):
+		return {
+			"company": self.company,
+			"voucher_type": "Payment Entry",
+			"voucher_no": voucher_no,
+			"against_voucher_type": si.doctype,
+			"against_voucher_no": si.name,
+		}
+
+	def test_create_unreconcile_doc_for_selection_respects_user_permission(self):
+		si_inside, pe_inside = self.create_allocated_payment("Main - _TC")
+		si_unfenced, pe_unfenced = self.create_allocated_payment("_Test Cost Center 2 - _TC")
+		si_outside, pe_outside = self.create_allocated_payment("_Test Cost Center 2 - _TC")
+		user = make_fenced_user("unreconcile-payment-user@example.com", ["Accounts User"])
+
+		with as_user(user):
+			create_unreconcile_doc_for_selection([self.get_selection(si_unfenced, pe_unfenced.name)])
+		si_unfenced.reload()
+		self.assertEqual(si_unfenced.outstanding_amount, 100)
+
+		make_fenced_user(user, ["Accounts User"], [("Cost Center", "Main - _TC")])
+		hidden = ["_Test Cost Center 2 - _TC"]
+		with as_user(user):
+			create_unreconcile_doc_for_selection(
+				frappe.as_json([self.get_selection(si_inside, pe_inside.name)])
+			)
+			si_inside.reload()
+			self.assertEqual(si_inside.outstanding_amount, 100)
+
+			assert_refused_without(
+				self,
+				hidden,
+				create_unreconcile_doc_for_selection,
+				[self.get_selection(si_outside, pe_outside.name)],
+			)
+			assert_not_found(
+				self,
+				create_unreconcile_doc_for_selection,
+				[self.get_selection(si_outside, [pe_outside.name])],
+			)
+			for voucher_no in ("", None):
+				assert_refused(
+					self,
+					create_unreconcile_doc_for_selection,
+					[self.get_selection(si_outside, voucher_no)],
+				)
+			for voucher_no in (0, False):
+				assert_not_found(
+					self,
+					create_unreconcile_doc_for_selection,
+					[self.get_selection(si_outside, voucher_no)],
+				)
+
+			def build_kwargs(voucher_no):
+				return {"selections": [self.get_selection(si_outside, voucher_no)]}
+
+			assert_refused_for_names(
+				self, create_unreconcile_doc_for_selection, build_kwargs, [], caller_supplied=True
+			)
+			assert_refused_without(
+				self,
+				hidden,
+				create_unreconcile_doc_for_selection,
+				[
+					self.get_selection(si_inside, pe_inside.name),
+					self.get_selection(si_outside, pe_outside.name),
+				],
+			)
+			assert_not_found(
+				self,
+				create_unreconcile_doc_for_selection,
+				[
+					self.get_selection(si_inside, pe_inside.name),
+					self.get_selection(si_outside, MISSING_NAME),
+				],
+			)
+
+		si_outside.reload()
+		self.assertEqual(si_outside.outstanding_amount, 0)

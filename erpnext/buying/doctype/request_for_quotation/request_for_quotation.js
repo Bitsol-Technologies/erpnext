@@ -28,6 +28,7 @@ frappe.ui.form.on("Request for Quotation", {
 				is_group: 0,
 			},
 		}));
+		frm.set_query("supplier", "suppliers", () => erpnext.queries.supplier(frm.doc));
 
 		frm.set_indicator_formatter("item_code", function (doc) {
 			return !doc.qty && frm.doc.has_unit_price_items ? "yellow" : "";
@@ -100,6 +101,7 @@ frappe.ui.form.on("Request for Quotation", {
 								fieldname: "print_format",
 								options: "Print Format",
 								placeholder: "Standard",
+								default: frappe.get_meta("Request for Quotation").default_print_format || "",
 								get_query: () => {
 									return {
 										filters: {
@@ -165,14 +167,10 @@ frappe.ui.form.on("Request for Quotation", {
 	},
 
 	show_supplier_quotation_comparison(frm) {
-		const today = new Date();
-		const oneMonthAgo = new Date(today);
-		oneMonthAgo.setMonth(today.getMonth() - 1);
-
 		frappe.route_options = {
 			company: frm.doc.company,
-			from_date: moment(oneMonthAgo).format("YYYY-MM-DD"),
-			to_date: moment(today).format("YYYY-MM-DD"),
+			from_date: moment(frm.doc.transaction_date).format("YYYY-MM-DD"),
+			to_date: moment(new Date()).format("YYYY-MM-DD"),
 			request_for_quotation: frm.doc.name,
 		};
 		frappe.set_route("query-report", "Supplier Quotation Comparison");
@@ -250,10 +248,17 @@ frappe.ui.form.on("Request for Quotation", {
 					"subject",
 				])
 				.then((r) => {
-					frm.set_value(
-						"message_for_supplier",
-						r.message.use_html ? r.message.response_html : r.message.response
-					);
+					if (r.message.use_html) {
+						frm.set_value({
+							mfs_html: r.message.response_html,
+							use_html: 1,
+						});
+					} else {
+						frm.set_value({
+							message_for_supplier: r.message.response,
+							use_html: 0,
+						});
+					}
 					frm.set_value("subject", r.message.subject);
 				});
 		}
@@ -335,6 +340,7 @@ frappe.ui.form.on("Request for Quotation Supplier", {
 			args: {
 				party: d.supplier,
 				party_type: "Supplier",
+				company: frm.doc.company,
 			},
 			callback: function (r) {
 				if (r.message) {

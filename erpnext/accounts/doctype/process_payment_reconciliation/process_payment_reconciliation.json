@@ -3,6 +3,7 @@
  "autoname": "format:ACC-PPR-{#####}",
  "creation": "2023-03-30 21:28:39.793927",
  "default_view": "List",
+ "description": "Matches payments to invoices in the background.",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -151,13 +152,14 @@
    "label": "Default Advance Account",
    "mandatory_depends_on": "doc.party_type",
    "options": "Account",
-   "reqd": 1
+   "reqd": 0
   }
  ],
+ "icon": "scale",
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-01-08 08:22:14.798085",
+ "modified": "2026-05-16 11:43:12.758685",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Process Payment Reconciliation",

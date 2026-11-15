@@ -3,12 +3,13 @@
  "allow_import": 1,
  "autoname": "naming_series:",
  "creation": "2013-05-21 16:16:39",
+ "description": "A bill from a supplier for what you bought.",
  "doctype": "DocType",
  "document_type": "Document",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/purchase-invoice",
  "email_append_to": 1,
  "engine": "InnoDB",
  "field_order": [
-  "title",
   "naming_series",
   "supplier",
   "supplier_name",
@@ -85,20 +86,24 @@
   "taxes_and_charges_added",
   "taxes_and_charges_deducted",
   "total_taxes_and_charges",
-  "section_break_49",
+  "totals_section",
+  "use_company_roundoff_cost_center",
+  "grand_total",
+  "in_words",
+  "column_break8",
+  "disable_rounded_total",
+  "rounding_adjustment",
+  "rounded_total",
+  "base_totals_section",
   "base_grand_total",
+  "base_in_words",
+  "column_break_hcca",
   "base_rounding_adjustment",
   "base_rounded_total",
-  "base_in_words",
-  "column_break8",
-  "grand_total",
-  "rounding_adjustment",
-  "use_company_roundoff_cost_center",
-  "rounded_total",
-  "in_words",
+  "section_break_ttrv",
   "total_advance",
+  "column_break_peap",
   "outstanding_amount",
-  "disable_rounded_total",
   "section_tax_withholding_entry",
   "tax_withholding_group",
   "ignore_tax_withholding_threshold",
@@ -177,11 +182,12 @@
   "unrealized_profit_loss_account",
   "subscription_section",
   "subscription",
-  "auto_repeat",
-  "update_auto_repeat_reference",
   "column_break_114",
   "from_date",
   "to_date",
+  "automation_section",
+  "auto_repeat",
+  "update_auto_repeat_reference",
   "printing_settings",
   "letter_head",
   "group_same_items",
@@ -195,6 +201,7 @@
   "hold_comment",
   "additional_info_section",
   "is_internal_supplier",
+  "title",
   "represents_company",
   "supplier_group",
   "sender",
@@ -205,16 +212,6 @@
   "connections_tab"
  ],
  "fields": [
-  {
-   "allow_on_submit": 1,
-   "default": "{supplier_name}",
-   "fieldname": "title",
-   "fieldtype": "Data",
-   "hidden": 1,
-   "label": "Title",
-   "no_copy": 1,
-   "print_hide": 1
-  },
   {
    "fieldname": "naming_series",
    "fieldtype": "Select",
@@ -262,6 +259,8 @@
   {
    "fieldname": "due_date",
    "fieldtype": "Date",
+   "in_import_template": 1,
+   "in_list_view": 1,
    "label": "Due Date",
    "oldfieldname": "due_date",
    "oldfieldtype": "Date"
@@ -315,7 +314,8 @@
    "fieldname": "posting_date",
    "fieldtype": "Date",
    "in_list_view": 1,
-   "label": "Date",
+   "in_standard_filter": 1,
+   "label": "Posting Date",
    "oldfieldname": "posting_date",
    "oldfieldtype": "Date",
    "print_hide": 1,
@@ -337,6 +337,7 @@
    "depends_on": "eval:doc.docstatus==0",
    "fieldname": "set_posting_time",
    "fieldtype": "Check",
+   "in_import_template": 1,
    "label": "Edit Posting Date and Time",
    "print_hide": 1
   },
@@ -355,6 +356,7 @@
   {
    "collapsible": 1,
    "collapsible_depends_on": "eval:doc.on_hold",
+   "depends_on": "eval:doc.on_hold",
    "fieldname": "sb_14",
    "fieldtype": "Section Break",
    "label": "Hold Invoice"
@@ -385,7 +387,7 @@
   },
   {
    "collapsible": 1,
-   "collapsible_depends_on": "bill_no",
+   "collapsible_depends_on": "posting_date",
    "fieldname": "supplier_invoice_details",
    "fieldtype": "Section Break",
    "label": "Supplier Invoice"
@@ -393,6 +395,10 @@
   {
    "fieldname": "bill_no",
    "fieldtype": "Data",
+   "in_global_search": 1,
+   "in_import_template": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Supplier Invoice No",
    "oldfieldname": "bill_no",
    "oldfieldtype": "Data",
@@ -406,6 +412,7 @@
   {
    "fieldname": "bill_date",
    "fieldtype": "Date",
+   "in_import_template": 1,
    "label": "Supplier Invoice Date",
    "no_copy": 1,
    "oldfieldname": "bill_date",
@@ -458,7 +465,6 @@
   {
    "fieldname": "contact_person",
    "fieldtype": "Link",
-   "in_global_search": 1,
    "label": "Contact Person",
    "options": "Contact",
    "print_hide": 1
@@ -504,6 +510,7 @@
   },
   {
    "collapsible": 1,
+   "collapsible_depends_on": "eval:doc.currency && doc.currency != erpnext.get_currency(doc.company)",
    "fieldname": "currency_and_price_list",
    "fieldtype": "Section Break",
    "label": "Currency and Price List",
@@ -516,7 +523,8 @@
    "oldfieldname": "currency",
    "oldfieldtype": "Select",
    "options": "Currency",
-   "print_hide": 1
+   "print_hide": 1,
+   "read_only_depends_on": "eval:doc.inter_company_invoice_reference"
   },
   {
    "fieldname": "conversion_rate",
@@ -606,10 +614,13 @@
   },
   {
    "default": "0",
+   "depends_on": "eval:doc.items.every((item) => !item.pr_detail)",
+   "description": "If checked, updates inventory; stock and accounting entries are created together. Leave unchecked if a Purchase Receipt is created separately.",
    "fieldname": "update_stock",
    "fieldtype": "Check",
    "label": "Update Stock",
-   "print_hide": 1
+   "print_hide": 1,
+   "show_description_on_click": 1
   },
   {
    "fieldname": "scan_barcode",
@@ -883,14 +894,9 @@
    "print_hide": 1
   },
   {
-   "fieldname": "section_break_49",
-   "fieldtype": "Section Break",
-   "label": "Totals"
-  },
-  {
    "fieldname": "base_grand_total",
    "fieldtype": "Currency",
-   "label": "Grand Total (Company Currency)",
+   "label": "Grand Total",
    "oldfieldname": "grand_total",
    "oldfieldtype": "Currency",
    "options": "Company:company:default_currency",
@@ -901,7 +907,7 @@
    "depends_on": "eval:!doc.disable_rounded_total",
    "fieldname": "base_rounding_adjustment",
    "fieldtype": "Currency",
-   "label": "Rounding Adjustment (Company Currency)",
+   "label": "Rounding Adjustment",
    "no_copy": 1,
    "options": "Company:company:default_currency",
    "print_hide": 1,
@@ -911,7 +917,7 @@
    "depends_on": "eval:!doc.disable_rounded_total",
    "fieldname": "base_rounded_total",
    "fieldtype": "Currency",
-   "label": "Rounded Total (Company Currency)",
+   "label": "Rounded Total",
    "no_copy": 1,
    "options": "Company:company:default_currency",
    "print_hide": 1,
@@ -920,7 +926,7 @@
   {
    "fieldname": "base_in_words",
    "fieldtype": "Data",
-   "label": "In Words (Company Currency)",
+   "label": "In Words",
    "length": 240,
    "oldfieldname": "in_words",
    "oldfieldtype": "Data",
@@ -1391,8 +1397,10 @@
    "fetch_from": "supplier.represents_company",
    "fieldname": "represents_company",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Represents Company",
-   "options": "Company"
+   "options": "Company",
+   "read_only": 1
   },
   {
    "depends_on": "eval:doc.update_stock && doc.is_internal_supplier",
@@ -1566,6 +1574,7 @@
    "fieldname": "use_transaction_date_exchange_rate",
    "fieldtype": "Check",
    "label": "Use Transaction Date Exchange Rate",
+   "no_copy": 1,
    "read_only": 1
   },
   {
@@ -1625,8 +1634,7 @@
    "hidden": 1,
    "label": "Item Wise Tax Details",
    "no_copy": 1,
-   "options": "Item Wise Tax Detail",
-   "print_hide": 1
+   "options": "Item Wise Tax Detail"
   },
   {
    "collapsible": 1,
@@ -1661,14 +1669,50 @@
    "fieldname": "override_tax_withholding_entries",
    "fieldtype": "Check",
    "label": "Edit Tax Withholding Entries"
+  },
+  {
+   "fieldname": "column_break_hcca",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_ttrv",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_peap",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "base_totals_section",
+   "fieldtype": "Section Break",
+   "label": "Totals (Company Currency)"
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break",
+   "label": "Totals"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "automation_section",
+   "fieldtype": "Section Break",
+   "label": "Automation"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "no_copy": 1,
+   "print_hide": 1
   }
  ],
  "grid_page_length": 50,
- "icon": "fa fa-file-text",
+ "icon": "receipt-text",
  "idx": 204,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-01-29 21:21:53.051193",
+ "modified": "2026-10-13 12:12:32.190935",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Purchase Invoice",
@@ -1721,6 +1765,18 @@
    "read": 1,
    "role": "Accounts Manager",
    "write": 1
+  },
+  {
+   "role": "Manufacturing Manager",
+   "select": 1
+  },
+  {
+   "role": "Quality Manager",
+   "select": 1
+  },
+  {
+   "role": "Stock Manager",
+   "select": 1
   }
  ],
  "row_format": "Dynamic",
@@ -1731,6 +1787,6 @@
  "sort_order": "DESC",
  "states": [],
  "timeline_field": "supplier",
- "title_field": "title",
+ "title_field": "supplier_name",
  "track_changes": 1
 }

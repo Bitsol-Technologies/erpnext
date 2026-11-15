@@ -1,7 +1,7 @@
 import datetime
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.core.doctype.user_permission.test_user_permission import create_user
 from frappe.utils import add_days, add_months, nowdate
 
 from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
@@ -10,20 +10,10 @@ from erpnext.selling.report.payment_terms_status_for_sales_order.payment_terms_s
 	execute,
 )
 from erpnext.stock.doctype.item.test_item import create_item
-
-EXTRA_TEST_RECORD_DEPENDENCIES = [
-	"Sales Order",
-	"Item",
-	"Sales Invoice",
-	"Payment Terms Template",
-	"Customer",
-]
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestPaymentTermsStatusForSalesOrder(IntegrationTestCase):
-	def tearDown(self):
-		frappe.db.rollback()
-
+class TestPaymentTermsStatusForSalesOrder(ERPNextTestSuite):
 	def create_payment_terms_template(self):
 		# create template for 50-50 payments
 		template = None
@@ -145,7 +135,7 @@ class TestPaymentTermsStatusForSalesOrder(IntegrationTestCase):
 			)
 			doc.insert()
 
-	@IntegrationTestCase.change_settings(
+	@ERPNextTestSuite.change_settings(
 		"Accounts Settings", allow_multi_currency_invoices_against_single_party_account=1
 	)
 	def test_02_alternate_currency(self):
@@ -410,3 +400,39 @@ class TestPaymentTermsStatusForSalesOrder(IntegrationTestCase):
 		# Only the first term should be pulled
 		self.assertEqual(len(data), 1)
 		self.assertEqual(data, expected_value)
+
+	def test_user_permission_on_company(self):
+		self.create_payment_terms_template()
+		item = create_item(item_code="_Test Excavator 1", is_stock_item=0)
+		orders = {}
+		for company, warehouse, conversion_rate in (
+			("_Test Company", "_Test Warehouse - _TC", 1),
+			("_Test Company 1", "_Test Warehouse 2 - _TC1", 0.02),
+		):
+			so = make_sales_order(
+				company=company,
+				customer="_Test Customer 1",
+				transaction_date="2021-06-15",
+				warehouse=warehouse,
+				item=item.item_code,
+				qty=1,
+				rate=1000,
+				do_not_save=True,
+			)
+			so.conversion_rate = conversion_rate
+			so.plc_conversion_rate = conversion_rate
+			so.payment_terms_template = self.template.name
+			so.save()
+			so.submit()
+			orders[company] = so.name
+
+		user = create_user("test_payment_terms_status_user@example.com", "Sales User")
+		frappe.permissions.add_user_permission("Company", "_Test Company", user.name)
+
+		filters = frappe._dict({"period_start_date": "2021-06-01", "period_end_date": "2021-06-30"})
+		with self.set_user(user.name):
+			_, own, _, _ = execute(filters.copy().update({"company": "_Test Company"}))
+			_, other, _, _ = execute(filters.copy().update({"company": "_Test Company 1"}))
+
+		self.assertIn(orders["_Test Company"], [row.name for row in own])
+		self.assertNotIn(orders["_Test Company 1"], [row.name for row in other])

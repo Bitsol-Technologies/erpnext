@@ -4,8 +4,10 @@
  "allow_rename": 1,
  "autoname": "field:uom_name",
  "creation": "2013-01-10 16:34:24",
+ "description": "A unit you measure items in, like kg or box.",
  "doctype": "DocType",
  "document_type": "Setup",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/uom",
  "engine": "InnoDB",
  "field_order": [
   "uom_name",
@@ -13,6 +15,7 @@
   "common_code",
   "description",
   "column_break_obth",
+  "category",
   "enabled",
   "must_be_whole_number"
  ],
@@ -32,6 +35,7 @@
    "description": "Check this to disallow fractions. (for Nos)",
    "fieldname": "must_be_whole_number",
    "fieldtype": "Check",
+   "in_import_template": 1,
    "label": "Must be Whole Number"
   },
   {
@@ -60,12 +64,21 @@
   {
    "fieldname": "column_break_obth",
    "fieldtype": "Column Break"
+  },
+  {
+   "allow_in_quick_entry": 1,
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "UOM Category"
   }
  ],
- "icon": "fa fa-compass",
+ "icon": "ruler",
  "idx": 1,
  "links": [],
- "modified": "2025-08-21 18:59:27.900209",
+ "modified": "2026-09-16 11:42:07.000000",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "UOM",
@@ -116,6 +129,10 @@
    "report": 1,
    "role": "Sales Manager",
    "share": 1
+  },
+  {
+   "role": "Desk User",
+   "select": 1
   }
  ],
  "quick_entry": 1,

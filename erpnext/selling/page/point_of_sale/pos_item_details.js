@@ -83,6 +83,17 @@ erpnext.PointOfSale.ItemDetails = class {
 			this.item_row = item;
 			this.currency = this.events.get_frm().doc.currency;
 
+			if (item.has_serial_no == null || item.has_batch_no == null) {
+				const r = await frappe.db.get_value("Item", item.item_code, [
+					"has_serial_no",
+					"has_batch_no",
+				]);
+				if (r && r.message) {
+					item.has_serial_no = r.message.has_serial_no;
+					item.has_batch_no = r.message.has_batch_no;
+				}
+			}
+
 			this.current_item = item;
 
 			this.render_dom(item);
@@ -129,24 +140,26 @@ erpnext.PointOfSale.ItemDetails = class {
 			return ``;
 		}
 
-		this.$item_name.html(item_name);
+		this.$item_name.html(frappe.utils.escape_html(item_name));
 		this.$item_description.html(get_description_html());
 		this.$item_price.html(format_currency(price_list_rate, this.currency));
 		if (!this.hide_images && image) {
 			this.$item_image.html(
 				`<img
 					onerror="cur_pos.item_details.handle_broken_image(this)"
-					class="h-full" src="${image}"
-					alt="${frappe.get_abbr(item_name)}"
+					class="h-full" src="${frappe.utils.escape_html(image)}"
+					alt="${frappe.utils.escape_html(frappe.get_abbr(item_name))}"
 					style="object-fit: cover;">`
 			);
 		} else {
-			this.$item_image.html(`<div class="item-abbr">${frappe.get_abbr(item_name)}</div>`);
+			this.$item_image.html(
+				`<div class="item-abbr">${frappe.utils.escape_html(frappe.get_abbr(item_name))}</div>`
+			);
 		}
 	}
 
 	handle_broken_image($img) {
-		const item_abbr = $($img).attr("alt");
+		const item_abbr = frappe.utils.escape_html($($img).attr("alt"));
 		$($img).replaceWith(`<div class="item-abbr">${item_abbr}</div>`);
 	}
 
@@ -192,6 +205,30 @@ erpnext.PointOfSale.ItemDetails = class {
 		this.make_auto_serial_selection_btn(item);
 
 		this.bind_custom_control_change_event();
+		this.make_batch_selection_btn(item);
+	}
+
+	make_batch_selection_btn(item) {
+		if (!item.has_batch_no || this.events.get_frm().doc.is_return) return;
+
+		$('<button type="button" class="btn btn-sm btn-secondary add-batch-btn"></button>')
+			.text(__("Add Another Batch"))
+			.appendTo(this.$form_container)
+			.on("click", () => {
+				frappe.prompt(
+					{
+						fieldname: "batch_no",
+						fieldtype: "Link",
+						label: __("Batch"),
+						options: "Batch",
+						reqd: 1,
+						get_query: () => this.batch_no_control.df.get_query(),
+					},
+					({ batch_no }) => this.events.add_batch_item(item, batch_no),
+					__("Add Another Batch"),
+					__("Add")
+				);
+			});
 	}
 
 	get_form_fields(item) {

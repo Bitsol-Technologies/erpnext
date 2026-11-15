@@ -1,20 +1,39 @@
 # Copyright (c) 2025, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 
-# import frappe
-from frappe.tests import IntegrationTestCase
+import frappe
 
-# On IntegrationTestCase, the doctype test records and all
-# link-field test record dependencies are recursively loaded
-# Use these module variables to add/remove to/from that list
-EXTRA_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
-IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class IntegrationTestWorkstationOperatingComponent(IntegrationTestCase):
-	"""
-	Integration tests for WorkstationOperatingComponent.
-	Use this class for testing interactions between multiple components.
-	"""
+class TestWorkstationOperatingComponent(ERPNextTestSuite):
+	def test_expense_account_validated(self):
+		for account in ("Expenses - _TC", "Debtors - _TC", "Sales - _TC", "Cost of Goods Sold - _TC1"):
+			component = make_component("_Test Component Bad Account", [("_Test Company", account)])
+			self.assertRaises(frappe.ValidationError, component.insert)
 
-	pass
+		component = make_component(
+			"_Test Component Good Account", [("_Test Company", "Cost of Goods Sold - _TC")]
+		)
+		component.insert()
+		self.assertEqual(component.accounts[0].expense_account, "Cost of Goods Sold - _TC")
+
+	def test_one_account_per_company(self):
+		component = make_component(
+			"_Test Component Two Accounts",
+			[
+				("_Test Company", "Cost of Goods Sold - _TC"),
+				("_Test Company", "Administrative Expenses - _TC"),
+			],
+		)
+		self.assertRaises(frappe.ValidationError, component.insert)
+
+
+def make_component(name, accounts):
+	return frappe.get_doc(
+		{
+			"doctype": "Workstation Operating Component",
+			"component_name": name,
+			"accounts": [{"company": company, "expense_account": account} for company, account in accounts],
+		}
+	)

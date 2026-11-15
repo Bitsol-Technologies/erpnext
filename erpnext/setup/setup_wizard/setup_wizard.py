@@ -4,79 +4,87 @@
 
 import frappe
 from frappe import _
+from frappe.utils.telemetry import capture
 
-from erpnext.setup.demo import setup_demo_data
 from erpnext.setup.setup_wizard.operations import install_fixtures as fixtures
 
 
-def get_setup_stages(args=None):
-	if frappe.db.sql("select name from tabCompany"):
-		stages = [
-			{
-				"status": _("Wrapping up"),
-				"fail_msg": _("Failed to login"),
-				"tasks": [{"fn": fin, "args": args, "fail_msg": _("Failed to login")}],
-			}
-		]
-	else:
-		stages = [
-			{
-				"status": _("Installing presets"),
-				"fail_msg": _("Failed to install presets"),
-				"tasks": [{"fn": stage_fixtures, "args": args, "fail_msg": _("Failed to install presets")}],
-			},
-			{
-				"status": _("Setting up company"),
-				"fail_msg": _("Failed to setup company"),
-				"tasks": [{"fn": setup_company, "args": args, "fail_msg": _("Failed to setup company")}],
-			},
-			{
-				"status": _("Setting defaults"),
-				"fail_msg": "Failed to set defaults",
-				"tasks": [
-					{"fn": setup_defaults, "args": args, "fail_msg": _("Failed to setup defaults")},
-				],
-			},
-			{
-				"status": _("Wrapping up"),
-				"fail_msg": _("Failed to login"),
-				"tasks": [{"fn": fin, "args": args, "fail_msg": _("Failed to login")}],
-			},
-		]
+def get_setup_stages(args=None):  # nosemgrep
+	stages = [
+		{
+			"status": _("Setting up the basics"),
+			"fail_msg": _("We couldn't set up the basics"),
+			"tasks": [{"fn": stage_fixtures, "args": args, "fail_msg": _("We couldn't set up the basics")}],
+		},
+		{
+			"status": _("Creating your company"),
+			"fail_msg": _("We couldn't create your company"),
+			"tasks": [{"fn": setup_company, "args": args, "fail_msg": _("We couldn't create your company")}],
+		},
+		{
+			"status": _("Applying recommended settings"),
+			"fail_msg": _("We couldn't apply the recommended settings"),
+			"tasks": [
+				{
+					"fn": setup_defaults,
+					"args": args,
+					"fail_msg": _("We couldn't apply the recommended settings"),
+				},
+			],
+		},
+		{
+			"status": _("Personalizing your setup"),
+			"fail_msg": _("We couldn't personalize your setup"),
+			"tasks": [
+				{
+					"fn": capture_user_persona,
+					"args": args,
+					"fail_msg": _("We couldn't personalize your setup"),
+				}
+			],
+		},
+	]
 
 	return stages
 
 
-def stage_fixtures(args):
+def capture_user_persona(args):  # nosemgrep
+	"""Send the persona answers captured on the setup slide to telemetry."""
+	if not args:
+		return
+
+	capture(
+		"user_persona_submitted",
+		"erpnext",
+		properties={
+			"implementing_for": args.get("persona_implementing_for"),
+			"company_size": args.get("persona_company_size"),
+			"industry": args.get("persona_industry"),
+			"current_system": args.get("persona_current_system"),
+			"module_accounting": bool(args.get("module_accounting")),
+			"module_stock": bool(args.get("module_stock")),
+			"module_manufacturing": bool(args.get("module_manufacturing")),
+			"module_projects": bool(args.get("module_projects")),
+			"country": args.get("country"),
+			"language": args.get("language"),
+		},
+	)
+
+
+def stage_fixtures(args):  # nosemgrep
 	fixtures.install(args.get("country"))
 
 
-def setup_company(args):
+def setup_company(args):  # nosemgrep
 	fixtures.install_company(args)
 
 
-def setup_defaults(args):
+def setup_defaults(args):  # nosemgrep
 	fixtures.install_defaults(frappe._dict(args))
 
 
-def fin(args):
-	frappe.local.message_log = []
-	login_as_first_user(args)
-
-
-def setup_demo(args):
-	if args.get("setup_demo"):
-		frappe.enqueue(setup_demo_data, enqueue_after_commit=True, at_front=True)
-
-
-def login_as_first_user(args):
-	if args.get("email") and hasattr(frappe.local, "login_manager"):
-		frappe.local.login_manager.login_as(args.get("email"))
-
-
 # Only for programmatical use
-def setup_complete(args=None):
+def setup_complete(args=None):  # nosemgrep
 	stage_fixtures(args)
 	setup_company(args)
 	setup_defaults(args)
-	fin(args)

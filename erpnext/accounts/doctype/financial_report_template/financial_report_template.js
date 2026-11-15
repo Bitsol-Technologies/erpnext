@@ -3,6 +3,8 @@
 
 frappe.ui.form.on("Financial Report Template", {
 	refresh(frm) {
+		if (frm.is_new() || frm.doc.rows.length === 0) return;
+
 		// add custom button to view missed accounts
 		frm.add_custom_button(__("View Account Coverage"), function () {
 			let selected_rows = frm.get_field("rows").grid.get_selected_children();
@@ -20,7 +22,7 @@ frappe.ui.form.on("Financial Report Template", {
 		});
 	},
 
-	validate(frm) {
+	after_save(frm) {
 		if (!frm.doc.rows || frm.doc.rows.length === 0) {
 			frappe.msgprint(__("At least one row is required for a financial report template"));
 		}
@@ -33,14 +35,6 @@ frappe.ui.form.on("Financial Report Row", {
 
 		update_formula_label(frm, row.data_source);
 		update_formula_description(frm, row.data_source);
-
-		if (row.data_source !== "Account Data") {
-			frappe.model.set_value(cdt, cdn, "balance_type", "");
-		}
-
-		if (["Blank Line", "Column Break", "Section Break"].includes(row.data_source)) {
-			frappe.model.set_value(cdt, cdn, "calculation_formula", "");
-		}
 
 		set_up_filters_editor(frm, cdt, cdn);
 	},
@@ -169,7 +163,7 @@ function show_accounts_tree(template_rows, has_selection) {
 				fieldname: "company",
 				fieldtype: "Link",
 				options: "Company",
-				label: "Company",
+				label: __("Company"),
 				reqd: 1,
 				default: frappe.defaults.get_user_default("Company"),
 				onchange: () => {
@@ -182,7 +176,7 @@ function show_accounts_tree(template_rows, has_selection) {
 				fieldname: "view_type",
 				fieldtype: "Select",
 				options: ["Missing Accounts", "Filtered Accounts"],
-				label: "View",
+				label: __("View"),
 				default: has_selection ? "Filtered Accounts" : "Missing Accounts",
 				reqd: 1,
 				onchange: () => {
@@ -198,10 +192,10 @@ function show_accounts_tree(template_rows, has_selection) {
 			{
 				fieldname: "tip",
 				fieldtype: "HTML",
-				label: "Tip",
+				label: __("Tip"),
 				options: `
 					<div class="alert alert-success" role="alert">
-							Tip: Select report lines to view their accounts
+							${__("Tip: Select report lines to view their accounts")}
 					</div>
 				`,
 				depends_on: has_selection ? "eval: false" : "eval: true",
@@ -209,7 +203,7 @@ function show_accounts_tree(template_rows, has_selection) {
 			{
 				fieldname: "tree_area",
 				fieldtype: "HTML",
-				label: "Chart of Accounts",
+				label: __("Chart of Accounts"),
 				read_only: 1,
 				depends_on: "eval: doc.company",
 			},
@@ -242,6 +236,8 @@ async function refresh_tree_view(dialog, account_rows) {
 		parent: wrapper,
 		label: company,
 		root_value: company,
+		// read-only preview: row-mode visuals without actions
+		row_style: true,
 		method: "erpnext.accounts.doctype.financial_report_template.financial_report_engine.get_children_accounts",
 		args: { doctype: "Account", company: company, filtered_accounts: filtered_accounts, missed: missed },
 		toolbar: [],
@@ -294,14 +290,14 @@ function update_formula_label(frm, data_source) {
 	if (!field) return;
 
 	const labels = {
-		"Account Data": "Account Filter",
-		"Custom API": "API Method Path",
+		"Account Data": __("Account Filter"),
+		"Custom API": __("API Method Path"),
 	};
 
 	grid.update_docfield_property(
 		"calculation_formula",
 		"label",
-		labels[data_source] || "Calculation Formula"
+		labels[data_source] || __("Calculation Formula")
 	);
 }
 
@@ -322,6 +318,8 @@ function update_formula_description(frm, data_source) {
 	const list_style = `style="margin-bottom: var(--margin-sm); color: var(--text-muted); font-size: 0.9em;"`;
 	const note_style = `style="margin-bottom: 0; color: var(--text-muted); font-size: 0.9em;"`;
 	const tip_style = `style="margin-bottom: 0; color: var(--text-color); font-size: 0.85em;"`;
+	const code_style = `style="background: var(--bg-light-gray); padding: var(--padding-xs); border-radius: var(--border-radius); font-size: 0.85em; width: max-content; margin-bottom: var(--margin-sm);"`;
+	const pre_style = `style="margin: 0; border-radius: var(--border-radius)"`;
 
 	let description_html = "";
 
@@ -374,7 +372,7 @@ function update_formula_description(frm, data_source) {
 		description_html = `
 			<div ${container_style}>
 				<h5 ${title_style}>Custom API Setup</h5>
-				<p ${text_style}>Path to your custom method that returns financial data.</p>
+				<p ${text_style}>Path to your custom whitelisted method that returns financial data. It must permit GET requests.</p>
 
 				<h6 ${subtitle_style}>Format:</h6>
 				<ul ${list_style}>
@@ -382,8 +380,14 @@ function update_formula_description(frm, data_source) {
 					<li><code>my_app.financial_reports.get_kpi_data</code></li>
 				</ul>
 
+				<h6 ${subtitle_style}>Method Signature:</h6>
+				<div ${code_style}>
+					<!-- &#10; is used for line breaks since frappe.render replaces newlines with spaces -->
+					<pre ${pre_style} class="language-python">@frappe.whitelist(methods=["GET"])&#10;def get_custom_data(filters, periods, row):&#10;    # filters: dict — report filters (company, period, etc.)&#10;    # periods: list[dict] — period definitions&#10;    # row: dict — the current report row&#10;&#10;    return [1000.0, 1200.0, 1150.0]  # one value per period</pre>
+				</div>
+
 				<h6 ${subtitle_style}>Return Format:</h6>
-				<p ${text_style}>Numbers for each period: <code>[1000.0, 1200.0, 1150.0]</code></p>
+				<p ${text_style}>A list of numbers, one for each period: <code>[1000.0, 1200.0, 1150.0]</code></p>
 			</div>`;
 	} else if (data_source === "Blank Line") {
 		description_html = `

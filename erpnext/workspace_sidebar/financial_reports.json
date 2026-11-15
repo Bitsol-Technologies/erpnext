@@ -9,7 +9,7 @@
   {
    "child": 0,
    "collapsible": 1,
-   "icon": "accounting",
+   "icon": "wallet",
    "indent": 1,
    "keep_closed": 0,
    "label": "Financial Reports",
@@ -381,9 +381,10 @@
    "type": "Link"
   }
  ],
- "modified": "2026-01-10 00:06:13.168391",
+ "modified": "2026-07-03 18:35:48.416287",
  "modified_by": "Administrator",
  "module": "Accounts",
+ "module_onboarding": "Accounting Onboarding",
  "name": "Financial Reports",
  "owner": "Administrator",
  "standard": 1,

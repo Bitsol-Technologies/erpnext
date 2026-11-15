@@ -275,7 +275,7 @@ erpnext.stock.DeliveryNoteController = class DeliveryNoteController extends (
 				);
 			}
 
-			if (doc.docstatus == 1 && doc.status != "Completed" && frappe.model.can_create("Delivery Trip")) {
+			if (doc.docstatus == 1 && doc.status != "Closed" && frappe.model.can_create("Delivery Trip")) {
 				this.frm.add_custom_button(
 					__("Delivery Trip"),
 					function () {
@@ -370,6 +370,15 @@ erpnext.stock.DeliveryNoteController = class DeliveryNoteController extends (
 			method: "erpnext.stock.doctype.delivery_note.delivery_note.make_shipment",
 			frm: this.frm,
 		});
+	}
+
+	items_add(doc, cdt, cdn) {
+		const row = frappe.get_doc(cdt, cdn);
+		if (doc.project) {
+			frappe.model.set_value(cdt, cdn, "project", doc.project);
+		} else {
+			this.frm.script_manager.copy_from_first_row("items", row, ["project"]);
+		}
 	}
 
 	make_sales_invoice() {

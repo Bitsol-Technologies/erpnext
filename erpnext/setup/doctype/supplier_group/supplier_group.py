@@ -4,7 +4,10 @@
 
 import frappe
 from frappe import _
-from frappe.utils.nestedset import NestedSet, get_root_of
+from frappe.utils.nestedset import NestedSet
+
+from erpnext.accounts.party import validate_party_account_rows
+from erpnext.setup.utils import set_root_as_default_parent
 
 
 class SupplierGroup(NestedSet):
@@ -31,8 +34,8 @@ class SupplierGroup(NestedSet):
 	nsm_parent_field = "parent_supplier_group"
 
 	def validate(self):
-		if not self.parent_supplier_group:
-			self.parent_supplier_group = get_root_of("Supplier Group")
+		set_root_as_default_parent(self)
+		validate_party_account_rows(self, "Supplier")
 		self.validate_currency_for_payable_and_advance_account()
 
 	def validate_currency_for_payable_and_advance_account(self):
@@ -70,3 +73,13 @@ class SupplierGroup(NestedSet):
 	def on_trash(self):
 		NestedSet.validate_if_child_exists(self)
 		frappe.utils.nestedset.update_nsm(self)
+
+
+def get_parent_supplier_groups(supplier_group):
+	lft, rgt = frappe.db.get_value("Supplier Group", supplier_group, ["lft", "rgt"])
+	return frappe.get_all(
+		"Supplier Group",
+		filters=[["lft", "<=", lft], ["rgt", ">=", rgt]],
+		fields=["name"],
+		order_by="lft asc",
+	)

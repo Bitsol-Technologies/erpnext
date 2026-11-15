@@ -3,21 +3,19 @@
 import unittest
 
 import frappe
-from frappe.tests import IntegrationTestCase
-from frappe.utils import now
+from frappe.utils import add_days, now
 
-from erpnext.assets.doctype.asset.test_asset import create_asset_data
+from erpnext.assets.doctype.asset.test_asset import create_asset
 from erpnext.setup.doctype.employee.test_employee import make_employee
 from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestAssetMovement(IntegrationTestCase):
+class TestAssetMovement(ERPNextTestSuite):
 	def setUp(self):
 		frappe.db.set_value(
 			"Company", "_Test Company", "capital_work_in_progress_account", "CWIP Account - _TC"
 		)
-		create_asset_data()
-		make_location()
 
 	def test_movement(self):
 		pr = make_purchase_receipt(item_code="Macbook Pro", qty=1, rate=100000.0, location="Test Location")
@@ -40,10 +38,6 @@ class TestAssetMovement(IntegrationTestCase):
 
 		if asset.docstatus == 0:
 			asset.submit()
-
-		# check asset movement is created
-		if not frappe.db.exists("Location", "Test Location 2"):
-			frappe.get_doc({"doctype": "Location", "location_name": "Test Location 2"}).insert()
 
 		create_asset_movement(
 			purpose="Transfer",
@@ -123,9 +117,6 @@ class TestAssetMovement(IntegrationTestCase):
 		if asset.docstatus == 0:
 			asset.submit()
 
-		if not frappe.db.exists("Location", "Test Location 2"):
-			frappe.get_doc({"doctype": "Location", "location_name": "Test Location 2"}).insert()
-
 		movement = frappe.get_doc({"doctype": "Asset Movement", "reference_name": pr.name})
 		self.assertRaises(frappe.ValidationError, movement.cancel)
 
@@ -147,6 +138,107 @@ class TestAssetMovement(IntegrationTestCase):
 		movement1.cancel()
 		self.assertEqual(frappe.db.get_value("Asset", asset.name, "location"), "Test Location")
 
+	def test_location_and_custodian_are_resolved_separately(self):
+		employee = make_employee("testassetmovemp@example.com", company="_Test Company")
+		asset = create_asset(location="Test Location", submit=1)
+		issue_and_transfer = [
+			("Issue", {"to_employee": employee}),
+			("Transfer", {"source_location": "Test Location", "target_location": "Test Location 2"}),
+		]
+		for purpose, row in issue_and_transfer:
+			create_asset_movement(
+				purpose=purpose, company=asset.company, assets=[{"asset": asset.name, **row}]
+			)
+
+		self.assertEqual(get_location_and_custodian(asset.name), ("Test Location 2", employee))
+
+		asset = create_asset(location="Test Location", submit=1)
+		movements = [
+			create_asset_movement(
+				purpose=purpose, company=asset.company, assets=[{"asset": asset.name, **row}]
+			)
+			for purpose, row in reversed(issue_and_transfer)
+		]
+		movements[0].cancel()
+
+		self.assertEqual(get_location_and_custodian(asset.name), ("Test Location", employee))
+
+	def test_return_to_current_location_logs_custodian_removal(self):
+		employee = make_employee("testassetmovemp@example.com", company="_Test Company")
+		asset = create_asset(location="Test Location", submit=1)
+		for purpose, row in (
+			("Issue", {"to_employee": employee}),
+			("Receipt", {"target_location": "Test Location"}),
+		):
+			create_asset_movement(
+				purpose=purpose, company=asset.company, assets=[{"asset": asset.name, **row}]
+			)
+
+		self.assertFalse(frappe.db.get_value("Asset", asset.name, "custodian"))
+		latest_activity = frappe.get_all(
+			"Asset Activity",
+			filters={"asset": asset.name},
+			pluck="subject",
+			order_by="creation desc",
+			limit=1,
+		)
+		self.assertIn("returned by Employee", latest_activity[0])
+
+	def test_movement_of_disposed_asset_is_refused(self):
+		employee = make_employee("testassetmovemp@example.com", company="_Test Company")
+		asset = create_asset(location="Test Location", submit=1)
+		asset.db_set("status", "Scrapped")
+
+		for purpose, row in (
+			("Issue", {"to_employee": employee}),
+			("Receipt", {"target_location": "Test Location 2"}),
+		):
+			movement = create_asset_movement(
+				purpose=purpose, company=asset.company, assets=[{"asset": asset.name, **row}], do_not_save=1
+			)
+			self.assertRaisesRegex(frappe.ValidationError, "cannot be moved", movement.insert)
+
+	def test_same_asset_twice_is_refused(self):
+		asset = create_asset(location="Test Location", submit=1)
+		movement = create_asset_movement(
+			purpose="Transfer",
+			company=asset.company,
+			assets=[
+				{
+					"asset": asset.name,
+					"source_location": "Test Location",
+					"target_location": "Test Location 2",
+				}
+			]
+			* 2,
+			do_not_save=1,
+		)
+		self.assertRaisesRegex(frappe.ValidationError, "already added", movement.insert)
+
+	def test_movement_transaction_date(self):
+		asset = create_asset(item_code="Macbook Pro", do_not_save=1)
+		asset.save().submit()
+
+		asset_creation_date = frappe.db.get_value(
+			"Asset Movement",
+			[["Asset Movement Item", "asset", "=", asset.name], ["docstatus", "=", 1]],
+			"transaction_date",
+		)
+		asset_movement = create_asset_movement(
+			purpose="Transfer",
+			company=asset.company,
+			assets=[
+				{
+					"asset": asset.name,
+					"source_location": "Test Location",
+					"target_location": "Test Location 2",
+				}
+			],
+			transaction_date=add_days(asset_creation_date, -1),
+			do_not_save=True,
+		)
+		self.assertRaises(frappe.ValidationError, asset_movement.save)
+
 
 def create_asset_movement(**args):
 	args = frappe._dict(args)
@@ -165,14 +257,13 @@ def create_asset_movement(**args):
 			"reference_name": args.reference_name,
 		}
 	)
-
-	movement.insert()
-	movement.submit()
+	if not args.do_not_save:
+		movement.insert(ignore_if_duplicate=True)
+		if not args.do_not_submit:
+			movement.submit()
 
 	return movement
 
 
-def make_location():
-	for location in ["Pune", "Mumbai", "Nagpur"]:
-		if not frappe.db.exists("Location", location):
-			frappe.get_doc({"doctype": "Location", "location_name": location}).insert(ignore_permissions=True)
+def get_location_and_custodian(asset: str) -> tuple[str, str]:
+	return tuple(frappe.db.get_value("Asset", asset, ["location", "custodian"]))

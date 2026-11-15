@@ -4,19 +4,6 @@
 frappe.ui.form.on("POS Closing Entry", {
 	onload: async function (frm) {
 		frm.ignore_doctypes_on_cancel_all = ["POS Invoice Merge Log", "Sales Invoice"];
-		frm.set_query("pos_profile", function (doc) {
-			return {
-				filters: { user: doc.user },
-			};
-		});
-
-		frm.set_query("user", function (doc) {
-			return {
-				query: "erpnext.accounts.doctype.pos_closing_entry.pos_closing_entry.get_cashiers",
-				filters: { parent: doc.pos_profile },
-			};
-		});
-
 		frm.set_query("pos_opening_entry", function (doc) {
 			return { filters: { status: "Open", docstatus: 1 } };
 		});
@@ -47,7 +34,7 @@ frappe.ui.form.on("POS Closing Entry", {
 	},
 
 	refresh: function (frm) {
-		if (frm.doc.docstatus == 1 && frm.doc.status == "Failed") {
+		if (frm.doc.docstatus > 0 && frm.doc.status == "Failed") {
 			const issue = '<a id="jump_to_error" style="text-decoration: underline;">issue</a>';
 			frm.dashboard.set_headline(
 				__(
@@ -164,7 +151,7 @@ function refresh_payments(payments, frm) {
 				mode_of_payment: p.mode_of_payment,
 				opening_amount: 0,
 				expected_amount: p.amount,
-				closing_amount: 0,
+				closing_amount: p.amount,
 			});
 		}
 	});

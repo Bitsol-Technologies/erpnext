@@ -3,12 +3,16 @@
  "allow_import": 1,
  "autoname": "naming_series:",
  "creation": "2018-10-22 18:19:02.784533",
+ "description": "A line from your bank statement, ready to be matched with a payment.",
  "doctype": "DocType",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/bank-transaction",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
   "date",
+  "is_rule_evaluated",
+  "matched_transaction_rule",
   "column_break_2",
   "status",
   "bank_account",
@@ -256,12 +260,29 @@
    "label": "Excluded Fee",
    "non_negative": 1,
    "options": "currency"
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "0",
+   "fieldname": "is_rule_evaluated",
+   "fieldtype": "Check",
+   "label": "Is Rule Evaluated",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "matched_transaction_rule",
+   "fieldtype": "Link",
+   "label": "Matched Transaction Rule",
+   "options": "Bank Transaction Rule",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
+ "icon": "arrow-left-right",
  "is_submittable": 1,
  "links": [],
- "modified": "2025-12-07 20:49:18.600757",
+ "modified": "2026-04-11 20:41:15.124085",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Bank Transaction",

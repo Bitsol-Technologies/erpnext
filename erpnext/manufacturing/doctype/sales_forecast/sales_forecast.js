@@ -1,5 +1,6 @@
 frappe.ui.form.on("Sales Forecast", {
 	refresh(frm) {
+		frm.fields_dict.items.grid.update_docfield_property("demand_qty", "reqd", 1);
 		frm.trigger("set_query_filters");
 		frm.trigger("set_custom_buttons");
 		frm.set_df_property("items", "cannot_add_rows", true);
@@ -45,13 +46,5 @@ frappe.ui.form.on("Sales Forecast", {
 				});
 			}).addClass("btn-primary");
 		}
-	},
-});
-
-frappe.ui.form.on("Sales Forecast Item", {
-	adjust_qty(frm, cdt, cdn) {
-		let row = locals[cdt][cdn];
-		row.demand_qty = row.forecast_qty + row.adjust_qty;
-		frappe.model.set_value(cdt, cdn, "demand_qty", row.demand_qty);
 	},
 });

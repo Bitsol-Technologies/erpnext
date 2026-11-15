@@ -2,12 +2,16 @@ import unittest
 
 import frappe
 from frappe.test_runner import make_test_objects
-from frappe.tests import IntegrationTestCase
 
+from erpnext.accounts.doctype.account.test_account import create_account
+from erpnext.accounts.doctype.journal_entry.test_journal_entry import make_journal_entry
 from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
 from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make_purchase_invoice
 from erpnext.accounts.party import get_party_shipping_address
 from erpnext.accounts.utils import (
+	get_account_balances_coa,
+	get_balance_on,
+	get_currency_precision,
 	get_future_stock_vouchers,
 	get_voucherwise_gl_entries,
 	get_zero_cutoff,
@@ -16,17 +20,66 @@ from erpnext.accounts.utils import (
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestUtils(IntegrationTestCase):
-	@classmethod
-	def setUpClass(cls):
-		super().setUpClass()
-		make_test_objects("Address", ADDRESS_RECORDS)
+class TestUtils(ERPNextTestSuite):
+	def test_balances_respect_finance_books(self):
+		company = "_Test Company"
+		frappe.db.set_value("Company", company, "default_finance_book", "")
+		books = [
+			frappe.get_doc(doctype="Finance Book", finance_book_name=name).insert().name
+			for name in ("_Test Balance Default Book", "_Test Balance Alternative Book")
+		]
+		group = create_account(
+			account_name="_Test Finance Book Balances",
+			company=company,
+			parent_account="Bank Accounts - _TC",
+			is_group=1,
+		)
+		account = create_account(
+			account_name="_Test Finance Book Balance Ledger", company=company, parent_account=group
+		)
+		for book, amount in ((None, 100), ("", 200), (books[0], 300), (books[1], 400)):
+			journal = make_journal_entry(account, "Cash - _TC", amount, save=False)
+			journal.finance_book = book
+			journal.submit()
+			frappe.db.set_value(
+				"GL Entry",
+				{"voucher_type": journal.doctype, "voucher_no": journal.name},
+				"finance_book",
+				book,
+			)
 
-	@classmethod
-	def tearDownClass(cls):
-		frappe.db.rollback()
+		for default_book in ("", books[0]):
+			frappe.db.set_value("Company", company, "default_finance_book", default_book)
+			for include_default in (False, True):
+				with self.subTest(default_book=default_book, include_default=include_default):
+					balances = {
+						row["value"]: row["balance"]
+						for row in get_account_balances_coa(company, include_default)
+					}
+					expected = 600 if default_book and include_default else 300
+					self.assertEqual(balances[account], expected)
+					self.assertEqual(balances[group], expected)
+					for selected in (None, "", *books):
+						expected = 300
+						if selected == books[0] or (default_book and include_default):
+							expected += 300
+						if selected == books[1]:
+							expected += 400
+						for name in (account, group):
+							with self.subTest(account=name, selected=selected):
+								self.assertEqual(
+									get_balance_on(
+										account=name,
+										company=company,
+										finance_book=selected,
+										include_default_fb_balances=include_default,
+									),
+									expected,
+								)
+		self.assertEqual(get_balance_on(account=account), 300)
 
 	def test_get_party_shipping_address(self):
 		address = get_party_shipping_address("Customer", "_Test Customer 1")
@@ -90,6 +143,8 @@ class TestUtils(IntegrationTestCase):
 		purchase_invoice.submit()
 
 		payment_entry = get_payment_entry(purchase_invoice.doctype, purchase_invoice.name)
+		payment_entry.target_exchange_rate = 82.32
+		payment_entry.set_amounts()
 		payment_entry.paid_amount = 15725
 		payment_entry.deductions = []
 		payment_entry.save()
@@ -163,44 +218,17 @@ class TestUtils(IntegrationTestCase):
 		self.assertEqual(get_zero_cutoff("EUR"), 0.005)
 		self.assertEqual(get_zero_cutoff("BHD"), 0.0005)
 
+	def test_get_currency_precision_respects_zero_and_fallback(self):
+		currency_precision = frappe.db.get_default("currency_precision")
+		number_format = frappe.db.get_default("number_format")
 
-ADDRESS_RECORDS = [
-	{
-		"doctype": "Address",
-		"address_type": "Billing",
-		"address_line1": "Address line 1",
-		"address_title": "_Test Billing Address Title",
-		"city": "Lagos",
-		"country": "Nigeria",
-		"links": [{"link_doctype": "Customer", "link_name": "_Test Customer 2", "doctype": "Dynamic Link"}],
-	},
-	{
-		"doctype": "Address",
-		"address_type": "Shipping",
-		"address_line1": "Address line 2",
-		"address_title": "_Test Shipping Address 1 Title",
-		"city": "Lagos",
-		"country": "Nigeria",
-		"links": [{"link_doctype": "Customer", "link_name": "_Test Customer 2", "doctype": "Dynamic Link"}],
-	},
-	{
-		"doctype": "Address",
-		"address_type": "Shipping",
-		"address_line1": "Address line 3",
-		"address_title": "_Test Shipping Address 2 Title",
-		"city": "Lagos",
-		"country": "Nigeria",
-		"is_shipping_address": "1",
-		"links": [{"link_doctype": "Customer", "link_name": "_Test Customer 2", "doctype": "Dynamic Link"}],
-	},
-	{
-		"doctype": "Address",
-		"address_type": "Billing",
-		"address_line1": "Address line 4",
-		"address_title": "_Test Billing Address 2 Title",
-		"city": "Lagos",
-		"country": "Nigeria",
-		"is_shipping_address": "1",
-		"links": [{"link_doctype": "Customer", "link_name": "_Test Customer 1", "doctype": "Dynamic Link"}],
-	},
-]
+		try:
+			frappe.db.set_default("number_format", "#,###.##")
+			frappe.db.set_default("currency_precision", "0")
+			self.assertEqual(get_currency_precision(), 0)
+
+			frappe.db.set_default("currency_precision", "")
+			self.assertEqual(get_currency_precision(), 2)
+		finally:
+			frappe.db.set_default("currency_precision", currency_precision or "")
+			frappe.db.set_default("number_format", number_format or "#,###.##")

@@ -1,24 +1,16 @@
 # Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 import frappe
-from frappe.tests import IntegrationTestCase
 
 from erpnext.manufacturing.doctype.job_card.job_card import OperationSequenceError
 from erpnext.manufacturing.doctype.work_order.test_work_order import make_wo_order_test_record
 from erpnext.stock.doctype.item.test_item import make_item
+from erpnext.tests.utils import ERPNextTestSuite
 
-EXTRA_TEST_RECORD_DEPENDENCIES = ["UOM"]
 
-
-class TestRouting(IntegrationTestCase):
-	@classmethod
-	def setUpClass(cls):
-		super().setUpClass()
-		cls.item_code = "Test Routing Item - A"
-
-	@classmethod
-	def tearDownClass(cls):
-		frappe.db.sql("delete from tabBOM where item=%s", cls.item_code)
+class TestRouting(ERPNextTestSuite):
+	def setUp(self):
+		self.item_code = "Test Routing Item - A"
 
 	def test_sequence_id(self):
 		operations = [
@@ -56,7 +48,6 @@ class TestRouting(IntegrationTestCase):
 				self.assertEqual(job_card_doc.total_completed_qty, 10)
 
 		wo_doc.cancel()
-		wo_doc.delete()
 
 	def test_update_bom_operation_time(self):
 		"""Update cost shouldn't update routing times."""
@@ -93,6 +84,53 @@ class TestRouting(IntegrationTestCase):
 		bom_doc.reload()
 		self.assertEqual(bom_doc.operations[0].time_in_mins, 30)
 		self.assertEqual(bom_doc.operations[1].time_in_mins, 20)
+
+	def test_workstation_change_refreshes_hour_rate(self):
+		operations = [
+			{
+				"operation": "_Test Op Routing Rate",
+				"workstation": "_Test WS Routing 600",
+				"hour_rate_rent": 600,
+			},
+			{
+				"operation": "_Test Op Routing Rate",
+				"workstation": "_Test WS Routing 1200",
+				"hour_rate_rent": 1200,
+			},
+		]
+		setup_operations(operations)
+		routing = create_routing(
+			routing_name="Routing Rate Change",
+			operations=[
+				{
+					"operation": "_Test Op Routing Rate",
+					"workstation": "_Test WS Routing 600",
+					"time_in_mins": 60,
+				}
+			],
+		)
+		self.assertEqual(routing.operations[0].hour_rate, 600)
+
+		routing.operations[0].workstation = "_Test WS Routing 1200"
+		routing.save()
+		self.assertEqual(routing.operations[0].hour_rate, 1200)
+		self.assertEqual(routing.operations[0].operating_cost, 1200)
+
+		routing.operations[0].hour_rate = 900
+		routing.save()
+		self.assertEqual(routing.operations[0].hour_rate, 900)
+
+	def test_disabled_routing_refused_on_bom(self):
+		operations = [
+			{"operation": "Test Operation A", "workstation": "Test Workstation A", "time_in_mins": 30}
+		]
+		setup_operations(operations)
+		routing = create_routing(routing_name="Disabled Route", operations=operations)
+		routing.db_set("disabled", 1)
+
+		self.assertRaises(
+			frappe.ValidationError, setup_bom, item_code="_Test Disabled Routing Item", routing=routing.name
+		)
 
 
 def setup_operations(rows):

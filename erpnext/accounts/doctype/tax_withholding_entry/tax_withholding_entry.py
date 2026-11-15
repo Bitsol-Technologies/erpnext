@@ -344,7 +344,6 @@ class TaxWithholdingEntry(Document):
 
 from erpnext.accounts.doctype.tax_withholding_category.tax_withholding_category import (
 	TaxWithholdingDetails,
-	get_tax_id_for_party,
 )
 
 
@@ -423,7 +422,9 @@ class TaxWithholdingController:
 		entries.extend(self._adjust_under_over_withheld(under_entries, over_entries, category))
 
 		# Case 4: Lower Deduction Certificate processing
-		if category.ldc_unutilized_amount:
+		if self._is_return_against_invoice():
+			entries.extend(self._process_return_ldc_entries(under_entries, category))
+		elif category.ldc_unutilized_amount:
 			entries.extend(self._process_ldc_entries(under_entries, over_entries, category))
 
 		# Case 5: Regular tax withholding processing
@@ -520,6 +521,77 @@ class TaxWithholdingController:
 			constraint=category.ldc_unutilized_amount,
 			default_obj=ldc_config,
 		)
+
+	def _is_return_against_invoice(self) -> bool:
+		return bool(self.doc.get("is_return") and self.doc.get("return_against"))
+
+	def _process_return_ldc_entries(self, under_entries: deque, category: dict) -> list:
+		"""Reverse a return at each certificate rate applied on the original invoice, up to the
+		amount deducted under that certificate, so that its limit is given back."""
+		current_entry = under_entries[0] if under_entries else None
+		if not (current_entry and current_entry.taxable_name == self.doc.name):
+			return []
+
+		entries = []
+		for ldc_entry in self._get_original_ldc_entries(category):
+			if flt(current_entry.taxable_amount, self.precision) >= 0:
+				break
+			entries.extend(self._reverse_ldc_entry(current_entry, ldc_entry, category))
+
+		if not flt(current_entry.taxable_amount, self.precision):
+			under_entries.popleft()
+
+		return entries
+
+	def _reverse_ldc_entry(self, current_entry: dict, ldc_entry: dict, category: dict) -> list:
+		ldc_part = current_entry.copy()
+		ldc_part.taxable_amount = max(current_entry.taxable_amount, -ldc_entry.taxable_amount)
+		current_entry.taxable_amount -= ldc_part.taxable_amount
+
+		return self._merge_entries(
+			deque([ldc_part]),
+			deque(),
+			category,
+			tax_rate=ldc_entry.tax_rate,
+			default_obj={
+				"under_withheld_reason": "Lower Deduction Certificate",
+				"lower_deduction_certificate": ldc_entry.lower_deduction_certificate,
+			},
+		)
+
+	def _get_original_ldc_entries(self, category: dict) -> list:
+		"""Certificate, rate and net taxable amount deducted under it for the original invoice
+		and its earlier returns, including deductions made through later documents."""
+		entry = frappe.qb.DocType(DOCTYPE)
+		taxable_amount = Sum(entry.taxable_amount)
+
+		return (
+			frappe.qb.from_(entry)
+			.select(
+				entry.lower_deduction_certificate,
+				entry.tax_rate,
+				taxable_amount.as_("taxable_amount"),
+			)
+			.where(entry.taxable_doctype == self.doc.doctype)
+			.where(entry.taxable_name.isin(self._get_original_and_return_names()))
+			.where(entry.tax_withholding_category == category.name)
+			.where(IfNull(entry.lower_deduction_certificate, "") != "")
+			.where(entry.status == "Settled")
+			.where(entry.docstatus == 1)
+			.groupby(entry.lower_deduction_certificate, entry.tax_rate)
+			.having(taxable_amount > 0)
+			.orderby(entry.lower_deduction_certificate)
+			.orderby(entry.tax_rate)
+			.run(as_dict=True)
+		)
+
+	def _get_original_and_return_names(self) -> list[str]:
+		returns = frappe.get_all(
+			self.doc.doctype,
+			filters={"return_against": self.doc.return_against, "docstatus": 1},
+			pluck="name",
+		)
+		return [self.doc.return_against, *returns]
 
 	def _update_taxable_amounts(self):
 		if not self.doc.base_net_total:
@@ -641,13 +713,17 @@ class TaxWithholdingController:
 			.where(entry.tax_withholding_category == category.name)
 			.where(entry.company == self.doc.company)
 			.where(entry.docstatus == 1)
+			.where(entry.taxable_date.between(category.from_date, category.to_date))
 			.groupby(entry.status)
 		)
 
 		# NOTE: This can be a configurable option
 		# To check if filter by tax_id is needed
-		tax_id = get_tax_id_for_party(self.party_type, self.party)
-		query = query.where(entry.tax_id == tax_id) if tax_id else query.where(entry.party == self.party)
+		query = (
+			query.where(entry.tax_id == category.tax_id)
+			if category.tax_id
+			else query.where(entry.party == self.party)
+		)
 
 		return query
 
@@ -686,6 +762,7 @@ class TaxWithholdingController:
 				"company": self.doc.company,
 				"party_type": self.party_type,
 				"party": self.party,
+				"tax_id": category.tax_id,
 				"tax_withholding_category": category.name,
 				"tax_withholding_group": category.tax_withholding_group,
 				"tax_rate": category.tax_rate,
@@ -1052,6 +1129,7 @@ class TaxWithholdingController:
 				"party_type": self.party_type,
 				"party": self.party,
 				"company": self.doc.company,
+				"tax_id": category.tax_id,
 			}
 		)
 		return entry

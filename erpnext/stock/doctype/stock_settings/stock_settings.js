@@ -3,16 +3,62 @@
 
 frappe.ui.form.on("Stock Settings", {
 	refresh: function (frm) {
-		let filters = function () {
-			return {
-				filters: {
-					is_group: 0,
-				},
-			};
-		};
+		if (!frm.naming_controller) frm.naming_controller = new frappe.ui.NamingSeriesController(frm);
+		const item_display = frm.doc.item_naming_by === "Naming Series";
 
-		frm.set_query("default_warehouse", filters);
-		frm.set_query("sample_retention_warehouse", filters);
+		frm.set_df_property("naming_series_details", "hidden", !item_display);
+		frm.set_df_property("configure", "hidden", !item_display);
+
+		if (item_display) {
+			frm.naming_controller.load_master_series("Item", "naming_series_details");
+		} else {
+			frm.doc.naming_series_details = "";
+		}
+
+		toggle_serial_and_batch_naming_series(frm);
+
+		frm.naming_controller.render_table("transaction_naming_html", get_transactions(frm));
+	},
+
+	item_naming_by(frm) {
+		const display = frm.doc.item_naming_by === "Naming Series";
+		frm.set_df_property("naming_series_details", "hidden", !display);
+		frm.set_df_property("configure", "hidden", !display);
+
+		if (display) {
+			frm.naming_controller.load_master_series("Item", "naming_series_details");
+		} else {
+			frm.doc.naming_series_details = "";
+			frm.refresh_field("naming_series_details");
+		}
+
+		frm.naming_controller.render_table("transaction_naming_html", get_transactions(frm));
+	},
+
+	set_serial_and_batch_bundle_naming_based_on_naming_series(frm) {
+		toggle_serial_and_batch_naming_series(frm);
+	},
+
+	enable_serial_and_batch_no_for_item(frm) {
+		toggle_serial_and_batch_naming_series(frm);
+	},
+
+	configure(frm) {
+		configure_naming_series(frm, "Item", "naming_series_details");
+	},
+
+	configure_series(frm) {
+		configure_naming_series(frm, "Serial and Batch Bundle", "naming_series_preview");
+	},
+
+	after_save(frm) {
+		// user_defaults are loaded at boot, so reload to apply the changed setting across forms
+		if (
+			cint(frappe.user_defaults?.enable_serial_and_batch_no_for_item) !==
+			cint(frm.doc.enable_serial_and_batch_no_for_item)
+		) {
+			window.location.reload();
+		}
 	},
 
 	use_serial_batch_fields(frm) {
@@ -78,3 +124,45 @@ frappe.ui.form.on("Stock Settings", {
 		}
 	},
 });
+
+function toggle_serial_and_batch_naming_series(frm) {
+	const display =
+		frm.doc.enable_serial_and_batch_no_for_item &&
+		frm.doc.set_serial_and_batch_bundle_naming_based_on_naming_series;
+
+	frm.set_df_property("naming_series_preview", "hidden", !display);
+	frm.set_df_property("configure_series", "hidden", !display);
+
+	if (display) {
+		frm.naming_controller.load_master_series("Serial and Batch Bundle", "naming_series_preview");
+	} else {
+		frm.doc.naming_series_preview = "";
+		frm.refresh_field("naming_series_preview");
+	}
+}
+
+function get_transactions(frm) {
+	const transactions = [
+		{ label: __("Item"), doctype: "Item" },
+		{ label: __("Stock Entry"), doctype: "Stock Entry" },
+		{ label: __("Purchase Receipt"), doctype: "Purchase Receipt" },
+		{ label: __("Delivery Note"), doctype: "Delivery Note" },
+		{ label: __("Material Request"), doctype: "Material Request" },
+		{ label: __("Pick List"), doctype: "Pick List" },
+		{ label: __("Stock Reconciliation"), doctype: "Stock Reconciliation" },
+		{ label: __("Serial and Batch Bundle"), doctype: "Serial and Batch Bundle" },
+	];
+
+	if (frm.doc.item_naming_by !== "Naming Series") {
+		return transactions.filter((t) => t.doctype !== "Item");
+	}
+
+	return transactions;
+}
+
+function configure_naming_series(frm, doctype, fieldname) {
+	frm.naming_controller.show_naming_series_dialog(doctype, ({ naming_series_options }) => {
+		frm.doc[fieldname] = naming_series_options;
+		frm.refresh_field(fieldname);
+	});
+}

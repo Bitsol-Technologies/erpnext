@@ -8,6 +8,9 @@ frappe.pages["sales-funnel"].on_page_load = function (wrapper) {
 		single_column: true,
 	});
 
+	$(wrapper).find(".layout-main").addClass("row");
+	$(wrapper).find(".layout-main-section-wrapper").addClass("col-md-12");
+
 	wrapper.sales_funnel = new erpnext.SalesFunnel(wrapper);
 
 	frappe.breadcrumbs.add("Selling");
@@ -54,7 +57,7 @@ erpnext.SalesFunnel = class SalesFunnel {
 					function () {
 						me.get_data();
 					},
-					"fa fa-refresh"
+					"refresh-cw"
 				),
 			});
 
@@ -264,7 +267,7 @@ erpnext.SalesFunnel = class SalesFunnel {
 
 	render_chart(title) {
 		let me = this;
-		let currency = frappe.defaults.get_default("currency");
+		let currency = erpnext.get_currency(me.company);
 
 		let chart_data = me.options.data ? me.options.data : null;
 

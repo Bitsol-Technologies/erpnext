@@ -24,6 +24,7 @@ class LedgerMerge(Document):
 
 		account: DF.Link
 		account_name: DF.Data
+		account_type: DF.Data | None
 		company: DF.Link
 		is_group: DF.Check
 		merge_accounts: DF.Table[LedgerMergeAccounts]
@@ -40,6 +41,7 @@ class LedgerMerge(Document):
 
 		job_id = f"ledger_merge::{self.name}"
 		if not is_job_enqueued(job_id):
+			# nosemgrep: frappe-semgrep-rules.rules.frappe-enqueue-without-after-commit -- user action, nothing written before the enqueue
 			enqueue(
 				start_merge,
 				queue="default",
@@ -54,9 +56,11 @@ class LedgerMerge(Document):
 		return False
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def form_start_merge(docname):
-	return frappe.get_doc("Ledger Merge", docname).start_merge()
+	lm_doc = frappe.get_doc("Ledger Merge", docname)
+	lm_doc.check_permission("write")
+	return lm_doc.start_merge()
 
 
 def start_merge(docname):
@@ -71,14 +75,17 @@ def start_merge(docname):
 					ledger_merge.account,
 				)
 				row.db_set("merged", 1)
-				frappe.db.commit()
+				if not frappe.in_test:
+					# nosemgrep: frappe-semgrep-rules.rules.frappe-manual-commit -- background job saves progress or failure status
+					frappe.db.commit()
 				successful_merges += 1
 				frappe.publish_realtime(
 					"ledger_merge_progress",
 					{"ledger_merge": ledger_merge.name, "current": successful_merges, "total": total},
 				)
 			except Exception:
-				frappe.db.rollback()
+				if not frappe.in_test:
+					frappe.db.rollback()
 				ledger_merge.log_error("Ledger merge failed")
 			finally:
 				if successful_merges == total:

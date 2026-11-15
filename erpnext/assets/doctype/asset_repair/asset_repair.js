@@ -3,7 +3,7 @@
 
 frappe.ui.form.on("Asset Repair", {
 	setup: function (frm) {
-		frm.ignore_doctypes_on_cancel_all = ["Serial and Batch Bundle"];
+		frm.ignore_doctypes_on_cancel_all = ["Serial and Batch Bundle", "Stock Entry"];
 
 		frm.fields_dict.cost_center.get_query = function (doc) {
 			return {
@@ -84,27 +84,71 @@ frappe.ui.form.on("Asset Repair", {
 				};
 			};
 		}
+		if (frm.doc.asset) {
+			frappe.db.get_value("Asset", frm.doc.asset, "status").then(({ message }) => {
+				frm.set_df_property(
+					"capitalize_repair_cost",
+					"read_only",
+					message && message.status === "Fully Depreciated"
+				);
+			});
+		}
+	},
+
+	show_general_ledger: function (frm) {
+		if (frm.doc.docstatus > 0) {
+			frm.add_custom_button(
+				__("Accounting Ledger"),
+				function () {
+					frappe.route_options = {
+						voucher_no: frm.doc.name,
+						from_date: frm.doc.completion_date,
+						to_date: moment(frm.doc.modified).format("YYYY-MM-DD"),
+						company: frm.doc.company,
+						categorize_by: "",
+						show_cancelled_entries: frm.doc.docstatus === 2,
+					};
+					frappe.set_route("query-report", "General Ledger");
+				},
+				__("View")
+			);
+		}
 	},
 
 	repair_status: (frm) => {
-		if (frm.doc.completion_date && frm.doc.repair_status == "Completed") {
-			frappe.call({
-				method: "erpnext.assets.doctype.asset_repair.asset_repair.get_downtime",
-				args: {
-					failure_date: frm.doc.failure_date,
-					completion_date: frm.doc.completion_date,
-				},
-				callback: function (r) {
-					if (r.message) {
-						frm.set_value("downtime", r.message + " Hrs");
-					}
-				},
-			});
-		}
-
 		if (frm.doc.repair_status == "Completed" && !frm.doc.completion_date) {
 			frm.set_value("completion_date", frappe.datetime.now_datetime());
 		}
+
+		frm.events.set_downtime(frm);
+	},
+
+	failure_date: (frm) => {
+		frm.events.set_downtime(frm);
+	},
+
+	completion_date: (frm) => {
+		frm.events.set_downtime(frm);
+	},
+
+	set_downtime: (frm) => {
+		if (frm.doc.repair_status != "Completed" || !frm.doc.failure_date || !frm.doc.completion_date) {
+			frm.set_value("downtime", null);
+			return;
+		}
+
+		frappe.call({
+			method: "erpnext.assets.doctype.asset_repair.asset_repair.get_downtime",
+			args: {
+				failure_date: frm.doc.failure_date,
+				completion_date: frm.doc.completion_date,
+			},
+			callback: function (r) {
+				if (r.message) {
+					frm.set_value("downtime", r.message + " Hrs");
+				}
+			},
+		});
 	},
 
 	stock_items_on_form_rendered() {
@@ -163,26 +207,6 @@ frappe.ui.form.on("Asset Repair Purchase Invoice", {
 				}
 			},
 		});
-	},
-
-	show_general_ledger: (frm) => {
-		if (frm.doc.docstatus > 0) {
-			frm.add_custom_button(
-				__("Accounting Ledger"),
-				function () {
-					frappe.route_options = {
-						voucher_no: frm.doc.name,
-						from_date: frm.doc.posting_date,
-						to_date: moment(frm.doc.modified).format("YYYY-MM-DD"),
-						company: frm.doc.company,
-						categorize_by: "",
-						show_cancelled_entries: frm.doc.docstatus === 2,
-					};
-					frappe.set_route("query-report", "General Ledger");
-				},
-				__("View")
-			);
-		}
 	},
 });
 

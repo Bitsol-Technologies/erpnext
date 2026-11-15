@@ -4,37 +4,31 @@
  "allow_rename": 1,
  "autoname": "naming_series:",
  "creation": "2013-03-07 11:55:07",
+ "description": "A piece of work with tasks, time and costs.",
  "doctype": "DocType",
  "document_type": "Setup",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/project",
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
   "project_name",
   "status",
   "project_type",
-  "is_active",
   "percent_complete_method",
-  "percent_complete",
   "column_break_5",
   "project_template",
-  "expected_start_date",
-  "expected_end_date",
   "priority",
   "department",
-  "customer_details",
-  "customer",
-  "column_break_14",
-  "sales_order",
-  "users_section",
-  "users",
-  "copied_from",
-  "section_break0",
-  "notes",
+  "is_active",
+  "percent_complete",
   "section_break_18",
+  "expected_start_date",
   "actual_start_date",
   "actual_time",
   "column_break_20",
+  "expected_end_date",
   "actual_end_date",
+  "costing_tab",
   "project_details",
   "estimated_costing",
   "total_costing_amount",
@@ -50,7 +44,7 @@
   "gross_margin",
   "column_break_37",
   "per_gross_margin",
-  "monitor_progress",
+  "monitor_progress_tab",
   "collect_progress",
   "holiday_list",
   "frequency",
@@ -63,12 +57,24 @@
   "weekly_time_to_send",
   "column_break_45",
   "subject",
-  "message"
+  "message",
+  "more_info_tab",
+  "customer_details",
+  "customer",
+  "column_break_14",
+  "sales_order",
+  "users_section",
+  "users",
+  "copied_from",
+  "section_break0",
+  "notes",
+  "connections_tab"
  ],
  "fields": [
   {
    "fieldname": "project_name",
    "fieldtype": "Data",
+   "in_global_search": 1,
    "label": "Project Name",
    "oldfieldtype": "Data",
    "reqd": 1,
@@ -78,17 +84,19 @@
    "default": "Open",
    "fieldname": "status",
    "fieldtype": "Select",
+   "in_import_template": 1,
    "in_standard_filter": 1,
    "label": "Status",
    "no_copy": 1,
    "oldfieldname": "status",
    "oldfieldtype": "Select",
-   "options": "Open\nCompleted\nCancelled",
+   "options": "Open\nOn hold\nCompleted\nCancelled",
    "search_index": 1
   },
   {
    "fieldname": "project_type",
    "fieldtype": "Link",
+   "in_import_template": 1,
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Project Type",
@@ -115,9 +123,10 @@
    "bold": 1,
    "fieldname": "percent_complete",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "% Completed",
    "no_copy": 1,
-   "read_only": 1
+   "read_only_depends_on": "eval:doc.percent_complete_method != 'Manual'"
   },
   {
    "fieldname": "column_break_5",
@@ -135,6 +144,8 @@
    "bold": 1,
    "fieldname": "expected_start_date",
    "fieldtype": "Date",
+   "in_import_template": 1,
+   "in_list_view": 1,
    "label": "Expected Start Date",
    "oldfieldname": "project_start_date",
    "oldfieldtype": "Date"
@@ -143,6 +154,7 @@
    "bold": 1,
    "fieldname": "expected_end_date",
    "fieldtype": "Date",
+   "in_import_template": 1,
    "in_list_view": 1,
    "label": "Expected End Date",
    "oldfieldname": "completion_date",
@@ -175,7 +187,9 @@
    "fieldname": "customer",
    "fieldtype": "Link",
    "in_global_search": 1,
+   "in_import_template": 1,
    "label": "Customer",
+   "no_copy": 1,
    "oldfieldname": "customer",
    "oldfieldtype": "Link",
    "options": "Customer",
@@ -190,6 +204,7 @@
    "fieldname": "sales_order",
    "fieldtype": "Link",
    "label": "Sales Order",
+   "no_copy": 1,
    "options": "Sales Order"
   },
   {
@@ -203,13 +218,15 @@
    "fieldname": "users",
    "fieldtype": "Table",
    "label": "Users",
-   "options": "Project User"
+   "options": "Project User",
+   "permlevel": 1
   },
   {
    "fieldname": "copied_from",
    "fieldtype": "Data",
    "hidden": 1,
    "label": "Copied From",
+   "permlevel": 1,
    "read_only": 1
   },
   {
@@ -231,7 +248,7 @@
    "collapsible": 1,
    "fieldname": "section_break_18",
    "fieldtype": "Section Break",
-   "label": "Start and End Dates"
+   "label": "Timeline"
   },
   {
    "fieldname": "actual_start_date",
@@ -258,7 +275,6 @@
    "read_only": 1
   },
   {
-   "collapsible": 1,
    "fieldname": "project_details",
    "fieldtype": "Section Break",
    "label": "Costing and Billing",
@@ -268,6 +284,7 @@
   {
    "fieldname": "estimated_costing",
    "fieldtype": "Currency",
+   "in_import_template": 1,
    "in_list_view": 1,
    "label": "Estimated Cost",
    "oldfieldname": "project_value",
@@ -319,7 +336,7 @@
   {
    "fieldname": "total_consumed_material_cost",
    "fieldtype": "Currency",
-   "label": "Total Consumed Material Cost (via Stock Entry)",
+   "label": "Total Consumed Material Cost",
    "read_only": 1
   },
   {
@@ -329,7 +346,6 @@
    "options": "Cost Center"
   },
   {
-   "collapsible": 1,
    "fieldname": "margin",
    "fieldtype": "Section Break",
    "label": "Margin",
@@ -356,12 +372,6 @@
    "oldfieldname": "per_gross_margin",
    "oldfieldtype": "Currency",
    "read_only": 1
-  },
-  {
-   "collapsible": 1,
-   "fieldname": "monitor_progress",
-   "fieldtype": "Section Break",
-   "label": "Monitor Progress"
   },
   {
    "default": "0",
@@ -455,20 +465,53 @@
    "fieldtype": "Data",
    "label": "Subject",
    "mandatory_depends_on": "collect_progress"
+  },
+  {
+   "fieldname": "costing_tab",
+   "fieldtype": "Tab Break",
+   "label": "Costing"
+  },
+  {
+   "fieldname": "monitor_progress_tab",
+   "fieldtype": "Tab Break",
+   "label": "Progress"
+  },
+  {
+   "fieldname": "more_info_tab",
+   "fieldtype": "Tab Break",
+   "label": "More Info"
+  },
+  {
+   "fieldname": "connections_tab",
+   "fieldtype": "Tab Break",
+   "label": "Connections",
+   "show_dashboard": 1
   }
  ],
- "icon": "fa fa-puzzle-piece",
+ "icon": "folder-kanban",
  "idx": 29,
  "index_web_pages_for_search": 1,
  "links": [],
  "max_attachments": 4,
- "modified": "2025-08-21 17:57:58.314809",
+ "modified": "2026-10-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Project",
  "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
  "permissions": [
+  {
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "permlevel": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Projects Manager",
+   "share": 1,
+   "write": 1
+  },
   {
    "create": 1,
    "delete": 1,
@@ -506,6 +549,86 @@
    "role": "Employee",
    "select": 1,
    "share": 1
+  },
+  {
+   "role": "HR User",
+   "select": 1
+  },
+  {
+   "role": "HR Manager",
+   "select": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "select": 1
+  },
+  {
+   "role": "Accounts User",
+   "select": 1
+  },
+  {
+   "role": "Delivery Manager",
+   "select": 1
+  },
+  {
+   "role": "Delivery User",
+   "select": 1
+  },
+  {
+   "role": "Maintenance Manager",
+   "select": 1
+  },
+  {
+   "role": "Maintenance User",
+   "select": 1
+  },
+  {
+   "role": "Manufacturing Manager",
+   "select": 1
+  },
+  {
+   "role": "Manufacturing User",
+   "select": 1
+  },
+  {
+   "role": "Purchase Manager",
+   "select": 1
+  },
+  {
+   "role": "Purchase Master Manager",
+   "select": 1
+  },
+  {
+   "role": "Purchase User",
+   "select": 1
+  },
+  {
+   "role": "Quality Manager",
+   "select": 1
+  },
+  {
+   "role": "Sales Manager",
+   "select": 1
+  },
+  {
+   "role": "Sales Master Manager",
+   "select": 1
+  },
+  {
+   "role": "Sales User",
+   "select": 1
+  },
+  {
+   "role": "Stock Manager",
+   "select": 1
+  },
+  {
+   "role": "Stock User",
+   "select": 1
+  },
+  {
+   "role": "Support Team",
+   "select": 1
   }
  ],
  "quick_entry": 1,

@@ -1,9 +1,10 @@
 {
  "actions": [],
- "allow_rename": 1,
  "autoname": "field:template_name",
  "creation": "2025-08-02 04:44:15.184541",
+ "description": "The rows and formulas of a custom financial statement.",
  "doctype": "DocType",
+ "documentation": "https://docs.frappe.io/erpnext/user/manual/en/financial-report-template",
  "engine": "InnoDB",
  "field_order": [
   "template_name",
@@ -31,7 +32,8 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Report Type",
-   "options": "\nProfit and Loss Statement\nBalance Sheet\nCash Flow\nCustom Financial Statement"
+   "options": "\nProfit and Loss Statement\nBalance Sheet\nCash Flow\nCustom Financial Statement",
+   "reqd": 1
   },
   {
    "depends_on": "eval:frappe.boot.developer_mode",
@@ -64,9 +66,10 @@
   }
  ],
  "grid_page_length": 50,
+ "icon": "file-spreadsheet",
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-11-14 00:11:03.508139",
+ "modified": "2026-02-23 01:04:05.797161",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Financial Report Template",

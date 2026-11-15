@@ -9,7 +9,7 @@ frappe.query_reports["Consolidated Trial Balance"] = {
 			fieldtype: "MultiSelectList",
 			options: "Company",
 			get_data: function (txt) {
-				return frappe.db.get_link_options("Company", txt);
+				return erpnext.utils.get_link_options("Company", txt);
 			},
 			reqd: 1,
 		},
@@ -83,6 +83,12 @@ frappe.query_reports["Consolidated Trial Balance"] = {
 		{
 			fieldname: "include_default_book_entries",
 			label: __("Include Default FB Entries"),
+			fieldtype: "Check",
+			default: 1,
+		},
+		{
+			fieldname: "show_net_values",
+			label: __("Show net values in opening and closing columns"),
 			fieldtype: "Check",
 			default: 1,
 		},

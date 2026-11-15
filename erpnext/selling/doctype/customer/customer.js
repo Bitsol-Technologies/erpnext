@@ -2,7 +2,16 @@
 // License: GNU General Public License v3. See license.txt
 
 frappe.ui.form.on("Customer", {
+	restrict_to_companies(frm) {
+		if (!frm.doc.restrict_to_companies) {
+			frm.set_value("allowed_companies", []);
+		}
+	},
+
 	setup: function (frm) {
+		frm.set_query("allowed_companies", () => ({
+			query: "erpnext.stock.doctype.company_restriction.company_restriction.company_query",
+		}));
 		frm.custom_make_buttons = {
 			Opportunity: "Opportunity",
 			Quotation: "Quotation",
@@ -38,21 +47,17 @@ frappe.ui.form.on("Customer", {
 
 		frm.add_fetch("lead_name", "company_name", "customer_name");
 		frm.add_fetch("default_sales_partner", "commission_rate", "default_commission_rate");
-		frm.set_query("default_price_list", { selling: 1 });
+		frm.set_query("default_price_list", () => ({ filters: { selling: 1 } }));
 		frm.set_query("account", "accounts", function (doc, cdt, cdn) {
 			let d = locals[cdt][cdn];
-			let filters = {
-				account_type: "Receivable",
-				root_type: "Asset",
-				company: d.company,
-				is_group: 0,
-			};
-
-			if (doc.party_account_currency) {
-				$.extend(filters, { account_currency: doc.party_account_currency });
-			}
 			return {
-				filters: filters,
+				filters: {
+					account_type: "Receivable",
+					root_type: "Asset",
+					company: d.company,
+					is_group: 0,
+					account_currency: erpnext.utils.get_party_account_currency(doc, d.company),
+				},
 			};
 		});
 
@@ -185,13 +190,15 @@ frappe.ui.form.on("Customer", {
 				frm.add_custom_button(__(doctype), frm.make_methods[doctype], __("Create"));
 			}
 
-			frm.add_custom_button(
-				__("Get Customer Group Details"),
-				function () {
-					frm.trigger("get_customer_group_details");
-				},
-				__("Actions")
-			);
+			if (frm.doc.customer_group) {
+				frm.add_custom_button(
+					__("Get Customer Group Details"),
+					function () {
+						frm.trigger("get_customer_group_details");
+					},
+					__("Actions")
+				);
+			}
 
 			if (
 				cint(frappe.defaults.get_default("enable_common_party_accounting")) &&
@@ -212,9 +219,11 @@ frappe.ui.form.on("Customer", {
 			frappe.contacts.clear_address_and_contact(frm);
 		}
 
-		var grid = cur_frm.get_field("sales_team").grid;
-		grid.set_column_disp("allocated_amount", false);
-		grid.set_column_disp("incentives", false);
+		let grid = frm.get_field("sales_team")?.grid;
+		if (grid) {
+			grid.set_column_disp("allocated_amount", false);
+			grid.set_column_disp("incentives", false);
+		}
 
 		frm.set_query("customer_group", () => {
 			return {

@@ -4,6 +4,14 @@
 frappe.query_reports["Sales Partner Transaction Summary"] = {
 	filters: [
 		{
+			fieldname: "company",
+			label: __("Company"),
+			fieldtype: "Link",
+			options: "Company",
+			default: frappe.defaults.get_user_default("Company"),
+			reqd: 1,
+		},
+		{
 			fieldname: "sales_partner",
 			label: __("Sales Partner"),
 			fieldtype: "Link",
@@ -27,14 +35,6 @@ frappe.query_reports["Sales Partner Transaction Summary"] = {
 			label: __("To Date"),
 			fieldtype: "Date",
 			default: frappe.datetime.get_today(),
-		},
-		{
-			fieldname: "company",
-			label: __("Company"),
-			fieldtype: "Link",
-			options: "Company",
-			default: frappe.defaults.get_user_default("Company"),
-			reqd: 1,
 		},
 		{
 			fieldname: "item_group",
@@ -61,10 +61,10 @@ frappe.query_reports["Sales Partner Transaction Summary"] = {
 			options: "Territory",
 		},
 		{
-			fieldname: "show_return_entries",
-			label: __("Show Return Entries"),
+			fieldname: "account_for_return_entries",
+			label: __("Account for Return Entries"),
 			fieldtype: "Check",
-			default: 0,
+			default: 1,
 		},
 	],
 };

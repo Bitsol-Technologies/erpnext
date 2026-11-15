@@ -7,19 +7,31 @@ import json
 import frappe
 from frappe import ValidationError, _, msgprint
 from frappe.contacts.doctype.address.address import render_address
+from frappe.query_builder.functions import Abs, Sum
 from frappe.utils import cint, flt, format_date, get_link_to_form, getdate
 from frappe.utils.data import nowtime
 
 import erpnext
 from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import get_dimensions
 from erpnext.accounts.doctype.budget.budget import validate_expense_against_budget
-from erpnext.accounts.party import get_party_details
-from erpnext.buying.utils import update_last_purchase_rate, validate_for_items
-from erpnext.controllers.accounts_controller import get_taxes_and_charges
+from erpnext.accounts.party import _get_party_details
+from erpnext.buying.utils import update_last_purchase_rate, validate_duplicate_items, validate_for_items
+from erpnext.controllers.accounts_controller import (
+	_get_taxes_and_charges,
+	is_deduct_with_valuation,
+	validate_deduct_with_valuation_category,
+)
 from erpnext.controllers.sales_and_purchase_return import get_rate_for_return
 from erpnext.controllers.subcontracting_controller import SubcontractingController
-from erpnext.stock.get_item_details import get_conversion_factor, get_item_defaults
-from erpnext.stock.utils import get_incoming_rate
+from erpnext.setup.doctype.terms_and_conditions.terms_and_conditions import validate_terms_and_conditions
+from erpnext.setup.utils import get_exchange_rate
+from erpnext.stock.get_item_details import (
+	NOT_APPLICABLE_TAX,
+	get_conversion_factor,
+	get_item_defaults,
+)
+from erpnext.stock.utils import _get_incoming_rate, is_serial_no_wise_valuation_disabled
+from erpnext.utilities.transaction_base import get_whole_number_uoms
 
 
 class QtyMismatchError(ValidationError):
@@ -31,6 +43,7 @@ class BuyingController(SubcontractingController):
 		self.flags.ignore_permlevel_for_fields = ["buying_price_list", "price_list_currency"]
 
 	def validate(self):
+		validate_terms_and_conditions(self.get("tc_name"), "buying")
 		self.set_rate_for_standalone_debit_note()
 
 		super().validate()
@@ -40,6 +53,7 @@ class BuyingController(SubcontractingController):
 		self.validate_items()
 		self.set_qty_as_per_stock_uom()
 		self.validate_stock_or_nonstock_items()
+		self.validate_deduct_with_valuation_taxes()
 		self.validate_warehouse()
 		self.validate_from_warehouse()
 		self.set_supplier_address()
@@ -49,6 +63,8 @@ class BuyingController(SubcontractingController):
 
 		if self.doctype == "Purchase Invoice":
 			self.validate_purchase_receipt_if_update_stock()
+			if not self.update_stock:
+				validate_duplicate_items(self)
 
 		if self.doctype == "Purchase Receipt" or (self.doctype == "Purchase Invoice" and self.update_stock):
 			self.validate_purchase_return()
@@ -59,7 +75,7 @@ class BuyingController(SubcontractingController):
 			# sub-contracting
 			self.validate_for_subcontracting()
 			if self.get("is_old_subcontracting_flow"):
-				self.create_raw_materials_supplied()
+				self.create_raw_materials_supplied_or_received()
 			self.set_landed_cost_voucher_amount()
 
 		if self.doctype in ("Purchase Receipt", "Purchase Invoice"):
@@ -81,18 +97,12 @@ class BuyingController(SubcontractingController):
 				),
 			)
 
-		if (
-			self.get("company")
-			and (
-				default_buying_terms := frappe.get_value(
-					"Company", self.get("company"), "default_buying_terms"
-				)
-			)
-			and not self.get("tc_name")
-			and not self.get("terms")
-		):
-			self.tc_name = default_buying_terms
-			self.terms = frappe.get_value("Terms and Conditions", self.get("tc_name"), "terms")
+		if self.docstatus.is_draft() and self.get("company") and not self.get("terms"):
+			if not self.get("tc_name"):
+				self.tc_name = frappe.get_value("Company", self.company, "default_buying_terms")
+			tnc = frappe.get_cached_doc("Terms and Conditions", self.tc_name) if self.tc_name else None
+			if tnc and not tnc.disabled and tnc.get("buying"):
+				self.set_missing_terms()
 
 	def validate_posting_date_with_po(self):
 		po_list = {x.purchase_order for x in self.items if x.purchase_order}
@@ -146,13 +156,16 @@ class BuyingController(SubcontractingController):
 				):
 					bundle_ids[bundle.name] = bundle.serial_and_batch_bundle
 
+			bundle_ids.update(self.get_component_packages())
+
 			if not bundle_ids:
 				return
 
 			for item in self.get("items"):
-				if item.get(field) and not item.serial_and_batch_bundle and bundle_ids.get(item.get(field)):
+				reference = item.get(field) or item.get("delivery_note_packed_item")
+				if reference and not item.serial_and_batch_bundle and bundle_ids.get(reference):
 					item.serial_and_batch_bundle = self.make_package_for_transfer(
-						bundle_ids.get(item.get(field)),
+						bundle_ids.get(reference),
 						item.from_warehouse,
 						type_of_transaction="Outward",
 						do_not_submit=True,
@@ -180,12 +193,44 @@ class BuyingController(SubcontractingController):
 				):
 					frappe.set_value("Serial and Batch Entry", sabe[0], "qty", item.qty)
 
+	def get_component_incoming_rates(self) -> dict:
+		packed_items = [
+			d.delivery_note_packed_item for d in self.get("items") if d.get("delivery_note_packed_item")
+		]
+		if not packed_items:
+			return {}
+
+		return frappe._dict(
+			frappe.get_all(
+				"Packed Item",
+				filters={"name": ("in", packed_items)},
+				fields=["name", "incoming_rate"],
+				as_list=True,
+			)
+		)
+
+	def get_component_packages(self) -> dict:
+		packed_items = [
+			d.delivery_note_packed_item for d in self.get("items") if d.get("delivery_note_packed_item")
+		]
+		if not packed_items:
+			return {}
+
+		return frappe._dict(
+			frappe.get_all(
+				"Packed Item",
+				filters={"name": ("in", packed_items)},
+				fields=["name", "serial_and_batch_bundle"],
+				as_list=True,
+			)
+		)
+
 	def set_rate_for_standalone_debit_note(self):
 		if self.get("is_return") and self.get("update_stock") and not self.return_against:
 			for row in self.items:
 				if row.rate <= 0:
 					# override the rate with valuation rate
-					row.rate = get_incoming_rate(
+					row.rate = _get_incoming_rate(
 						{
 							"item_code": row.item_code,
 							"warehouse": row.warehouse,
@@ -214,7 +259,7 @@ class BuyingController(SubcontractingController):
 		# set contact and address details for supplier, if they are not mentioned
 		if getattr(self, "supplier", None):
 			self.update_if_missing(
-				get_party_details(
+				_get_party_details(
 					self.supplier,
 					party_type="Supplier",
 					doctype=self.doctype,
@@ -232,9 +277,23 @@ class BuyingController(SubcontractingController):
 
 		if self.meta.get_field("taxes"):
 			if self.get("taxes_and_charges") and not self.get("taxes") and not for_validate:
-				taxes = get_taxes_and_charges("Purchase Taxes and Charges Template", self.taxes_and_charges)
+				taxes = _get_taxes_and_charges("Purchase Taxes and Charges Template", self.taxes_and_charges)
 				for tax in taxes:
 					self.append("taxes", tax)
+
+	def set_transaction_date_exchange_rate(self):
+		"""Replace the exchange rate mapped from a Purchase Order with the posting date rate."""
+		if not (
+			self.currency
+			and frappe.db.get_single_value("Buying Settings", "use_transaction_date_exchange_rate")
+			and not any(item.get("purchase_receipt") or item.get("purchase_invoice") for item in self.items)
+		):
+			return
+
+		self.use_transaction_date_exchange_rate = 1
+		self.conversion_rate = get_exchange_rate(
+			self.currency, self.company_currency, self.posting_date, "for_buying"
+		)
 
 	def set_supplier_from_item_default(self):
 		if self.meta.get_field("supplier") and not self.supplier:
@@ -258,6 +317,39 @@ class BuyingController(SubcontractingController):
 			msg = _('Tax Category has been changed to "Total" because all the Items are non-stock items')
 			self.update_tax_category(msg)
 
+	def validate_deduct_with_valuation_taxes(self):
+		taxes = [tax for tax in self.get("taxes") or [] if is_deduct_with_valuation(tax)]
+		if taxes:
+			validate_deduct_with_valuation_category(taxes, self.get_deduct_with_valuation_heads_from_source())
+
+	def get_deduct_with_valuation_source_names(self) -> set:
+		source_fields = ("purchase_order", "purchase_receipt", "purchase_invoice", "supplier_quotation")
+		source_names = {item.get(field) for item in self.get("items") for field in source_fields}
+		source_names.update((self.get("amended_from"), self.get("return_against")))
+		if self.get("auto_repeat"):
+			source_names.add(frappe.db.get_value("Auto Repeat", self.auto_repeat, "reference_document"))
+		return source_names - {None, ""}
+
+	def get_deduct_with_valuation_heads_from_source(self) -> set:
+		source_names = self.get_deduct_with_valuation_source_names()
+		if not source_names:
+			return set()
+
+		taxes = frappe.qb.DocType("Purchase Taxes and Charges")
+		account_heads = (
+			frappe.qb.from_(taxes)
+			.select(taxes.account_head)
+			.distinct()
+			.where(
+				taxes.parent.isin(source_names)
+				& (taxes.docstatus != 0)
+				& (taxes.category == "Valuation")
+				& (taxes.add_deduct_tax == "Deduct")
+			)
+			.run(pluck=True)
+		)
+		return set(account_heads)
+
 	def update_tax_category(self, msg):
 		tax_for_valuation = [
 			d for d in self.get("taxes") if d.category in ["Valuation", "Valuation and Total"]
@@ -274,20 +366,87 @@ class BuyingController(SubcontractingController):
 			return
 
 		purchase_doc_field = "purchase_receipt" if self.doctype == "Purchase Receipt" else "purchase_invoice"
-		not_cancelled_asset = []
-		if self.return_against:
-			not_cancelled_asset = [
-				d.name
-				for d in frappe.db.get_all("Asset", {purchase_doc_field: self.return_against, "docstatus": 1})
-			]
+		detail_field = purchase_doc_field + "_item"
+		asset_filters = {purchase_doc_field: self.return_against, "docstatus": 1}
+		if (self.doctype == "Purchase Receipt" or self.get("update_stock")) and all(
+			row.get(detail_field) for row in self.items if row.is_fixed_asset
+		):
+			# Linked assets are checked against the quantity retained in each purchase row below.
+			asset_filters[detail_field] = ("is", "not set")
 
-		if self.is_return and len(not_cancelled_asset):
+		if self.return_against and frappe.db.exists("Asset", asset_filters):
 			frappe.throw(
 				_(
-					"{} has submitted assets linked to it. You need to cancel the assets to create purchase return."
+					"{0} has submitted assets linked to it. You need to cancel the assets to create purchase return."
 				).format(self.return_against),
 				title=_("Not Allowed"),
 			)
+
+		self.validate_assets_left_after_return()
+
+	def validate_assets_left_after_return(self):
+		if self.doctype == "Purchase Invoice" and not self.get("update_stock"):
+			return
+
+		detail_field = (
+			"purchase_receipt_item" if self.doctype == "Purchase Receipt" else "purchase_invoice_item"
+		)
+		returned_qty, rows = self.get_returned_asset_qty(detail_field)
+		if not returned_qty:
+			return
+
+		kept_qty = self.get_qty_kept_after_return(detail_field, returned_qty)
+		for detail, asset_qty in get_linked_asset_qty(detail_field, list(returned_qty)).items():
+			if flt(asset_qty) > kept_qty[detail]:
+				frappe.throw(
+					_(
+						"Row #{0}: {1} assets of {2} are linked to {3}, which keeps only {4} after this return. Cancel the extra submitted assets or delete the extra draft assets first."
+					).format(
+						rows[detail].idx,
+						flt(asset_qty),
+						frappe.bold(rows[detail].item_code),
+						get_link_to_form(self.doctype, self.return_against),
+						kept_qty[detail],
+					),
+					title=_("Not Allowed"),
+				)
+
+	def get_returned_asset_qty(self, detail_field):
+		returned_qty, rows = {}, {}
+		for d in self.items:
+			if d.is_fixed_asset and d.get(detail_field):
+				returned_qty[d.get(detail_field)] = returned_qty.get(d.get(detail_field), 0) + abs(flt(d.qty))
+				rows.setdefault(d.get(detail_field), d)
+
+		return returned_qty, rows
+
+	def get_qty_kept_after_return(self, detail_field, returned_qty):
+		item_doctype = f"{self.doctype} Item"
+		kept_qty = dict(
+			frappe.get_all(
+				item_doctype, filters={"name": ("in", list(returned_qty))}, fields=["name", "qty"], as_list=1
+			)
+		)
+
+		parent, child = frappe.qb.DocType(self.doctype), frappe.qb.DocType(item_doctype)
+		earlier_returns = (
+			frappe.qb.from_(child)
+			.join(parent)
+			.on(parent.name == child.parent)
+			.select(child[detail_field], Sum(Abs(child.qty)))
+			.where(
+				(child[detail_field].isin(list(returned_qty)))
+				& (parent.docstatus == 1)
+				& (parent.is_return == 1)
+				& (parent.name != self.name)
+			)
+			.groupby(child[detail_field])
+		).run()
+
+		for detail, qty in earlier_returns:
+			kept_qty[detail] = flt(kept_qty.get(detail)) - flt(qty)
+
+		return {detail: flt(kept_qty.get(detail)) - qty for detail, qty in returned_qty.items()}
 
 	def get_asset_items(self):
 		if self.doctype not in ["Purchase Order", "Purchase Invoice", "Purchase Receipt"]:
@@ -327,32 +486,51 @@ class BuyingController(SubcontractingController):
 					address_display_field, render_address(self.get(address_field), check_permissions=False)
 				)
 
+	def get_validated_purchase_expense_details(self, item_code):
+		fields = ("purchase_expense_account", "purchase_expense_contra_account")
+		details = get_purchase_expense_account(item_code, self.company)
+
+		for field in fields:
+			if not details.get(field):
+				details[field] = frappe.get_cached_value("Company", self.company, field)
+
+		for field in fields:
+			if not details.get(field):
+				frappe.throw(
+					_("Please set {0} in Company {1} or in the Item Defaults of Item {2}").format(
+						frappe.bold(_(frappe.unscrub(field))), self.company, item_code
+					)
+				)
+
+		return details
+
 	def set_gl_entry_for_purchase_expense(self, gl_entries):
+		if not cint(frappe.db.get_single_value("Accounts Settings", "book_stock_expense_gl_entries")):
+			return
+
 		if self.doctype == "Purchase Invoice" and not self.update_stock:
 			return
 
+		stock_items = self.get_stock_items()
+
 		for row in self.items:
-			details = get_purchase_expense_account(row.item_code, self.company)
+			# A service item holds no stock value, so there is nothing to book against it - and it
+			# must not make the expense accounts mandatory either.
+			if row.item_code not in stock_items:
+				continue
 
-			if not details.purchase_expense_account:
-				details.purchase_expense_account = frappe.get_cached_value(
-					"Company", self.company, "purchase_expense_account"
-				)
-
-			if not details.purchase_expense_account:
-				return
-
-			if not details.purchase_expense_contra_account:
-				details.purchase_expense_contra_account = frappe.get_cached_value(
-					"Company", self.company, "purchase_expense_contra_account"
-				)
-
-			if not details.purchase_expense_contra_account:
-				frappe.throw(
-					_("Please set Purchase Expense Contra Account in Company {0}").format(self.company)
-				)
+			details = self.get_validated_purchase_expense_details(row.item_code)
+			if not details:
+				continue
 
 			amount = flt(row.valuation_rate * row.stock_qty, row.precision("base_amount"))
+			if row.landed_cost_voucher_amount:
+				amount -= flt(row.landed_cost_voucher_amount, row.precision("base_amount"))
+
+			if not amount:
+				# GL Entry rejects a row with neither a debit nor a credit.
+				continue
+
 			self.add_gl_entry(
 				gl_entries=gl_entries,
 				account=details.purchase_expense_account,
@@ -410,36 +588,28 @@ class BuyingController(SubcontractingController):
 		stock_and_asset_items = []
 		stock_and_asset_items = self.get_stock_items() + self.get_asset_items()
 
-		stock_and_asset_items_qty, stock_and_asset_items_amount = 0, 0
-		last_item_idx = 1
-		for d in self.get("items"):
-			if d.item_code and d.item_code in stock_and_asset_items:
-				stock_and_asset_items_qty += flt(d.qty)
-				stock_and_asset_items_amount += flt(d.base_net_amount)
+		(
+			tax_accounts,
+			total_valuation_amount,
+			all_item_charges,
+			stock_item_charges,
+		) = self.get_tax_details()
 
-			last_item_idx = d.idx
+		# Pre-compute each item's share of the "Actual" valuation charges (keyed by row idx).
+		actual_charge_per_item = self.distribute_actual_tax_amount(
+			stock_and_asset_items, all_item_charges, stock_item_charges
+		)
 
-		tax_accounts, total_valuation_amount, total_actual_tax_amount = self.get_tax_details()
+		last_item_idx = max((d.idx for d in self.get("items")), default=1)
 
 		for i, item in enumerate(self.get("items")):
 			if item.item_code and (item.qty or item.get("rejected_qty")):
-				item_tax_amount, actual_tax_amount = 0.0, 0.0
 				if i == (last_item_idx - 1):
+					# dump any rounding remainder of the On Net Total valuation on the last item
 					item_tax_amount = total_valuation_amount
-					actual_tax_amount = total_actual_tax_amount
 				else:
-					# calculate item tax amount
 					item_tax_amount = self.get_item_tax_amount(item, tax_accounts)
 					total_valuation_amount -= item_tax_amount
-
-					if total_actual_tax_amount:
-						actual_tax_amount = self.get_item_actual_tax_amount(
-							item,
-							total_actual_tax_amount,
-							stock_and_asset_items_amount,
-							stock_and_asset_items_qty,
-						)
-						total_actual_tax_amount -= actual_tax_amount
 
 				# This code is required here to calculate the correct valuation for stock items
 				if item.item_code not in stock_and_asset_items:
@@ -448,10 +618,11 @@ class BuyingController(SubcontractingController):
 
 				# Item tax amount is the total tax amount applied on that item and actual tax type amount
 				item.item_tax_amount = flt(
-					item_tax_amount + actual_tax_amount, self.precision("item_tax_amount", item)
+					item_tax_amount + actual_charge_per_item.get(item.idx, 0.0),
+					self.precision("item_tax_amount", item),
 				)
 
-				self.round_floats_in(item)
+				self.round_floats_in(item, do_not_round_fields=["conversion_factor"])
 				if flt(item.conversion_factor) == 0.0:
 					item.conversion_factor = (
 						get_conversion_factor(item.item_code, item.uom).get("conversion_factor") or 1.0
@@ -459,7 +630,7 @@ class BuyingController(SubcontractingController):
 
 				net_rate = item.base_net_amount
 				if item.sales_incoming_rate:  # for internal transfer
-					net_rate = item.qty * item.sales_incoming_rate
+					net_rate = self.get_internal_transfer_qty(item) * item.sales_incoming_rate
 
 				if (
 					not net_rate
@@ -468,11 +639,13 @@ class BuyingController(SubcontractingController):
 						"Buying Settings", "set_valuation_rate_for_rejected_materials"
 					)
 				):
-					net_rate = item.rejected_qty * item.net_rate
+					net_rate = item.rejected_qty * item.base_net_rate
 
-				qty_in_stock_uom = flt(item.qty * item.conversion_factor)
-				if not qty_in_stock_uom and item.get("rejected_qty"):
-					qty_in_stock_uom = flt(item.rejected_qty * item.conversion_factor)
+				qty_in_stock_uom = (
+					get_stock_qty(item, item.qty)
+					or get_stock_qty(item, item.rejected_qty)
+					or flt(item.qty) * flt(item.conversion_factor)
+				)
 
 				if self.get("is_old_subcontracting_flow"):
 					item.rm_supp_cost = self.get_supplied_items_cost(item.name, reset_outgoing_rate)
@@ -494,49 +667,161 @@ class BuyingController(SubcontractingController):
 
 		update_regional_item_valuation_rate(self)
 
+	def get_rejected_valuation_rate(self, row) -> float:
+		if not frappe.db.get_single_value("Buying Settings", "set_valuation_rate_for_rejected_materials"):
+			return 0.0
+
+		if self.is_internal_transfer() or not flt(row.qty):
+			return flt(row.valuation_rate)
+
+		return flt(row.base_net_rate) / (flt(row.conversion_factor) or 1.0)
+
 	def get_tax_details(self):
 		tax_accounts = []
 		total_valuation_amount = 0.0
-		total_actual_tax_amount = 0.0
+		# Per-row "Actual" valuation charge amounts, kept separate (not pooled) so each can be
+		# distributed individually - this keeps the per-item item_tax_amount in lockstep with the
+		# per-tax-row amount capitalized in the GL (see get_capitalized_valuation_tax).
+		all_item_charges = []
+		stock_item_charges = []
 
 		for d in self.get("taxes"):
 			if d.category not in ["Valuation", "Valuation and Total"]:
 				continue
 
-			if d.charge_type == "On Net Total":
-				total_valuation_amount += flt(d.base_tax_amount_after_discount_amount)
-				tax_accounts.append(d.account_head)
-			else:
-				total_actual_tax_amount += flt(d.base_tax_amount_after_discount_amount)
+			multiplier = -1 if d.get("add_deduct_tax") == "Deduct" else 1
+			amount = flt(d.base_tax_amount_after_discount_amount) * multiplier
 
-		return tax_accounts, total_valuation_amount, total_actual_tax_amount
+			if d.charge_type == "On Net Total":
+				total_valuation_amount += amount
+				tax_accounts.append((d.account_head, multiplier))
+			elif d.charge_type == "Actual" and d.get("allocate_full_amount_to_stock_items"):
+				# Capitalize the full amount onto stock/asset items only (e.g. Freight)
+				stock_item_charges.append(amount)
+			elif d.charge_type != "On Item Quantity":
+				all_item_charges.append(amount)
+
+		return tax_accounts, total_valuation_amount, all_item_charges, stock_item_charges
 
 	def get_item_tax_amount(self, item, tax_accounts):
 		item_tax_amount = 0.0
 		if item.item_tax_rate:
 			tax_details = json.loads(item.item_tax_rate)
-			for account, rate in tax_details.items():
-				if account not in tax_accounts:
+			for account, multiplier in tax_accounts:
+				rate = tax_details.get(account, 0)
+				if rate == NOT_APPLICABLE_TAX:
 					continue
 
 				net_rate = item.base_net_amount
 				if item.sales_incoming_rate:
 					net_rate = item.qty * item.sales_incoming_rate
 
-				item_tax_amount += flt(net_rate) * flt(rate) / 100
+				item_tax_amount += flt(net_rate) * flt(rate) / 100 * multiplier
 
 		return item_tax_amount
 
-	def get_item_actual_tax_amount(
-		self, item, actual_tax_amount, stock_and_asset_items_amount, stock_and_asset_items_qty
-	):
-		item_proportion = (
-			flt(item.base_net_amount) / stock_and_asset_items_amount
-			if stock_and_asset_items_amount
-			else flt(item.qty) / stock_and_asset_items_qty
+	def distribute_actual_tax_amount(self, stock_and_asset_items, all_item_charges, stock_item_charges):
+		"""Distribute "Actual" valuation charges to each item, keyed by row idx.
+
+		Each charge is spread individually (not pooled together) so the resulting per-item
+		item_tax_amount decomposes exactly into the per-tax-row amount capitalized in the GL
+		(see get_capitalized_valuation_tax) - pooling first and spreading the aggregate can drift
+		by rounding for multiple charges over unevenly valued items. A charge in `all_item_charges`
+		is spread across every item by net amount; a non-stock item's share is computed but never
+		capitalized (e.g. a genuine tax). A charge in `stock_item_charges` (flagged
+		`allocate_full_amount_to_stock_items`) is spread across stock/asset items only, so the whole
+		charge is capitalized (e.g. Freight).
+		"""
+		all_items = [d for d in self.get("items") if d.item_code]
+		stock_items = [d for d in all_items if d.item_code in stock_and_asset_items]
+
+		charge_per_item = {}
+		for charge in all_item_charges:
+			self._spread_charge_over_items(charge_per_item, charge, all_items)
+		for charge in stock_item_charges:
+			self._spread_charge_over_items(charge_per_item, charge, stock_items)
+		for tax in self.get("taxes"):
+			if tax.charge_type == "On Item Quantity" and tax.category in ("Valuation", "Valuation and Total"):
+				for item_idx, amount in self.get_quantity_based_tax_amounts(tax).items():
+					charge_per_item[item_idx] = charge_per_item.get(item_idx, 0.0) + amount
+		return charge_per_item
+
+	def get_quantity_based_tax_amounts(self, tax):
+		# Reuse the signed, rounded base amounts calculated for each item.
+		if self.get("_item_wise_tax_details"):
+			return {
+				row.item.idx: flt(row.amount)
+				for row in self.get("_item_wise_tax_details")
+				if row.tax.idx == tax.idx
+			}
+
+		# Revaluation and GL reposting can run on a saved document without recalculating taxes.
+		item_indices = {item.name: item.idx for item in self.get("items")}
+		return {
+			item_indices[row.item_row]: flt(row.amount)
+			for row in self.get("item_wise_tax_details") or []
+			if row.tax_row == tax.name
+		}
+
+	def _spread_charge_over_items(self, charge_per_item, total_charge, items):
+		"""Add each item's proportional share of `total_charge` into `charge_per_item`.
+		Proportion is by net amount (falling back to qty); any rounding remainder is assigned
+		to the last item in the group."""
+		if not total_charge or not items:
+			return
+
+		total_amount = sum(flt(d.base_net_amount) for d in items)
+		total_qty = sum(flt(d.qty) for d in items)
+
+		# Nothing to proportion against (all rows have zero amount and zero qty)
+		if not total_amount and not total_qty:
+			return
+
+		remaining = total_charge
+		for d in items[:-1]:
+			proportion = flt(d.base_net_amount) / total_amount if total_amount else flt(d.qty) / total_qty
+			charge = flt(proportion * total_charge, self.precision("item_tax_amount", d))
+			charge_per_item[d.idx] = charge_per_item.get(d.idx, 0.0) + charge
+			remaining -= charge
+
+		last = items[-1]
+		charge_per_item[last.idx] = charge_per_item.get(last.idx, 0.0) + flt(
+			remaining, self.precision("item_tax_amount", last)
 		)
 
-		return flt(item_proportion * actual_tax_amount, self.precision("item_tax_amount", item))
+	def get_capitalized_valuation_tax(self):
+		stock_and_asset_items = self.get_stock_items() + self.get_asset_items()
+		all_items = [d for d in self.get("items") if d.item_code]
+		stock_item_idx = {d.idx for d in all_items if d.item_code in stock_and_asset_items}
+
+		capitalized = {}
+		for tax in self.get("taxes"):
+			if tax.category not in ("Valuation", "Valuation and Total"):
+				continue
+
+			amount = flt(tax.base_tax_amount_after_discount_amount) * (
+				-1 if tax.get("add_deduct_tax") == "Deduct" else 1
+			)
+			if not amount:
+				continue
+
+			if tax.charge_type == "On Item Quantity":
+				amount = sum(
+					charge
+					for item_idx, charge in self.get_quantity_based_tax_amounts(tax).items()
+					if item_idx in stock_item_idx
+				)
+			elif tax.charge_type == "Actual" and not tax.get("allocate_full_amount_to_stock_items"):
+				# Spread across all items; only the stock/asset items' share is capitalized.
+				charge_per_item = {}
+				self._spread_charge_over_items(charge_per_item, amount, all_items)
+				amount = sum(
+					charge for item_idx, charge in charge_per_item.items() if item_idx in stock_item_idx
+				)
+
+			capitalized[tax.name] = amount
+
+		return capitalized
 
 	def set_incoming_rate(self):
 		"""
@@ -590,13 +875,18 @@ class BuyingController(SubcontractingController):
 		}
 
 		ref_doctype = ref_doctype_map.get(self.doctype)
+		component_rates = self.get_component_incoming_rates()
 		for d in self.get("items"):
-			if not d.get(frappe.scrub(ref_doctype)):
+			if d.get("delivery_note_packed_item") in component_rates:
+				d.sales_incoming_rate = flt(
+					component_rates[d.delivery_note_packed_item] * (d.conversion_factor or 1)
+				)
+			elif not d.get(frappe.scrub(ref_doctype)):
 				posting_time = self.get("posting_time")
 				if not posting_time:
 					posting_time = nowtime()
 
-				outgoing_rate = get_incoming_rate(
+				outgoing_rate = _get_incoming_rate(
 					{
 						"item_code": d.item_code,
 						"warehouse": d.get("from_warehouse"),
@@ -655,6 +945,7 @@ class BuyingController(SubcontractingController):
 		allow_to_edit_stock_qty = frappe.get_single_value(
 			"Stock Settings", "allow_to_edit_stock_uom_qty_for_purchase"
 		)
+		whole_number_uoms = get_whole_number_uoms(d.get("stock_uom") for d in self.get("items"))
 
 		for d in self.get("items"):
 			if d.meta.get_field("stock_qty"):
@@ -675,7 +966,7 @@ class BuyingController(SubcontractingController):
 						d.conversion_factor, d.precision("conversion_factor")
 					)
 
-				if allow_to_edit_stock_qty:
+				if allow_to_edit_stock_qty or d.get("stock_uom") in whole_number_uoms:
 					d.stock_qty = flt(d.stock_qty, d.precision("stock_qty"))
 					if d.get("received_stock_qty") and d.meta.get_field("received_stock_qty"):
 						d.received_stock_qty = flt(d.received_stock_qty, d.precision("received_stock_qty"))
@@ -716,18 +1007,25 @@ class BuyingController(SubcontractingController):
 					)
 				)
 
-	def check_for_on_hold_or_closed_status(self, ref_doctype, ref_fieldname):
-		for d in self.get("items"):
-			if d.get(ref_fieldname):
-				status = frappe.db.get_value(ref_doctype, d.get(ref_fieldname), "status")
-				if status in ("Closed", "On Hold"):
-					frappe.throw(
-						_("{ref_doctype} {ref_name} is {status}.").format(
-							ref_doctype=frappe.bold(_(ref_doctype)),
-							ref_name=frappe.bold(d.get(ref_fieldname)),
-							status=frappe.bold(_(status)),
-						)
-					)
+	def get_internal_transfer_qty(self, row) -> float:
+		if flt(row.qty) or not self.is_internal_receipt():
+			return flt(row.qty)
+
+		return flt(row.rejected_qty)
+
+	def is_internal_receipt(self) -> bool:
+		return self.doctype == "Purchase Receipt" and self.is_internal_transfer()
+
+	def get_source_warehouse_qty(self, row, accepted_qty):
+		if not (self.is_internal_receipt() and flt(row.rejected_qty)):
+			return accepted_qty
+
+		if row.get("serial_and_batch_bundle") or row.get("rejected_serial_and_batch_bundle"):
+			return accepted_qty
+
+		rejected_qty = flt(flt(row.rejected_qty) * flt(row.conversion_factor), row.precision("stock_qty"))
+
+		return flt(accepted_qty + rejected_qty, row.precision("stock_qty"))
 
 	def update_stock_ledger(self, allow_negative_stock=False, via_landed_cost_voucher=False):
 		self.update_ordered_and_reserved_qty()
@@ -740,9 +1038,10 @@ class BuyingController(SubcontractingController):
 				continue
 
 			if d.warehouse:
-				pr_qty = flt(flt(d.qty) * flt(d.conversion_factor), d.precision("stock_qty"))
+				pr_qty = get_stock_qty(d, d.qty)
+				source_qty = self.get_source_warehouse_qty(d, pr_qty)
 
-				if pr_qty:
+				if pr_qty or source_qty:
 					if d.from_warehouse and (
 						(not cint(self.is_return) and self.docstatus == 1)
 						or (cint(self.is_return) and self.docstatus == 2)
@@ -758,7 +1057,7 @@ class BuyingController(SubcontractingController):
 						from_warehouse_sle = self.get_sl_entries(
 							d,
 							{
-								"actual_qty": -1 * pr_qty,
+								"actual_qty": -1 * source_qty,
 								"warehouse": d.from_warehouse,
 								"outgoing_rate": d.rate,
 								"recalculate_rate": 1,
@@ -783,16 +1082,20 @@ class BuyingController(SubcontractingController):
 								or self.is_return
 								or (self.is_internal_transfer() and self.docstatus == 2)
 								else self.get_package_for_target_warehouse(
-									d, type_of_transaction=type_of_transaction
+									d,
+									type_of_transaction=type_of_transaction,
+									via_landed_cost_voucher=via_landed_cost_voucher,
 								)
 							),
 						},
 					)
 
 					if self.is_return:
-						outgoing_rate = get_rate_for_return(
-							self.doctype, self.name, d.item_code, self.return_against, item_row=d
-						)
+						outgoing_rate = 0.0
+						if not is_serial_no_wise_valuation_disabled(d.item_code):
+							outgoing_rate = get_rate_for_return(
+								self.doctype, self.name, d.item_code, self.return_against, item_row=d
+							)
 
 						sle.update(
 							{
@@ -829,7 +1132,7 @@ class BuyingController(SubcontractingController):
 						from_warehouse_sle = self.get_sl_entries(
 							d,
 							{
-								"actual_qty": -1 * pr_qty,
+								"actual_qty": -1 * source_qty,
 								"warehouse": d.from_warehouse,
 								"recalculate_rate": 1,
 								"serial_and_batch_bundle": (
@@ -843,18 +1146,14 @@ class BuyingController(SubcontractingController):
 						sl_entries.append(from_warehouse_sle)
 
 			if flt(d.rejected_qty) != 0:
-				valuation_rate_for_rejected_item = 0.0
-				if frappe.db.get_single_value("Buying Settings", "set_valuation_rate_for_rejected_materials"):
-					valuation_rate_for_rejected_item = d.valuation_rate
+				valuation_rate_for_rejected_item = self.get_rejected_valuation_rate(d)
 
 				sl_entries.append(
 					self.get_sl_entries(
 						d,
 						{
 							"warehouse": d.rejected_warehouse,
-							"actual_qty": flt(
-								flt(d.rejected_qty) * flt(d.conversion_factor), d.precision("stock_qty")
-							),
+							"actual_qty": get_stock_qty(d, d.rejected_qty),
 							"incoming_rate": valuation_rate_for_rejected_item if not self.is_return else 0.0,
 							"outgoing_rate": valuation_rate_for_rejected_item if self.is_return else 0.0,
 							"serial_and_batch_bundle": d.rejected_serial_and_batch_bundle,
@@ -871,7 +1170,22 @@ class BuyingController(SubcontractingController):
 			via_landed_cost_voucher=via_landed_cost_voucher,
 		)
 
-	def get_package_for_target_warehouse(self, item, warehouse=None, type_of_transaction=None) -> str:
+	def get_package_for_target_warehouse(
+		self, item, warehouse=None, type_of_transaction=None, via_landed_cost_voucher=None
+	) -> str:
+		if via_landed_cost_voucher and item.get("warehouse"):
+			if sabb := frappe.db.get_value(
+				"Serial and Batch Bundle",
+				{
+					"voucher_detail_no": item.name,
+					"warehouse": item.get("warehouse"),
+					"docstatus": 1,
+					"is_cancelled": 0,
+				},
+				"name",
+			):
+				return sabb
+
 		if not item.serial_and_batch_bundle:
 			return ""
 
@@ -880,6 +1194,14 @@ class BuyingController(SubcontractingController):
 
 		return self.make_package_for_transfer(
 			item.serial_and_batch_bundle, warehouse, type_of_transaction=type_of_transaction
+		)
+
+	def check_purchase_order_on_hold_or_close(self, ref_fieldname, exclude_if_field=None):
+		if self.get("is_return"):
+			return
+
+		self.check_for_on_hold_or_closed_status(
+			"Purchase Order", ref_fieldname, exclude_if_field=exclude_if_field
 		)
 
 	def update_ordered_and_reserved_qty(self):
@@ -895,7 +1217,7 @@ class BuyingController(SubcontractingController):
 			if po and po_item_rows:
 				po_obj = frappe.get_lazy_doc("Purchase Order", po)
 
-				if po_obj.status in ["Closed", "Cancelled"]:
+				if po_obj.status == "Cancelled" or (po_obj.status == "Closed" and not self.get("is_return")):
 					frappe.throw(
 						_("{doctype} {name} is cancelled or closed.").format(
 							doctype=frappe.bold(_("Purchase Order")),
@@ -915,11 +1237,7 @@ class BuyingController(SubcontractingController):
 		if self.doctype in ["Purchase Receipt", "Purchase Invoice"]:
 			self.process_fixed_asset()
 
-		if self.doctype in [
-			"Purchase Order",
-			"Purchase Receipt",
-			"Purchase Invoice",
-		] and not frappe.db.get_single_value("Buying Settings", "disable_last_purchase_rate"):
+		if self.doctype in ["Purchase Order", "Purchase Receipt", "Purchase Invoice"]:
 			update_last_purchase_rate(self, is_submit=1)
 
 	def on_cancel(self):
@@ -928,11 +1246,7 @@ class BuyingController(SubcontractingController):
 		if self.get("is_return"):
 			return
 
-		if self.doctype in [
-			"Purchase Order",
-			"Purchase Receipt",
-			"Purchase Invoice",
-		] and not frappe.db.get_single_value("Buying Settings", "disable_last_purchase_rate"):
+		if self.doctype in ["Purchase Order", "Purchase Receipt", "Purchase Invoice"]:
 			update_last_purchase_rate(self, is_submit=0)
 
 		if self.doctype in ["Purchase Receipt", "Purchase Invoice"]:
@@ -1050,7 +1364,7 @@ class BuyingController(SubcontractingController):
 			"Item", row.item_code, ["asset_naming_series", "asset_category"], as_dict=1
 		)
 		asset_quantity = row.qty if is_grouped_asset else 1
-		purchase_amount = flt(row.valuation_rate) * asset_quantity
+		purchase_amount = flt(row.valuation_rate) * flt(row.conversion_factor or 1) * asset_quantity
 
 		asset = frappe.get_doc(
 			{
@@ -1075,12 +1389,10 @@ class BuyingController(SubcontractingController):
 			}
 		)
 		for dimension in accounting_dimensions[0]:
-			asset.update(
-				{
-					dimension["fieldname"]: self.get(dimension["fieldname"])
-					or dimension.get("default_dimension")
-				}
-			)
+			fieldname = dimension["fieldname"]
+			default_dimension = accounting_dimensions[1].get(self.company, {}).get(fieldname)
+			if not asset.get(fieldname):
+				asset.update({fieldname: row.get(fieldname) or self.get(fieldname) or default_dimension})
 
 		asset.flags.ignore_validate = True
 		asset.flags.ignore_mandatory = True
@@ -1241,8 +1553,24 @@ def update_regional_item_valuation_rate(doc):
 	pass
 
 
+def get_linked_asset_qty(detail_field, details, exclude_asset=None):
+	asset = frappe.qb.DocType("Asset")
+	query = (
+		frappe.qb.from_(asset)
+		.select(asset[detail_field], Sum(asset.asset_quantity))
+		.where((asset[detail_field].isin(details)) & (asset.docstatus < 2))
+		.groupby(asset[detail_field])
+	)
+	if exclude_asset:
+		query = query.where(asset.name != exclude_asset)
+	return dict(query.run())
+
+
 @frappe.request_cache
 def get_purchase_expense_account(item_code, company):
+	from erpnext.setup.doctype.brand.brand import get_brand_defaults
+	from erpnext.setup.doctype.item_group.item_group import get_item_group_defaults
+
 	defaults = get_item_defaults(item_code, company)
 
 	details = frappe._dict(
@@ -1253,19 +1581,19 @@ def get_purchase_expense_account(item_code, company):
 	)
 
 	if not details.purchase_expense_account:
-		details = frappe.db.get_value(
-			"Item Default",
-			{"parent": defaults.item_group, "company": company},
-			["purchase_expense_account", "purchase_expense_contra_account"],
-			as_dict=1,
-		) or frappe._dict({})
+		details = get_item_group_defaults(item_code, company)
 
 	if not details.purchase_expense_account:
-		details = frappe.db.get_value(
-			"Item Default",
-			{"parent": defaults.brand, "company": company},
-			["purchase_expense_account", "purchase_expense_contra_account"],
-			as_dict=1,
-		)
+		details = get_brand_defaults(item_code, company)
 
-	return details or frappe._dict({})
+	return frappe._dict(
+		{
+			field: details.get(field)
+			for field in ("purchase_expense_account", "purchase_expense_contra_account")
+		}
+	)
+
+
+def get_stock_qty(row, qty) -> float:
+	"""Qty of a row in the stock UOM, rounded as the stock ledger posts it."""
+	return flt(flt(qty) * flt(row.conversion_factor), row.precision("stock_qty"))

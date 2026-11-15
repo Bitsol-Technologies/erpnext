@@ -5,7 +5,7 @@
 from urllib.parse import urlparse
 
 import frappe
-from frappe.tests import IntegrationTestCase, change_settings
+from frappe.tests import change_settings
 from frappe.utils import nowdate
 
 from erpnext.buying.doctype.request_for_quotation.request_for_quotation import (
@@ -17,11 +17,13 @@ from erpnext.buying.doctype.request_for_quotation.request_for_quotation import (
 from erpnext.controllers.accounts_controller import InvalidQtyError
 from erpnext.crm.doctype.opportunity.opportunity import make_request_for_quotation as make_rfq
 from erpnext.crm.doctype.opportunity.test_opportunity import make_opportunity
+from erpnext.exceptions import PartyDisabled
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.templates.pages.rfq import check_supplier_has_docname_access
+from erpnext.tests.utils import ERPNextTestSuite
 
 
-class TestRequestforQuotation(IntegrationTestCase):
+class TestRequestforQuotation(ERPNextTestSuite):
 	def test_rfq_qty(self):
 		rfq = make_request_for_quotation(qty=0, do_not_save=True)
 		with self.assertRaises(InvalidQtyError):
@@ -31,6 +33,27 @@ class TestRequestforQuotation(IntegrationTestCase):
 		rfq.items[0].qty = 1
 		rfq.save()
 		self.assertEqual(rfq.items[0].qty, 1)
+
+	def test_whole_number_qty_must_not_be_fractional(self):
+		from erpnext.utilities.transaction_base import UOMMustBeIntegerError
+
+		item = make_item(properties={"stock_uom": "Nos"})
+		rfq = make_request_for_quotation(
+			item_code=item.name,
+			qty=2.5,
+			uom="Nos",
+			stock_uom="Nos",
+			do_not_save=True,
+		)
+
+		self.assertRaises(UOMMustBeIntegerError, rfq.save)
+
+	def test_rfq_zero_qty_cannot_be_forced_by_the_client(self):
+		rfq = make_request_for_quotation(qty=0, do_not_save=True)
+		rfq.has_unit_price_items = 1
+
+		with self.assertRaises(InvalidQtyError):
+			rfq.save()
 
 	def test_rfq_zero_qty(self):
 		"""
@@ -56,6 +79,17 @@ class TestRequestforQuotation(IntegrationTestCase):
 
 		self.assertEqual(rfq.get("suppliers")[0].quote_status, "Received")
 		self.assertEqual(rfq.get("suppliers")[1].quote_status, "Pending")
+
+	def test_rfq_blocked_for_disabled_supplier(self):
+		frappe.db.set_value("Supplier", "_Test Supplier", "disabled", 1)
+		rfq = make_request_for_quotation(
+			supplier_data=[{"supplier": "_Test Supplier", "supplier_name": "_Test Supplier"}],
+			do_not_save=True,
+		)
+		self.assertRaises(PartyDisabled, rfq.save)
+
+		frappe.db.set_value("Supplier", "_Test Supplier", "disabled", 0)
+		rfq.save()
 
 	def test_make_supplier_quotation(self):
 		rfq = make_request_for_quotation()
@@ -149,6 +183,125 @@ class TestRequestforQuotation(IntegrationTestCase):
 		self.assertEqual(supplier_quotation_doc.get("items")[0].qty, 5)
 		self.assertEqual(supplier_quotation_doc.get("items")[0].amount, 500)
 
+	def test_rate_quoted_from_portal_is_kept(self):
+		from erpnext.accounts.doctype.pricing_rule.test_pricing_rule import make_pricing_rule
+
+		item_code = "_Test RFQ Quoted Rate Item"
+		if not frappe.db.exists("Item", item_code):
+			make_item(item_code, {"stock_uom": "_Test UOM"})
+		if not frappe.db.exists("Item Price", {"item_code": item_code, "price_list": "Standard Buying"}):
+			frappe.get_doc(
+				{
+					"doctype": "Item Price",
+					"item_code": item_code,
+					"price_list": "Standard Buying",
+					"price_list_rate": 100,
+				}
+			).insert()
+
+		def assert_saved_rate(quoted_rate, expected_rate):
+			rfq = make_request_for_quotation(item_code=item_code)
+			rfq.supplier = rfq.suppliers[0].supplier
+			rfq.buying_price_list = "Standard Buying"
+			rfq.currency = frappe.db.get_value("Price List", "Standard Buying", "currency")
+			# None leaves the row without a rate, as the portal sends a row the supplier did not touch
+			if quoted_rate is not None:
+				rfq.items[0].rate = quoted_rate
+			supplier_quotation = frappe.get_doc("Supplier Quotation", create_supplier_quotation(rfq))
+
+			self.assertEqual(supplier_quotation.items[0].price_list_rate, 100)
+			self.assertEqual(supplier_quotation.items[0].rate, expected_rate)
+			self.assertEqual(supplier_quotation.items[0].amount, expected_rate * 5)
+
+		cases = ((0, 0), (50, 50), (None, 100), ("", 100))
+		for quoted_rate, expected_rate in cases:
+			with self.subTest(quoted_rate=quoted_rate, pricing_rule=False):
+				assert_saved_rate(quoted_rate, expected_rate)
+
+		pricing_rule = make_pricing_rule(
+			title="_Test RFQ Buying Discount", item_code=item_code, buying=1, discount_percentage=10
+		)
+		self.addCleanup(frappe.delete_doc_if_exists, "Pricing Rule", pricing_rule.name)
+		for quoted_rate, expected_rate in cases:
+			with self.subTest(quoted_rate=quoted_rate, pricing_rule=True):
+				assert_saved_rate(quoted_rate, expected_rate)
+
+	def test_portal_page_embeds_only_the_quotation_fields(self):
+		from erpnext.templates.pages.rfq import get_portal_doc
+
+		rfq = make_request_for_quotation()
+		portal_doc = get_portal_doc(rfq)
+		embedded = frappe.as_json(portal_doc)
+		for supplier in rfq.suppliers:
+			self.assertNotIn(supplier.supplier, embedded)
+
+		portal_doc["supplier"] = rfq.suppliers[0].supplier
+		for item in portal_doc["items"]:
+			item["rate"] = 100
+		supplier_quotation = frappe.get_doc("Supplier Quotation", create_supplier_quotation(portal_doc))
+		self.assertEqual(supplier_quotation.items[0].amount, 500)
+
+	def test_portal_row_left_untouched_is_quoted_at_zero(self):
+		from erpnext.templates.pages.rfq import get_portal_doc
+
+		item_code = make_item("_Test RFQ Untouched Rate Item", {"stock_uom": "_Test UOM"}).name
+		frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": item_code,
+				"price_list": "Standard Buying",
+				"price_list_rate": 100,
+			}
+		).insert()
+
+		rfq = make_request_for_quotation(item_code=item_code)
+		portal_doc = get_portal_doc(rfq)
+		portal_doc["supplier"] = rfq.suppliers[0].supplier
+		portal_doc["buying_price_list"] = "Standard Buying"
+		portal_doc["currency"] = frappe.db.get_value("Price List", "Standard Buying", "currency")
+		supplier_quotation = frappe.get_doc("Supplier Quotation", create_supplier_quotation(portal_doc))
+
+		self.assertEqual(supplier_quotation.items[0].price_list_rate, 100)
+		self.assertEqual(supplier_quotation.items[0].rate, 0)
+
+	def test_portal_supplier_quotation_is_built_from_the_rfq_rows(self):
+		make_request_for_quotation(
+			supplier_data=[{"supplier": "_Test Supplier 2", "supplier_name": "_Test Supplier 2"}]
+		)
+		rfq = make_request_for_quotation()
+
+		rfq.supplier = "_Test Supplier 2"
+		self.assertRaises(frappe.PermissionError, create_supplier_quotation, rfq)
+
+		rfq.supplier = rfq.suppliers[0].supplier
+		rfq.items[0].item_code = "_Test Item 2"
+		rfq.items[0].conversion_factor = 7
+		supplier_quotation = frappe.get_doc("Supplier Quotation", create_supplier_quotation(rfq))
+
+		self.assertEqual(
+			(supplier_quotation.items[0].item_code, supplier_quotation.items[0].conversion_factor),
+			("_Test Item", 1),
+		)
+
+	def test_missing_item_name_is_filled_from_the_item(self):
+		rfq = make_request_for_quotation(do_not_save=True)
+		rfq.items[0].item_name = None
+		rfq.insert()
+
+		self.assertEqual(rfq.items[0].item_name, frappe.db.get_value("Item", "_Test Item", "item_name"))
+
+	def test_make_duplicate_supplier_quotation_from_portal(self):
+		rfq = make_request_for_quotation()
+		rfq.supplier = rfq.suppliers[0].supplier
+		supplier_quotation = frappe.get_doc("Supplier Quotation", create_supplier_quotation(rfq))
+		supplier_quotation.submit()
+
+		with self.assertRaisesRegex(frappe.ValidationError, "already exists"):
+			create_supplier_quotation(rfq)
+
+		supplier_quotation.cancel()
+		self.assertTrue(create_supplier_quotation(rfq))
+
 	def test_make_multi_uom_supplier_quotation(self):
 		item_code = "_Test Multi UOM RFQ Item"
 		if not frappe.db.exists("Item", item_code):
@@ -222,7 +375,7 @@ class TestRequestforQuotation(IntegrationTestCase):
 		supplier_doc.reload()
 		self.assertTrue(supplier_doc.portal_users[0].user)
 
-	@IntegrationTestCase.change_settings("Buying Settings", {"allow_zero_qty_in_request_for_quotation": 1})
+	@ERPNextTestSuite.change_settings("Buying Settings", {"allow_zero_qty_in_request_for_quotation": 1})
 	def test_supplier_quotation_from_zero_qty_rfq(self):
 		rfq = make_request_for_quotation(qty=0)
 		sq = make_supplier_quotation_from_rfq(rfq.name, for_supplier=rfq.get("suppliers")[0].supplier)
@@ -231,7 +384,7 @@ class TestRequestforQuotation(IntegrationTestCase):
 		self.assertEqual(sq.items[0].qty, 0)
 		self.assertEqual(sq.items[0].item_code, rfq.items[0].item_code)
 
-	@IntegrationTestCase.change_settings(
+	@ERPNextTestSuite.change_settings(
 		"Buying Settings",
 		{
 			"allow_zero_qty_in_request_for_quotation": 1,
@@ -263,6 +416,13 @@ def make_request_for_quotation(**args) -> "RequestforQuotation":
 
 	for data in supplier_data:
 		rfq.append("suppliers", data)
+		frappe.new_doc(
+			"Portal User",
+			user="Administrator",
+			parent=data.get("supplier"),
+			parentfield="portal_users",
+			parenttype="Supplier",
+		).insert()
 
 	rfq.append(
 		"items",

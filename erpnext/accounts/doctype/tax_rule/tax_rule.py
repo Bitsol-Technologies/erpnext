@@ -8,10 +8,14 @@ import frappe
 from frappe import _
 from frappe.contacts.doctype.address.address import get_default_address
 from frappe.model.document import Document
+from frappe.query_builder import DocType
+from frappe.query_builder.functions import IfNull
 from frappe.utils import cstr
 from frappe.utils.nestedset import get_root_of
 
+from erpnext import _refuse, require_party_permission, require_permission
 from erpnext.setup.doctype.customer_group.customer_group import get_parent_customer_groups
+from erpnext.setup.doctype.supplier_group.supplier_group import get_parent_supplier_groups
 
 
 class IncorrectCustomerGroup(frappe.ValidationError):
@@ -83,6 +87,8 @@ class TaxRule(Document):
 			frappe.throw(_("Tax Template is mandatory."))
 
 	def validate_filters(self):
+		TaxRule = DocType("Tax Rule")
+
 		filters = {
 			"tax_type": self.tax_type,
 			"customer": self.customer,
@@ -105,104 +111,140 @@ class TaxRule(Document):
 			"company": self.company,
 		}
 
-		conds = ""
-		for d in filters:
-			if conds:
-				conds += " and "
-			conds += f"""ifnull({d}, '') = {frappe.db.escape(cstr(filters[d]))}"""
-
-		if self.from_date and self.to_date:
-			conds += f""" and ((from_date > '{self.from_date}' and from_date < '{self.to_date}') or
-					(to_date > '{self.from_date}' and to_date < '{self.to_date}') or
-					('{self.from_date}' > from_date and '{self.from_date}' < to_date) or
-					('{self.from_date}' = from_date and '{self.to_date}' = to_date))"""
-
-		elif self.from_date and not self.to_date:
-			conds += f""" and to_date > '{self.from_date}'"""
-
-		elif self.to_date and not self.from_date:
-			conds += f""" and from_date < '{self.to_date}'"""
-
-		tax_rule = frappe.db.sql(
-			f"select name, priority \
-			from `tabTax Rule` where {conds} and name != '{self.name}'",
-			as_dict=1,
+		query = (
+			frappe.qb.from_(TaxRule).select(TaxRule.name, TaxRule.priority).where(TaxRule.name != self.name)
 		)
 
-		if tax_rule:
-			if tax_rule[0].priority == self.priority:
-				frappe.throw(_("Tax Rule Conflicts with {0}").format(tax_rule[0].name), ConflictingTaxRule)
+		for field, value in filters.items():
+			query = query.where(IfNull(TaxRule[field], "") == cstr(value))
+
+		if self.from_date and self.to_date:
+			query = query.where(
+				((TaxRule.from_date > self.from_date) & (TaxRule.from_date < self.to_date))
+				| ((TaxRule.to_date > self.from_date) & (TaxRule.to_date < self.to_date))
+				| ((self.from_date > TaxRule.from_date) & (self.from_date < TaxRule.to_date))
+				| ((TaxRule.from_date == self.from_date) & (TaxRule.to_date == self.to_date))
+			)
+
+		elif self.from_date:
+			query = query.where(TaxRule.to_date > self.from_date)
+
+		elif self.to_date:
+			query = query.where(TaxRule.from_date < self.to_date)
+
+		tax_rule = query.run(as_dict=True)
+
+		if tax_rule and tax_rule[0].priority == self.priority:
+			frappe.throw(
+				_("Tax Rule Conflicts with {0}").format(tax_rule[0].name),
+				ConflictingTaxRule,
+			)
 
 
 @frappe.whitelist()
-def get_party_details(party, party_type, args=None):
-	out = {}
-	billing_address, shipping_address = None, None
+def get_party_details(party: str, party_type: str, args: dict | None = None):
+	if party_type in ("customer", "supplier"):
+		party_type = party_type.title()
+	if party:
+		party = cstr(party)
+	require_party_permission(party_type, party)
+
+	address_names = get_party_address_names(party, party_type, args)
+	for address_name in address_names:
+		if not address_name:
+			continue
+		if args:
+			if not frappe.has_permission("Address", "read", doc=address_name):
+				_refuse()
+		else:
+			require_permission("Address", address_name, "read")
+
+	return get_address_details(*address_names)
+
+
+def get_tax_rule_party_details(party, party_type, args=None):
+	return get_address_details(*get_party_address_names(party, party_type, args))
+
+
+def get_party_address_names(party, party_type, args=None) -> tuple:
 	if args:
-		if args.get("billing_address"):
-			billing_address = frappe.get_doc("Address", args.get("billing_address"))
-		if args.get("shipping_address"):
-			shipping_address = frappe.get_doc("Address", args.get("shipping_address"))
-	else:
-		billing_address_name = get_default_address(party_type, party)
-		shipping_address_name = get_default_address(party_type, party, "is_shipping_address")
-		if billing_address_name:
-			billing_address = frappe.get_doc("Address", billing_address_name)
-		if shipping_address_name:
-			shipping_address = frappe.get_doc("Address", shipping_address_name)
+		# each names a single Address: a dict is read as a filter and get_doc would resolve it to
+		# whichever Address matched.
+		for fieldname in ("billing_address", "shipping_address"):
+			if args.get(fieldname) and not isinstance(args.get(fieldname), str):
+				frappe.throw(_("Invalid address"), frappe.PermissionError)
 
-	if billing_address:
-		out["billing_city"] = billing_address.city
-		out["billing_county"] = billing_address.county
-		out["billing_state"] = billing_address.state
-		out["billing_zipcode"] = billing_address.pincode
-		out["billing_country"] = billing_address.country
+		return args.get("billing_address"), args.get("shipping_address")
 
-	if shipping_address:
-		out["shipping_city"] = shipping_address.city
-		out["shipping_county"] = shipping_address.county
-		out["shipping_state"] = shipping_address.state
-		out["shipping_zipcode"] = shipping_address.pincode
-		out["shipping_country"] = shipping_address.country
+	return (
+		get_default_address(party_type, party),
+		get_default_address(party_type, party, "is_shipping_address"),
+	)
+
+
+def get_address_details(billing_address_name=None, shipping_address_name=None) -> dict:
+	out = {}
+	if billing_address_name:
+		out.update(get_address_fields(billing_address_name, "billing"))
+
+	if shipping_address_name:
+		out.update(get_address_fields(shipping_address_name, "shipping"))
 
 	return out
+
+
+def get_address_fields(address_name, prefix) -> dict:
+	address = frappe.get_doc("Address", address_name)
+	return {
+		f"{prefix}_city": address.city,
+		f"{prefix}_county": address.county,
+		f"{prefix}_state": address.state,
+		f"{prefix}_zipcode": address.pincode,
+		f"{prefix}_country": address.country,
+	}
 
 
 def get_tax_template(posting_date, args):
 	"""Get matching tax rule"""
 	args = frappe._dict(args)
-	conditions = []
+
+	TaxRule = DocType("Tax Rule")
+	query = frappe.qb.from_(TaxRule).select("*")
 
 	if posting_date:
-		conditions.append(
-			f"""(from_date is null or from_date <= '{posting_date}')
-			and (to_date is null or to_date >= '{posting_date}')"""
+		query = query.where(
+			(TaxRule.from_date.isnull() | (TaxRule.from_date <= posting_date))
+			& (TaxRule.to_date.isnull() | (TaxRule.to_date >= posting_date))
 		)
 	else:
-		conditions.append("(from_date is null) and (to_date is null)")
+		query = query.where(TaxRule.from_date.isnull() & TaxRule.to_date.isnull())
 
-	conditions.append(
-		"ifnull(tax_category, '') = {}".format(frappe.db.escape(cstr(args.get("tax_category")), False))
-	)
-	if "tax_category" in args.keys():
-		del args["tax_category"]
+	def get_group_ancestors(doctype, get_parents, value):
+		if not value:
+			value = get_root_of(doctype)
+		return [""] + [d.name for d in get_parents(value)]
+
+	group_fields = {
+		"customer_group": ("Customer Group", get_parent_customer_groups),
+		"supplier_group": ("Supplier Group", get_parent_supplier_groups),
+	}
+
+	args.setdefault("tax_category", "")
 
 	for key, value in args.items():
 		if key == "use_for_shopping_cart":
-			conditions.append(f"use_for_shopping_cart = {1 if value else 0}")
-		elif key == "customer_group":
-			if not value:
-				value = get_root_of("Customer Group")
-			customer_group_condition = get_customer_group_condition(value)
-			conditions.append(f"ifnull({key}, '') in ('', {customer_group_condition})")
+			query = query.where(TaxRule.use_for_shopping_cart == value)
+		elif key == "tax_category":
+			query = query.where(IfNull(TaxRule.tax_category, "") == (value or ""))
+		elif key in group_fields:
+			doctype, get_parents = group_fields[key]
+			query = query.where(
+				IfNull(TaxRule[key], "").isin(get_group_ancestors(doctype, get_parents, value))
+			)
 		else:
-			conditions.append(f"ifnull({key}, '') in ('', {frappe.db.escape(cstr(value))})")
+			query = query.where(IfNull(TaxRule[key], "").isin(["", value or ""]))
 
-	tax_rule = frappe.db.sql(
-		"""select * from `tabTax Rule`
-		where {}""".format(" and ".join(conditions)),
-		as_dict=True,
-	)
+	tax_rule = query.run(as_dict=True)
 
 	if not tax_rule:
 		return None
@@ -231,11 +273,3 @@ def get_tax_template(posting_date, args):
 		return None
 
 	return tax_template
-
-
-def get_customer_group_condition(customer_group):
-	condition = ""
-	customer_groups = ["%s" % (frappe.db.escape(d.name)) for d in get_parent_customer_groups(customer_group)]
-	if customer_groups:
-		condition = ",".join(["%s"] * len(customer_groups)) % (tuple(customer_groups))
-	return condition

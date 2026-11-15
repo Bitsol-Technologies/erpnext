@@ -3,8 +3,11 @@
 
 
 import frappe
-from frappe import _
+from frappe import _, qb
+from frappe.desk.reportview import build_match_conditions
+from frappe.query_builder import Criterion
 from frappe.utils import cstr, flt
+from pypika.terms import Bracket, LiteralValue
 
 from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import get_dimensions
 from erpnext.accounts.report.financial_statements import (
@@ -31,17 +34,35 @@ def execute(filters=None):
 	return columns, data
 
 
+def validate_company_permission(company: str | None) -> None:
+	if company and not frappe.has_permission("Company", "read", company):
+		frappe.throw(_("You are not permitted to view {0}").format(company), frappe.PermissionError)
+
+
 def get_accounts_data(based_on, company):
 	if based_on == "Cost Center":
-		return frappe.db.sql(
-			"""select name, parent_cost_center as parent_account, cost_center_name as account_name, lft, rgt
-			from `tabCost Center` where company=%s order by name""",
-			company,
-			as_dict=True,
+		cost_centers = frappe.get_list(
+			"Cost Center",
+			fields=[
+				"name",
+				"parent_cost_center as parent_account",
+				"cost_center_name as account_name",
+				"lft",
+				"rgt",
+			],
+			filters={"company": company},
+			order_by="name",
 		)
+		# show a cost center as a root when the user cannot read its parent
+		names = {cc.name for cc in cost_centers}
+		for cc in cost_centers:
+			if cc.parent_account not in names:
+				cc.parent_account = None
+		return cost_centers
 	elif based_on == "Project":
-		return frappe.get_all("Project", fields=["name"], filters={"company": company}, order_by="name")
+		return frappe.get_list("Project", fields=["name"], filters={"company": company}, order_by="name")
 	else:
+		validate_company_permission(company)
 		filters = {}
 		doctype = frappe.unscrub(based_on)
 		has_company = frappe.db.has_column(doctype, "company")
@@ -49,7 +70,7 @@ def get_accounts_data(based_on, company):
 		if has_company:
 			filters.update({"company": company})
 
-		return frappe.get_all(doctype, fields=["name"], filters=filters, order_by="name")
+		return frappe.get_list(doctype, fields=["name"], filters=filters, order_by="name")
 
 
 def get_data(accounts, filters, based_on):
@@ -73,6 +94,7 @@ def get_data(accounts, filters, based_on):
 		fieldname,
 		gl_entries_by_account,
 		ignore_closing_entries=not flt(filters.get("with_period_closing_entry")),
+		finance_books=get_finance_books(filters),
 	)
 
 	total_row = calculate_values(accounts, gl_entries_by_account, filters)
@@ -203,33 +225,70 @@ def get_columns(filters):
 
 
 def set_gl_entries_by_account(
-	company, from_date, to_date, based_on, gl_entries_by_account, ignore_closing_entries=False
+	company,
+	from_date,
+	to_date,
+	based_on,
+	gl_entries_by_account,
+	ignore_closing_entries=False,
+	finance_books=None,
 ):
 	"""Returns a dict like { "account": [gl entries], ... }"""
-	additional_conditions = []
+	gl = qb.DocType("GL Entry")
+	acc = qb.DocType("Account")
+
+	conditions = []
+	conditions.append(gl.company.eq(company))
+	conditions.append(gl[based_on].notnull())
+	conditions.append(gl.is_cancelled.eq(0))
+
+	if from_date and to_date:
+		conditions.append(gl.posting_date.between(from_date, to_date))
+	elif from_date and not to_date:
+		conditions.append(gl.posting_date.gte(from_date))
+	elif not from_date and to_date:
+		conditions.append(gl.posting_date.lte(to_date))
 
 	if ignore_closing_entries:
-		additional_conditions.append("and voucher_type !='Period Closing Voucher'")
+		conditions.append(gl.voucher_type.ne("Period Closing Voucher"))
 
-	if from_date:
-		additional_conditions.append("and posting_date >= %(from_date)s")
+	conditions.append(gl.finance_book.isin(["", *(finance_books or [])]) | gl.finance_book.isnull())
 
-	gl_entries = frappe.db.sql(
-		"""select posting_date, {based_on} as based_on, debit, credit,
-		is_opening, (select root_type from `tabAccount` where name = account) as type
-		from `tabGL Entry` where company=%(company)s
-		{additional_conditions}
-		and posting_date <= %(to_date)s
-		and {based_on} is not null
-		and is_cancelled = 0
-		order by {based_on}, posting_date""".format(
-			additional_conditions="\n".join(additional_conditions), based_on=based_on
-		),
-		{"company": company, "from_date": from_date, "to_date": to_date},
-		as_dict=True,
+	if match_conditions := build_match_conditions("GL Entry"):
+		conditions.append(Bracket(LiteralValue(match_conditions)))
+
+	root_subquery = qb.from_(acc).select(acc.root_type).where(acc.name.eq(gl.account))
+	gl_entries = (
+		qb.from_(gl)
+		.select(
+			gl.posting_date,
+			gl[based_on].as_("based_on"),
+			gl.debit,
+			gl.credit,
+			gl.is_opening,
+			root_subquery.as_("type"),
+		)
+		.where(Criterion.all(conditions))
+		.orderby(gl[based_on], gl.posting_date)
+		.run(as_dict=True)
 	)
 
 	for entry in gl_entries:
 		gl_entries_by_account.setdefault(entry.based_on, []).append(entry)
 
 	return gl_entries_by_account
+
+
+def get_finance_books(filters) -> list[str]:
+	"""Finance books whose entries are included besides those without a book."""
+	finance_books = [cstr(filters.get("finance_book"))]
+	if filters.get("include_default_book_entries"):
+		company_finance_book = frappe.get_cached_value("Company", filters.company, "default_finance_book")
+		if (
+			filters.get("finance_book")
+			and company_finance_book
+			and filters.finance_book != company_finance_book
+		):
+			frappe.throw(_("To use a different finance book, please uncheck 'Include Default FB Entries'"))
+		finance_books.append(cstr(company_finance_book))
+	return finance_books

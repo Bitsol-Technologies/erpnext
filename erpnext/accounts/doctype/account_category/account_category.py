@@ -21,6 +21,7 @@ class AccountCategory(Document):
 
 		account_category_name: DF.Data
 		description: DF.SmallText | None
+		root_type: DF.Literal["", "Asset", "Liability", "Income", "Expense", "Equity"]
 	# end: auto-generated types
 
 	def after_rename(self, old_name, new_name, merge):
@@ -61,6 +62,7 @@ def import_account_categories(template_path: str):
 	if not os.path.exists(categories_file):
 		return
 
+	# nosemgrep: frappe-semgrep-rules.rules.security.frappe-security-file-traversal -- path is inside the app
 	with open(categories_file) as f:
 		categories = json.load(f, object_hook=frappe._dict)
 
