@@ -54,6 +54,7 @@
   "company",
   "review_date",
   "closing_date",
+  "clockify_task_id",
   "column_break_22",
   "department",
   "lft",
@@ -425,6 +426,11 @@
   {
    "fieldname": "column_break_vvfp",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "clockify_task_id",
+   "fieldtype": "Data",
+   "label": "Clockify Task ID"
   }
  ],
  "icon": "list-checks",
@@ -432,7 +438,7 @@
  "is_tree": 1,
  "links": [],
  "max_attachments": 5,
- "modified": "2026-10-12 16:00:00.000000",
+ "modified": "2026-11-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Task",
@@ -483,6 +489,7 @@
  "search_fields": "subject",
  "show_name_in_global_search": 1,
  "show_preview_popup": 1,
+ "show_title_field_in_link": 1,
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],

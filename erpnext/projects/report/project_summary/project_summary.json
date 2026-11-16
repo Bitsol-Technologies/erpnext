@@ -7,7 +7,7 @@
  "doctype": "Report",
  "idx": 0,
  "is_standard": "Yes",
- "modified": "2020-05-04 19:32:53.177213",
+ "modified": "2026-11-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Project Summary",
@@ -22,6 +22,9 @@
   },
   {
    "role": "Projects Manager"
+  },
+  {
+   "role": "System Manager"
   }
  ]
 }

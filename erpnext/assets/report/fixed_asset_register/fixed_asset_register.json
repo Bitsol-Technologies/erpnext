@@ -9,7 +9,7 @@
  "idx": 0,
  "is_standard": "Yes",
  "letterhead": null,
- "modified": "2023-07-26 21:03:20.722628",
+ "modified": "2026-11-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Assets",
  "name": "Fixed Asset Register",
@@ -24,6 +24,9 @@
   },
   {
    "role": "Quality Manager"
+  },
+  {
+   "role": "System Manager"
   }
  ]
 }

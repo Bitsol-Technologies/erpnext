@@ -19,6 +19,7 @@
   "column_break_3",
   "company",
   "asset_category",
+  "condition",
   "asset_type",
   "maintenance_required",
   "calculate_depreciation",
@@ -78,6 +79,7 @@
   "section_break_jtou",
   "status",
   "custodian",
+  "custodian_name",
   "department",
   "default_finance_book",
   "depr_entry_posting_status",
@@ -607,6 +609,20 @@
   {
    "fieldname": "column_break_yeds",
    "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "custodian.employee_name",
+   "fieldname": "custodian_name",
+   "fieldtype": "Data",
+   "ignore_user_permissions": 1,
+   "label": "Custodian Name"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "condition",
+   "fieldtype": "Select",
+   "label": "Condition",
+   "options": "New\nUsed\nDamaged\nUnusable\nOutdated"
   }
  ],
  "icon": "building",
@@ -651,7 +667,7 @@
    "link_fieldname": "target_asset"
   }
  ],
- "modified": "2026-10-19 12:00:00.000000",
+ "modified": "2026-11-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Assets",
  "name": "Asset",

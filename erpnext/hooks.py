@@ -505,6 +505,9 @@ scheduler_events = {
 		],
 		# Daily but offset by 45 minutes
 		"45 0 * * *": [],
+		"10 8 * * *": [
+			"erpnext.projects.doctype.timesheet.timesheet.run_daily_clockify_sync",
+		],
 	},
 	"hourly": [
 		"erpnext.projects.doctype.project.project.hourly_reminder",

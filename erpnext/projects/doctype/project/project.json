@@ -68,6 +68,41 @@
   "copied_from",
   "section_break0",
   "notes",
+  "additional_details",
+  "source",
+  "lead",
+  "lead_user",
+  "technical_lead",
+  "redacted_name",
+  "using_on_website",
+  "impact_on_media",
+  "impact_detail",
+  "great_ux",
+  "industry",
+  "is_live",
+  "key_features",
+  "platform",
+  "design_file_link",
+  "drive_link",
+  "startup",
+  "client_name",
+  "client_email",
+  "column_break_inwv",
+  "dev_credentials",
+  "screenshot_url",
+  "android_app_url",
+  "ios_app_url",
+  "web_url",
+  "actual_description",
+  "redacted_description_for_resumes",
+  "testimonials",
+  "project_notes",
+  "staff_augmentation",
+  "code_repo_link",
+  "section_break_btyu",
+  "tools_and_technologies",
+  "clockify_project_id",
+  "project_daily_update",
   "connections_tab"
  ],
  "fields": [
@@ -482,6 +517,203 @@
    "label": "More Info"
   },
   {
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "label": "Source"
+  },
+  {
+   "fieldname": "lead",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "label": "PM",
+   "options": "Employee"
+  },
+  {
+   "fieldname": "redacted_name",
+   "fieldtype": "Data",
+   "label": "Redacted Name"
+  },
+  {
+   "fieldname": "using_on_website",
+   "fieldtype": "Select",
+   "label": "Using On Website",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "impact_on_media",
+   "fieldtype": "Select",
+   "label": "Imapct On Media",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "great_ux",
+   "fieldtype": "Select",
+   "label": "Great UX",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "industry",
+   "fieldtype": "Select",
+   "label": "Category/Industry",
+   "options": "Audio/Video\nBooks & References\nEcommerce\nEducation\nEnvironment\nEvents\nFinance\nHealth\nHealthcare\nLifestyle\nMarketplace\nNews\nPolitics\nReal Estate\nSocial\nSocial Media\nTravel & Local\nSports\nTransport\nTraining\nLinkedIn Scrapping\nChildcare\nCommunications"
+  },
+  {
+   "fieldname": "is_live",
+   "fieldtype": "Select",
+   "label": "Live Web",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "tools_and_technologies",
+   "fieldtype": "Table",
+   "label": "Tools & Technologies",
+   "options": "Project Tools and Technologies"
+  },
+  {
+   "fieldname": "key_features",
+   "fieldtype": "Small Text",
+   "label": "Key Features"
+  },
+  {
+   "fieldname": "platform",
+   "fieldtype": "Select",
+   "label": "Platform",
+   "options": "Backend\nBackend/Hybrid\nBackend/Native iOS\nBackend/Native Android\nBackend/Native Mobile\nWeb\nWeb/Hybrid\nWeb/Backend\nWeb/Backend/Hybrid\nWeb/Backend/Native Mobile\nWeb/Backend/Native iOS\nWeb/Backend/Native Android\nWeb/Native Mobile\nWeb/Native iOS\nWeb/Native Android\nHybrid\nNative Mobile\nNative iOS\nNative Android"
+  },
+  {
+   "fieldname": "design_file_link",
+   "fieldtype": "Data",
+   "label": "Design File Link",
+   "length": 250
+  },
+  {
+   "fieldname": "drive_link",
+   "fieldtype": "Data",
+   "label": "Drive Link",
+   "length": 250
+  },
+  {
+   "fieldname": "startup",
+   "fieldtype": "Select",
+   "label": "Startup",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "client_name",
+   "fieldtype": "Data",
+   "label": "Client Name"
+  },
+  {
+   "fieldname": "client_email",
+   "fieldtype": "Data",
+   "label": "Client Email"
+  },
+  {
+   "fieldname": "column_break_inwv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "dev_credentials",
+   "fieldtype": "Small Text",
+   "label": "Dev Credentials"
+  },
+  {
+   "fieldname": "screenshot_url",
+   "fieldtype": "Data",
+   "label": "Screenshot URL",
+   "length": 250
+  },
+  {
+   "fieldname": "actual_description",
+   "fieldtype": "Small Text",
+   "label": "Actual Description"
+  },
+  {
+   "fieldname": "redacted_description_for_resumes",
+   "fieldtype": "Small Text",
+   "label": "Redacted Description For Resumes"
+  },
+  {
+   "fieldname": "testimonials",
+   "fieldtype": "Small Text",
+   "label": "Testimonials"
+  },
+  {
+   "fieldname": "project_notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "staff_augmentation",
+   "fieldtype": "Select",
+   "label": "Staff Augmentation",
+   "options": "Yes\nNo"
+  },
+  {
+   "fieldname": "code_repo_link",
+   "fieldtype": "Data",
+   "label": "Code Repo Link",
+   "length": 250
+  },
+  {
+   "fieldname": "additional_details",
+   "fieldtype": "Tab Break",
+   "label": "Additional Details"
+  },
+  {
+   "fieldname": "section_break_btyu",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "technical_lead",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "label": "Technical Lead",
+   "options": "Employee"
+  },
+  {
+   "fieldname": "android_app_url",
+   "fieldtype": "Data",
+   "label": "Android App Url",
+   "length": 250
+  },
+  {
+   "fieldname": "ios_app_url",
+   "fieldtype": "Data",
+   "label": "iOS App Url",
+   "length": 250
+  },
+  {
+   "fieldname": "web_url",
+   "fieldtype": "Data",
+   "label": "Web URL",
+   "length": 250
+  },
+  {
+   "fieldname": "impact_detail",
+   "fieldtype": "Data",
+   "label": "Impact Detail"
+  },
+  {
+   "fetch_from": "lead.user_id",
+   "fieldname": "lead_user",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Lead User",
+   "options": "User"
+  },
+  {
+   "fieldname": "clockify_project_id",
+   "fieldtype": "Data",
+   "label": "Clockify Project ID"
+  },
+  {
+   "fieldname": "project_daily_update",
+   "fieldtype": "Table",
+   "label": "Project Daily Updates",
+   "options": "Project Update Entry"
+  },
+  {
    "fieldname": "connections_tab",
    "fieldtype": "Tab Break",
    "label": "Connections",
@@ -491,9 +723,14 @@
  "icon": "folder-kanban",
  "idx": 29,
  "index_web_pages_for_search": 1,
- "links": [],
+ "links": [
+  {
+   "link_doctype": "Project Assignment",
+   "link_fieldname": "project"
+  }
+ ],
  "max_attachments": 4,
- "modified": "2026-10-15 12:00:00.000000",
+ "modified": "2026-11-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Project",
@@ -641,5 +878,6 @@
  "states": [],
  "timeline_field": "customer",
  "title_field": "project_name",
+ "track_changes": 1,
  "track_seen": 1
 }

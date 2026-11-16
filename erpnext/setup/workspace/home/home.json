@@ -3,9 +3,13 @@
   {
    "chart_name": "Profit and Loss",
    "label": "Profit and Loss"
+  },
+  {
+   "chart_name": "Leaves Balance Chart",
+   "label": "Total Leaves"
   }
  ],
- "content": "[{\"id\": \"5e7b1c9a2f\", \"type\": \"onboarding\", \"data\": {\"onboarding_name\": \"Organization Onboarding\", \"col\": 12}}, {\"id\": \"797d6b3896\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Profit and Loss\", \"col\": 12}}, {\"id\": \"7dfaeec97e\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Annual Sales\", \"col\": 4}}, {\"id\": \"b76ffb894b\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Annual Purchase\", \"col\": 4}}, {\"id\": \"ba3943fb2d\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Total Stock Value\", \"col\": 4}}]",
+ "content": "[{\"id\": \"5e7b1c9a2f\", \"type\": \"onboarding\", \"data\": {\"onboarding_name\": \"Organization Onboarding\", \"col\": 12}}, {\"id\": \"kb3XPLg8lb\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\", \"col\": 12}}, {\"id\": \"L7853FAEbu\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Check-in/Check-out\", \"col\": 3}}, {\"id\": \"fBkvOXpxYW\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Leave Request\", \"col\": 3}}, {\"id\": \"KxYMJ5nrQe\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Attendance\", \"col\": 3}}, {\"id\": \"797d6b3896\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Profit and Loss\", \"col\": 12}}, {\"id\": \"7dfaeec97e\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Annual Sales\", \"col\": 4}}, {\"id\": \"b76ffb894b\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Annual Purchase\", \"col\": 4}}, {\"id\": \"ba3943fb2d\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Total Stock Value\", \"col\": 4}}, {\"id\": \"8EnAp49ypA\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Stats</b></span>\", \"col\": 12}}, {\"id\": \"WxCMGg5_B4\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Total Leaves\", \"col\": 12}}]",
  "creation": "2020-01-23 13:46:38.833076",
  "custom_blocks": [],
  "docstatus": 0,
@@ -17,7 +21,7 @@
  "is_hidden": 0,
  "label": "Home",
  "links": [],
- "modified": "2026-10-04 15:00:00.000000",
+ "modified": "2026-11-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Home",
@@ -46,7 +50,29 @@
   }
  ],
  "sequence_id": 1.0,
- "shortcuts": [],
+ "shortcuts": [
+  {
+   "color": "Green",
+   "doc_view": "List",
+   "label": "Check-in/Check-out",
+   "link_to": "Employee Checkin",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Leave Request",
+   "link_to": "Leave Application",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Attendance",
+   "link_to": "Attendance",
+   "type": "DocType"
+  }
+ ],
  "standard": 1,
  "title": "Home",
  "type": "Workspace"

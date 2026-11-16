@@ -285,7 +285,9 @@ class PurchaseInvoice(BuyingController):
 		if not self.is_return:
 			self.po_required()
 			self.pr_required()
-			self.validate_supplier_invoice()
+			# Bitsol: supplier invoice number uniqueness check intentionally disabled
+			# (carried over from version-15-dev, PR #13 "validation").
+			# self.validate_supplier_invoice()
 
 		# validate cash purchase
 		if self.is_paid == 1:
@@ -1999,6 +2001,9 @@ class PurchaseInvoice(BuyingController):
 		update_purchase_cost({d.project for d in self.items if d.project})
 
 	def validate_supplier_invoice(self):
+		# Bitsol: guard for empty bill_no
+		if not self.bill_no:
+			return
 		if self.bill_no:
 			if cint(frappe.get_single_value("Accounts Settings", "check_supplier_invoice_uniqueness")):
 				fiscal_year = get_fiscal_year(self.posting_date, company=self.company, as_dict=True)
@@ -2022,7 +2027,6 @@ class PurchaseInvoice(BuyingController):
 
 				if pi:
 					pi = pi[0][0]
-
 					frappe.throw(
 						_("Supplier Invoice No exists in Purchase Invoice {0}").format(
 							get_link_to_form("Purchase Invoice", pi)

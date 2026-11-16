@@ -66,8 +66,10 @@ class Asset(AccountsController):
 		calculate_depreciation: DF.Check
 		company: DF.Link
 		comprehensive_insurance: DF.Data | None
+		condition: DF.Literal["New", "Used", "Damaged", "Unusable", "Outdated"]
 		cost_center: DF.Link | None
 		custodian: DF.Link | None
+		custodian_name: DF.Data | None
 		customer: DF.Link | None
 		default_finance_book: DF.Link | None
 		department: DF.Link | None

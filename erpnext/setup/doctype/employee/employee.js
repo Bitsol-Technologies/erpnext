@@ -23,8 +23,114 @@ erpnext.setup.EmployeeController = class EmployeeController extends frappe.ui.fo
 
 	refresh() {
 		erpnext.toggle_naming_series();
+
+		// Bitsol: HR Manager shortcut to recompute medical availed/balance from hrms Reimbursements
+		if (!this.frm.is_new() && frappe.user.has_role("HR Manager")) {
+			this.frm.add_custom_button(__("Recalculate Medical Balance"), () => {
+				frappe.call({
+					method: "erpnext.setup.doctype.employee.employee.recalculate_medical_balance",
+					args: { employee_name: this.frm.doc.name },
+					freeze: true,
+					callback: (r) => {
+						if (r.message) {
+							// the server already saved the Employee; reload instead of dirtying the form
+							this.frm.reload_doc();
+							frappe.show_alert({
+								message: __("Medical balance recalculated successfully."),
+								indicator: "green",
+							});
+						}
+					},
+				});
+			});
+		}
+
+		add_offboarding_button(this.frm);
 	}
 };
+
+// Bitsol: "Offboarding" shortcut -> creates an hrms Employee Separation for an exiting employee
+function add_offboarding_button(frm) {
+	if (
+		frm.is_new() ||
+		!(
+			frm.doc.held_on ||
+			frm.doc.relieving_date ||
+			frm.doc.resignation_letter_date ||
+			frm.doc.reason_for_leaving
+		)
+	) {
+		return;
+	}
+
+	// Employee Separation lives in hrms; skip silently when it is not installed / not readable
+	if (!frappe.boot.versions?.hrms || !frappe.model.can_read("Employee Separation")) {
+		return;
+	}
+
+	frappe.call({
+		method: "hrms.hr.doctype.employee_separation.employee_separation.check_employee_separation_exists",
+		args: { employee: frm.doc.name },
+		callback: function (r) {
+			if (!r.message || r.message.exists) {
+				return;
+			}
+
+			frm.add_custom_button(__("Offboarding"), function () {
+				let d = new frappe.ui.Dialog({
+					title: __("Create Offboarding"),
+					fields: [
+						{
+							fieldtype: "Date",
+							fieldname: "relieving_date",
+							label: __("Relieving Date"),
+							reqd: 1,
+							default: frm.doc.relieving_date,
+						},
+						{
+							fieldtype: "Link",
+							fieldname: "employee",
+							label: __("Employee"),
+							reqd: 1,
+							options: "Employee",
+							default: frm.doc.name,
+						},
+						{
+							fieldtype: "Link",
+							fieldname: "company",
+							label: __("Company"),
+							reqd: 1,
+							options: "Company",
+							default: frm.doc.company,
+						},
+						{
+							fieldtype: "Link",
+							fieldname: "employee_separation_template",
+							label: __("Employee Separation Template"),
+							reqd: 1,
+							options: "Employee Separation Template",
+						},
+					],
+					primary_action_label: __("Create Offboarding"),
+					primary_action(values) {
+						frappe.call({
+							method: "hrms.hr.doctype.employee_separation.employee_separation.create_employee_separation_from_employee",
+							args: values,
+							freeze: true,
+							callback: function (r) {
+								if (r.message) {
+									d.hide();
+									frappe.set_route("Form", "Employee Separation", r.message);
+								}
+							},
+						});
+					},
+				});
+				d.show();
+			});
+		},
+	});
+}
 
 frappe.ui.form.on("Employee", {
 	setup: function (frm) {

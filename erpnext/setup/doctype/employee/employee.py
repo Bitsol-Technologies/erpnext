@@ -8,7 +8,7 @@ from frappe.permissions import (
 	get_doc_permissions,
 	remove_user_permission,
 )
-from frappe.utils import cint, cstr, getdate, today, validate_email_address
+from frappe.utils import cint, cstr, flt, getdate, today, validate_email_address
 from frappe.utils.nestedset import NestedSet
 
 from erpnext.utilities.transaction_base import delete_events
@@ -112,6 +112,11 @@ class Employee(NestedSet):
 	# end: auto-generated types
 
 	nsm_parent_field = "reports_to"
+
+	def before_save(self):
+		# Bitsol: keep the medical balance in sync with allowance/availed
+		if self.get("medical_allowance"):
+			self.set("medical_balance", flt(self.medical_allowance) - flt(self.get("medical_availed")))
 
 	def autoname(self):
 		set_name_by_naming_series(self)
@@ -611,6 +616,45 @@ def has_upload_permission(doc, ptype="read", user=None):
 	if get_doc_permissions(doc, user=user, ptype=ptype).get(ptype):
 		return True
 	return doc.user_id == user
+
+
+@frappe.whitelist()
+def recalculate_medical_balance(employee_name: str) -> dict:
+	"""
+	Bitsol: reset and recalculate medical_availed and medical_balance for the given employee
+	based on approved, submitted Medical reimbursements (hrms `Reimbursement`) of the current calendar year.
+	"""
+	frappe.only_for("HR Manager")
+
+	if not frappe.db.exists("DocType", "Reimbursement"):
+		frappe.throw(_("Reimbursement DocType is not available. Please install HRMS."))
+
+	employee = frappe.get_doc("Employee", employee_name)
+
+	current_year = getdate(today()).year
+	year_start = getdate(f"{current_year}-01-01")
+	year_end = getdate(f"{current_year}-12-31")
+
+	reimbursements = frappe.get_all(
+		"Reimbursement",
+		filters={
+			"employee": employee_name,
+			"reimbursement_type": "Medical",
+			"status": "Approved",
+			"docstatus": 1,
+			"reimbursement_date": ["between", [year_start, year_end]],
+		},
+		fields=["total_amount"],
+	)
+
+	total_availed = sum(flt(r.total_amount) for r in reimbursements)
+	employee.medical_availed = total_availed
+	employee.medical_balance = flt(employee.medical_allowance) - total_availed
+	employee.save(ignore_permissions=True)
+	return {
+		"medical_availed": employee.medical_availed,
+		"medical_balance": employee.medical_balance,
+	}
 
 
 @frappe.whitelist()

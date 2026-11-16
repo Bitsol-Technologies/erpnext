@@ -15,6 +15,8 @@
   "disable_rounded_total",
   "disable_in_words",
   "use_posting_datetime_for_naming_documents",
+  "year_start_date",
+  "year_end_date",
   "demo_company",
   "enable_item_search_index"
  ],
@@ -77,6 +79,18 @@
    "label": "Disable In Words"
   },
   {
+   "default": "2023-01-01",
+   "fieldname": "year_start_date",
+   "fieldtype": "Date",
+   "label": "Default Start Date"
+  },
+  {
+   "default": "2023-12-31",
+   "fieldname": "year_end_date",
+   "fieldtype": "Date",
+   "label": "Default End Date"
+  },
+  {
    "fieldname": "demo_company",
    "fieldtype": "Link",
    "hidden": 1,
@@ -107,7 +121,7 @@
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-03-16 13:28:20.155574",
+ "modified": "2026-11-15 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Global Defaults",

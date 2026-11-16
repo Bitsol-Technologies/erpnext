@@ -20,6 +20,7 @@
   "column_break_3",
   "status",
   "parent_project",
+  "project_name",
   "user",
   "start_date",
   "end_date",
@@ -46,7 +47,8 @@
   "per_billed",
   "section_break_18",
   "note",
-  "amended_from"
+  "amended_from",
+  "employee_compliance_report"
  ],
  "fields": [
   {
@@ -142,7 +144,9 @@
   {
    "fieldname": "start_date",
    "fieldtype": "Date",
+   "in_filter": 1,
    "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Start Date",
    "print_hide": 1,
    "read_only": 1
@@ -310,13 +314,28 @@
    "fieldname": "billing_tab",
    "fieldtype": "Tab Break",
    "label": "Billing"
+  },
+  {
+   "fetch_from": "parent_project.project_name",
+   "fieldname": "project_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Project Name"
+  },
+  {
+   "fieldname": "employee_compliance_report",
+   "fieldtype": "Link",
+   "label": "Employee Compliance Report",
+   "options": "Employee Compliance Report",
+   "read_only": 1
   }
  ],
  "icon": "clock",
  "idx": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-07-30 11:04:12.882140",
+ "modified": "2026-11-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Timesheet",
@@ -408,7 +427,7 @@
  ],
  "row_format": "Dynamic",
  "sort_field": "creation",
- "sort_order": "ASC",
+ "sort_order": "DESC",
  "states": [],
  "title_field": "employee_name"
 }

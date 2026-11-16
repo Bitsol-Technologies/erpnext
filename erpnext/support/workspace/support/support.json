@@ -6,7 +6,7 @@
    "label": "Issues Opened"
   }
  ],
- "content": "[{\"id\": \"729b633ade\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Issues Opened\", \"col\": 12}}, {\"id\": \"160ec56bec\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Open Issues\", \"col\": 4}}, {\"id\": \"104a187e86\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Overdue Issues\", \"col\": 4}}, {\"id\": \"7f4c92f841\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Resolved Issues\", \"col\": 4}}]",
+ "content": "[{\"id\": \"729b633ade\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Issues Opened\", \"col\": 12}}, {\"id\": \"160ec56bec\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Open Issues\", \"col\": 4}}, {\"id\": \"104a187e86\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Overdue Issues\", \"col\": 4}}, {\"id\": \"7f4c92f841\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Resolved Issues\", \"col\": 4}}, {\"id\": \"znIIKXbjMH\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Online Requests\", \"col\": 3}}, {\"id\": \"320GGWq2bK\", \"type\": \"quick_list\", \"data\": {\"quick_list_name\": \"Online Requests\", \"col\": 4}}]",
  "creation": "2020-03-02 15:48:23.224699",
  "custom_blocks": [],
  "docstatus": 0,
@@ -18,7 +18,7 @@
  "is_hidden": 0,
  "label": "Support",
  "links": [],
- "modified": "2026-08-26 18:34:03.000000",
+ "modified": "2026-11-15 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Support",
  "name": "Support",
@@ -39,11 +39,24 @@
  "owner": "Administrator",
  "parent_page": "",
  "public": 1,
- "quick_lists": [],
+ "quick_lists": [
+  {
+   "document_type": "Online Requests",
+   "label": "Online Requests"
+  }
+ ],
  "restrict_to_domain": "",
  "roles": [],
  "sequence_id": 12.0,
- "shortcuts": [],
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "New",
+   "label": "Online Requests",
+   "link_to": "Online Requests",
+   "type": "DocType"
+  }
+ ],
  "sidebar_items": [
   {
    "child": 0,

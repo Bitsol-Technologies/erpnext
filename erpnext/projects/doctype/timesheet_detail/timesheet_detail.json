@@ -40,7 +40,6 @@
   {
    "fieldname": "activity_type",
    "fieldtype": "Link",
-   "in_list_view": 1,
    "label": "Activity Type",
    "options": "Activity Type"
   },
@@ -98,6 +97,7 @@
   {
    "fieldname": "task",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Task",
    "options": "Task",
    "remember_last_selected_value": 1
@@ -221,7 +221,7 @@
  "idx": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-05 16:00:00.000000",
+ "modified": "2026-11-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Timesheet Detail",
